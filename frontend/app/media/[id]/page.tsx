@@ -1,4 +1,5 @@
 import PosterButtonModal from '@/components/PosterButtonModal';
+import CollectionLinks from '@/components/CollectionLinks';
 
 export default async function MediaDetail({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params;
@@ -53,6 +54,7 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
             <p className="text-gray-300 leading-relaxed text-lg">{media.sinopsis}</p>
           </div>
 
+          {/* COLUMNA DERECHA */}
           <div className="flex-shrink-0 w-full md:w-72 pt-24 md:pt-32">
             <div className="bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl">
               <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-4">
@@ -90,6 +92,9 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
               <div className="text-3xl font-extrabold text-blue-400">8.00</div>
               <div className="text-xs text-gray-500 mt-1">1,278,028 users</div>
             </div>
+
+            {/* LAS SECUELAS Y PRECUELAS UBICADAS CORRECTAMENTE AQUÍ */}
+            <CollectionLinks tmdbId={media.tmdbId} />
           </div>
 
         </div>

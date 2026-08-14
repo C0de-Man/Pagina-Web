@@ -191,6 +191,42 @@ app.get('/tmdb/year/:year/page/:page', async (req, res) => {
   }
 });
 
+// --- RUTA PARA OBTENER PRECUELA Y SECUELA (COLECCIÓN) ---
+app.get('/tmdb/collection/:tmdbId', async (req, res) => {
+  try {
+    const { tmdbId } = req.params;
+    const apiKey = process.env.TMDB_API_KEY;
+
+    // 1. Obtener detalles de la peli para saber si pertenece a una saga
+    const movieRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=es-ES`);
+    const movieData = await movieRes.json();
+
+    if (!movieData.belongs_to_collection) {
+      return res.json({ prequel: null, sequel: null });
+    }
+
+    // 2. Obtener la colección completa
+    const collectionId = movieData.belongs_to_collection.id;
+    const colRes = await fetch(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${apiKey}&language=es-ES`);
+    const colData = await colRes.json();
+
+    // 3. Ordenar todas las películas de la saga por fecha de salida
+    const parts = colData.parts.sort((a, b) => new Date(a.release_date) - new Date(b.release_date));
+
+    // 4. Buscar dónde está la peli actual en esa lista
+    const currentIndex = parts.findIndex(p => p.id === parseInt(tmdbId));
+
+    // 5. La anterior es la precuela, la siguiente es la secuela
+    const prequel = currentIndex > 0 ? parts[currentIndex - 1] : null;
+    const sequel = currentIndex < parts.length - 1 ? parts[currentIndex + 1] : null;
+
+    res.json({ prequel, sequel });
+  } catch (error) {
+    console.error("Error al obtener la colección:", error);
+    res.status(500).json({ error: "Error al obtener colección" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
