@@ -1,5 +1,13 @@
 import PosterButtonModal from '@/components/PosterButtonModal';
 import CollectionLinks from '@/components/CollectionLinks';
+import MediaTabs from '@/components/MediaTabs';
+
+function formatRuntime(minutes: number | null) {
+  if (!minutes) return null;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h}h ${m}m`;
+}
 
 export default async function MediaDetail({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params;
@@ -12,17 +20,20 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
     return <div className="p-8 text-white text-center min-h-screen bg-gray-950 flex items-center justify-center">Medio no encontrado</div>;
   }
 
+  let detalles: any = null;
+  if (media.tmdbId) {
+    const resDetalles = await fetch(`http://localhost:3001/tmdb/details/${media.tmdbId}`, { cache: 'no-store' });
+    detalles = await resDetalles.json();
+  }
+
+  const duracion = detalles ? formatRuntime(detalles.runtime) : null;
+
   return (
     <main className="min-h-screen bg-gray-950 text-white font-sans pb-16">
 
-      {/* ZONA BACKDROP REAL */}
       {media.backdrop ? (
         <div className="w-full h-64 md:h-80 relative border-b border-gray-800 overflow-hidden">
-          <img
-            src={media.backdrop}
-            alt="Backdrop"
-            className="w-full h-full object-cover opacity-60"
-          />
+          <img src={media.backdrop} alt="Backdrop" className="w-full h-full object-cover opacity-60" />
           <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/20 to-transparent" />
         </div>
       ) : (
@@ -40,21 +51,20 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
             ) : (
               <div className="w-full aspect-[2/3] bg-gray-800 rounded-lg shadow-2xl border-2 border-gray-800 flex items-center justify-center">Sin imagen</div>
             )}
-
-            {/* BOTÓN Y MODAL INTERACTIVO */}
             <PosterButtonModal tmdbId={media.tmdbId} mediaId={media.id} />
           </div>
 
           <div className="flex-grow pt-24 md:pt-32">
             <h1 className="text-4xl md:text-5xl font-extrabold text-white mb-2">{media.titulo}</h1>
-            <div className="flex items-center gap-4 text-gray-400 mb-6 border-b border-gray-800 pb-4">
+            <div className="flex items-center gap-2 text-gray-400 mb-6">
               <span className="text-lg">{media.anio}</span>
-              <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold">{media.tipo}</span>
+              {duracion && <span className="text-lg text-gray-500">({duracion})</span>}
+              <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{media.tipo}</span>
             </div>
-            <p className="text-gray-300 leading-relaxed text-lg">{media.sinopsis}</p>
+
+            <MediaTabs sinopsis={media.sinopsis} detalles={detalles} />
           </div>
 
-          {/* COLUMNA DERECHA */}
           <div className="flex-shrink-0 w-full md:w-72 pt-24 md:pt-32">
             <div className="bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl">
               <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-4">
@@ -93,7 +103,6 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
               <div className="text-xs text-gray-500 mt-1">1,278,028 users</div>
             </div>
 
-            {/* LAS SECUELAS Y PRECUELAS UBICADAS CORRECTAMENTE AQUÍ */}
             <CollectionLinks tmdbId={media.tmdbId} />
           </div>
 

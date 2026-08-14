@@ -227,6 +227,38 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
   }
 });
 
+// --- RUTA PARA DETALLES COMPLETOS: DURACIÓN, REPARTO, EQUIPO, ESTUDIO, PAÍS, PRESUPUESTO ---
+app.get('/tmdb/details/:tmdbId', async (req, res) => {
+  try {
+    const { tmdbId } = req.params;
+    const apiKey = process.env.TMDB_API_KEY;
+    const response = await fetch(
+      `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=es-ES&append_to_response=credits`
+    );
+    const data = await response.json();
+
+    const director = data.credits?.crew?.find(p => p.job === 'Director') || null;
+    const guionistas = data.credits?.crew?.filter(p => p.job === 'Screenplay' || p.job === 'Writer') || [];
+
+    res.json({
+      runtime: data.runtime || null,
+      presupuesto: data.budget || 0,
+      estudios: data.production_companies?.map(c => c.name) || [],
+      paises: data.production_countries?.map(c => c.name) || [],
+      cast: data.credits?.cast?.slice(0, 15).map(a => ({
+        id: a.id,
+        nombre: a.name,
+        personaje: a.character,
+        foto: a.profile_path ? `https://image.tmdb.org/t/p/w185${a.profile_path}` : null
+      })) || [],
+      director: director ? { nombre: director.name, id: director.id } : null,
+      guionistas: guionistas.map(g => ({ nombre: g.name, id: g.id }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Error al obtener detalles" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
