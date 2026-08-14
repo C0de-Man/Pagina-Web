@@ -1,5 +1,8 @@
-export default async function MediaDetail({ params }: { params: { id: string } }) {
-  const res = await fetch(`http://localhost:3001/media/${params.id}`, { cache: 'no-store' });
+export default async function MediaDetail({ params }: { params: Promise<{ id: string }> | { id: string } }) {
+  const resolvedParams = await params;
+  const id = resolvedParams.id;
+
+  const res = await fetch(`http://localhost:3001/media/${id}`, { cache: 'no-store' });
   const media = await res.json();
 
   if (!media || media.error) {
@@ -8,9 +11,22 @@ export default async function MediaDetail({ params }: { params: { id: string } }
 
   return (
     <main className="min-h-screen bg-gray-950 text-white font-sans pb-16">
-      <div className="w-full h-64 md:h-80 bg-gradient-to-b from-gray-800 to-gray-950 flex items-center justify-center border-b border-gray-800">
-         <span className="text-gray-600 font-bold tracking-widest">[ ZONA DE IMAGEN BACKDROP ]</span>
-      </div>
+      
+      {/* ZONA BACKDROP REAL */}
+      {media.backdrop ? (
+        <div className="w-full h-64 md:h-80 relative border-b border-gray-800 overflow-hidden">
+          <img 
+            src={media.backdrop} 
+            alt="Backdrop" 
+            className="w-full h-full object-cover opacity-60" 
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/20 to-transparent" />
+        </div>
+      ) : (
+        <div className="w-full h-64 md:h-80 bg-gradient-to-b from-gray-800 to-gray-950 flex items-center justify-center border-b border-gray-800">
+           <span className="text-gray-600 font-bold tracking-widest">SIN BACKDROP</span>
+        </div>
+      )}
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 -mt-24 md:-mt-32 relative z-10">
         <div className="flex flex-col md:flex-row gap-8">
