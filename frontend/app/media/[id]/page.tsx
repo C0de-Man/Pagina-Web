@@ -3,6 +3,7 @@ import ActionButtons from '@/components/ActionButtons';
 import PosterButtonModal from '@/components/PosterButtonModal';
 import CollectionLinks from '@/components/CollectionLinks';
 import MediaTabs from '@/components/MediaTabs';
+import RemakeOfBadge from '@/components/RemakeOfBadge';
 import AddToListModal from '@/components/AddToListModal';
 
 function formatRuntime(minutes: number | null) {
@@ -64,6 +65,8 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
               {duracion && <span className="text-lg text-gray-500">({duracion})</span>}
               <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{media.tipo}</span>
             </div>
+
+            <RemakeOfBadge remakeOf={media.remakeOf} />
 
             <MediaTabs sinopsis={media.sinopsis} detalles={detalles} />
           </div>

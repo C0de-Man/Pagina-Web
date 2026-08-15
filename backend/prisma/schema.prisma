@@ -24,6 +24,8 @@ model Media {
   portada   String?
   backdrop  String?   // Campo para la imagen horizontal de fondo
   sinopsis  String?
+  remakeOfTmdbId Int?
+  remakeChecked  Boolean @default(false)
   createdAt DateTime  @default(now())
 }
 

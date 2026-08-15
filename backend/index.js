@@ -101,13 +101,12 @@ app.get('/media/watched', requireAuth, async (req, res) => {
   try {
     const entries = await prisma.userMedia.findMany({
       where: { userId: req.userId, watched: true },
-      orderBy: { updatedAt: 'desc' } // de la más reciente a la más antigua marcada
+      orderBy: { updatedAt: 'desc' }
     });
 
     const mediaIds = entries.map(e => e.mediaId);
     const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
 
-    // Unimos cada película con la fecha en la que se marcó como vista, respetando el orden
     const resultado = entries
       .map(e => {
         const item = mediaItems.find(m => m.id === e.mediaId);
@@ -144,18 +143,6 @@ app.get('/media/watchlist', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('ERROR EN GET WATCHLIST:', error);
     res.status(500).json({ error: 'Error al obtener la watchlist' });
-  }
-});
-
-// --- RUTA PARA OBTENER UNA SOLA PELÍCULA POR SU ID ---
-app.get('/media/:id', async (req, res) => {
-  try {
-    const idParam = parseInt(req.params.id);
-    const mediaItem = await prisma.media.findUnique({ where: { id: idParam } });
-    if (!mediaItem) return res.status(404).json({ error: 'No encontrado' });
-    res.json(mediaItem);
-  } catch (error) {
-    res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
@@ -273,12 +260,10 @@ app.get('/tmdb/year/:year/page/:page', async (req, res) => {
     const page = parseInt(req.params.page) || 1;
     const apiKey = process.env.TMDB_API_KEY;
 
-    // Queremos exactamente 42 por página (7 columnas x 6 filas)
     const itemsPerPage = 42;
     const startIndex = (page - 1) * itemsPerPage;
     const endIndex = page * itemsPerPage;
 
-    // Las páginas de TMDB traen 20, calculamos cuáles pedir
     const startTmdbPage = Math.floor(startIndex / 20) + 1;
     const endTmdbPage = Math.ceil(endIndex / 20);
 
@@ -290,10 +275,8 @@ app.get('/tmdb/year/:year/page/:page', async (req, res) => {
       if (data.results) combined.push(...data.results);
     }
 
-    // Filtramos duplicados
     const uniqueCombined = Array.from(new Map(combined.map(m => [m.id, m])).values());
 
-    // Extraemos las 42 exactas
     const offset = startIndex % 20;
     const finalResults = uniqueCombined.slice(offset, offset + itemsPerPage);
 
@@ -305,6 +288,34 @@ app.get('/tmdb/year/:year/page/:page', async (req, res) => {
 });
 
 // --- RUTA PARA OBTENER PRECUELA Y SECUELA (COLECCIÓN) ---
+// --- BUSCA EN WIKIDATA EL ORDEN NARRATIVO REAL (P155 "sigue a" / P156 "seguido por") ---
+async function buscarOrdenNarrativoWikidata(imdbId) {
+  try {
+    const sparql = `
+      SELECT ?followsImdb ?followedByImdb WHERE {
+        ?film wdt:P345 "${imdbId}" .
+        OPTIONAL { ?film wdt:P155 ?follows . ?follows wdt:P345 ?followsImdb . }
+        OPTIONAL { ?film wdt:P156 ?followedBy . ?followedBy wdt:P345 ?followedByImdb . }
+      } LIMIT 1
+    `;
+    const url = `https://query.wikidata.org/sparql?query=${encodeURIComponent(sparql)}&format=json`;
+    const wdRes = await fetch(url, {
+      headers: {
+        'Accept': 'application/sparql-results+json',
+        'User-Agent': 'MediaTrackerApp/1.0 (proyecto personal)'
+      }
+    });
+    const wdData = await wdRes.json();
+    const binding = wdData.results?.bindings?.[0];
+    return {
+      followsImdb: binding?.followsImdb?.value || null,
+      followedByImdb: binding?.followedByImdb?.value || null
+    };
+  } catch (e) {
+    return { followsImdb: null, followedByImdb: null };
+  }
+}
+
 app.get('/tmdb/collection/:tmdbId', async (req, res) => {
   try {
     const { tmdbId } = req.params;
@@ -325,8 +336,36 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
 
     const currentIndex = parts.findIndex(p => p.id === parseInt(tmdbId));
 
-    const prequel = currentIndex > 0 ? parts[currentIndex - 1] : null;
-    const sequel = currentIndex < parts.length - 1 ? parts[currentIndex + 1] : null;
+    // Por defecto: orden por fecha de estreno (como hasta ahora)
+    let prequel = currentIndex > 0 ? parts[currentIndex - 1] : null;
+    let sequel = currentIndex < parts.length - 1 ? parts[currentIndex + 1] : null;
+
+    // Afinamos con el orden NARRATIVO real de Wikidata, si lo tiene documentado
+    try {
+      const extRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/external_ids?api_key=${apiKey}`);
+      const extData = await extRes.json();
+
+      if (extData.imdb_id) {
+        const { followsImdb, followedByImdb } = await buscarOrdenNarrativoWikidata(extData.imdb_id);
+
+        const buscarPeliculaPorImdb = async (imdb) => {
+          const findRes = await fetch(`https://api.themoviedb.org/3/find/${imdb}?api_key=${apiKey}&external_source=imdb_id&language=es-ES`);
+          const findData = await findRes.json();
+          return findData.movie_results?.[0] || null;
+        };
+
+        if (followsImdb) {
+          const encontrada = await buscarPeliculaPorImdb(followsImdb);
+          if (encontrada) prequel = parts.find(p => p.id === encontrada.id) || encontrada;
+        }
+        if (followedByImdb) {
+          const encontrada = await buscarPeliculaPorImdb(followedByImdb);
+          if (encontrada) sequel = parts.find(p => p.id === encontrada.id) || encontrada;
+        }
+      }
+    } catch (e) {
+      // si Wikidata falla, nos quedamos con el orden por fecha de estreno
+    }
 
     res.json({ prequel, sequel, nombreColeccion: colData.name || null, parts });
   } catch (error) {
@@ -386,13 +425,11 @@ app.post('/auth/register', async (req, res) => {
       data: { email, username, password: hashedPassword }
     });
 
-    // Nunca devolvemos la contraseña, ni siquiera la cifrada
     const { password: _, ...userSinPassword } = newUser;
     res.status(201).json(userSinPassword);
   } catch (error) {
     console.error('ERROR DETALLADO EN REGISTRO:', error);
     if (error.code === 'P2002') {
-      // Error de Prisma cuando se viola una restricción @unique
       return res.status(409).json({ error: 'Ese email o username ya está en uso' });
     }
     res.status(500).json({ error: 'Error al registrar el usuario' });
@@ -430,6 +467,86 @@ app.post('/auth/login', async (req, res) => {
   }
 });
 
+// --- BUSCA EN WIKIDATA SI ESTA PELÍCULA (por su IMDb ID) ES UN REMAKE DE OTRA ---
+async function buscarRemakeEnWikidata(tmdbId) {
+  try {
+    const apiKey = process.env.TMDB_API_KEY;
+
+    const extRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/external_ids?api_key=${apiKey}`);
+    const extData = await extRes.json();
+    const imdbId = extData.imdb_id;
+    if (!imdbId) return null;
+
+    const sparql = `
+      SELECT ?originalLabel ?imdbId WHERE {
+        ?film wdt:P345 "${imdbId}" .
+        ?film wdt:P144 ?original .
+        ?original wdt:P31/wdt:P279* wd:Q11424 .
+        OPTIONAL { ?original wdt:P345 ?imdbId . }
+        SERVICE wikibase:label { bd:serviceParam wikibase:language "es,en". }
+      } LIMIT 1
+    `;
+    const url = `https://query.wikidata.org/sparql?query=${encodeURIComponent(sparql)}&format=json`;
+    const wdRes = await fetch(url, {
+      headers: {
+        'Accept': 'application/sparql-results+json',
+        'User-Agent': 'MediaTrackerApp/1.0 (proyecto personal)'
+      }
+    });
+    const wdData = await wdRes.json();
+    const binding = wdData.results?.bindings?.[0];
+    if (!binding || !binding.imdbId) return null;
+
+    const findRes = await fetch(`https://api.themoviedb.org/3/find/${binding.imdbId.value}?api_key=${apiKey}&external_source=imdb_id`);
+    const findData = await findRes.json();
+    const originalTmdb = findData.movie_results?.[0];
+    if (!originalTmdb) return null;
+
+    return originalTmdb.id;
+  } catch (error) {
+    console.error('Error consultando Wikidata para remake:', error);
+    return null;
+  }
+}
+
+// --- RUTA PARA OBTENER UNA SOLA PELÍCULA POR SU ID ---
+app.get('/media/:id', async (req, res) => {
+  try {
+    const idParam = parseInt(req.params.id);
+    let mediaItem = await prisma.media.findUnique({ where: { id: idParam } });
+    if (!mediaItem) return res.status(404).json({ error: 'No encontrado' });
+
+    if (!mediaItem.remakeChecked && mediaItem.tmdbId && mediaItem.tipo === 'PELICULA') {
+      const remakeOfTmdbId = await buscarRemakeEnWikidata(mediaItem.tmdbId);
+      mediaItem = await prisma.media.update({
+        where: { id: idParam },
+        data: { remakeOfTmdbId, remakeChecked: true }
+      });
+    }
+
+    let remakeOf = null;
+    if (mediaItem.remakeOfTmdbId) {
+      try {
+        const apiKey = process.env.TMDB_API_KEY;
+        const r = await fetch(`https://api.themoviedb.org/3/movie/${mediaItem.remakeOfTmdbId}?api_key=${apiKey}&language=es-ES`);
+        const original = await r.json();
+        remakeOf = {
+          tmdbId: mediaItem.remakeOfTmdbId,
+          titulo: original.title,
+          anio: original.release_date ? original.release_date.split('-')[0] : null
+        };
+      } catch (e) {
+        remakeOf = null;
+      }
+    }
+
+    res.json({ ...mediaItem, remakeOf });
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id:', error);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
 // --- OBTENER MI ESTADO PERSONAL CON UNA PELÍCULA ---
 app.get('/media/:id/status', requireAuth, async (req, res) => {
   try {
@@ -438,7 +555,6 @@ app.get('/media/:id/status', requireAuth, async (req, res) => {
       where: { userId_mediaId: { userId: req.userId, mediaId } }
     });
 
-    // Si nunca ha interactuado con esta película, devolvemos valores por defecto
     res.json(status || {
       watched: false,
       liked: false,
@@ -458,13 +574,11 @@ app.patch('/media/:id/status', requireAuth, async (req, res) => {
     const mediaId = parseInt(req.params.id);
     const { watched, liked, watchlist, rating, customPoster } = req.body;
 
-    // Construimos solo con los campos que realmente vienen en la petición
     const data = {};
     if (watched !== undefined) data.watched = watched;
     if (liked !== undefined) data.liked = liked;
     if (watchlist !== undefined) data.watchlist = watchlist;
     if (rating !== undefined) data.rating = rating;
-    // Si se pone una nota (rating no nulo), se marca automáticamente como visto
     if (rating !== undefined && rating !== null) data.watched = true;
     if (customPoster !== undefined) data.customPoster = customPoster;
 
@@ -494,7 +608,6 @@ app.get('/media/:id/rating', async (req, res) => {
     const suma = ratings.reduce((acc, r) => acc + r.rating, 0);
     const count = ratings.length;
 
-    // Intentamos obtener la nota base de TMDB (misma escala 0-10)
     let tmdbAvg = null;
     const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true } });
 
@@ -504,17 +617,13 @@ app.get('/media/:id/rating', async (req, res) => {
         const tmdbRes = await fetch(`https://api.themoviedb.org/3/movie/${media.tmdbId}?api_key=${apiKey}`);
         const tmdbData = await tmdbRes.json();
         if (tmdbData.vote_average) tmdbAvg = tmdbData.vote_average;
-      } catch (e) {
-        // si falla TMDB, seguimos solo con las notas locales
-      }
+      } catch (e) { }
     }
 
-    // Sin nota de TMDB y sin votos locales: no hay nada que mostrar
     if (tmdbAvg === null && count === 0) {
       return res.json({ average: null, count: 0 });
     }
 
-    // TMDB cuenta como "un voto base" que se combina con las notas de los usuarios
     const pesoBase = tmdbAvg !== null ? 1 : 0;
     const sumaTotal = suma + (tmdbAvg !== null ? tmdbAvg : 0);
     const totalVotos = count + pesoBase;
@@ -528,7 +637,6 @@ app.get('/media/:id/rating', async (req, res) => {
   }
 });
 
-// --- MIS LISTAS: obtener todas ---
 // --- MIS LISTAS: obtener todas (con miniaturas y, opcionalmente, si contienen una película concreta) ---
 app.get('/lists', requireAuth, async (req, res) => {
   try {
@@ -539,7 +647,6 @@ app.get('/lists', requireAuth, async (req, res) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    // Traemos las portadas de todas las películas usadas en todas las listas, de una vez
     const todosMediaIds = [...new Set(lists.flatMap(l => l.items.map(i => i.mediaId)))];
     const mediaItems = await prisma.media.findMany({ where: { id: { in: todosMediaIds } } });
 
@@ -646,28 +753,6 @@ app.delete('/lists/:id/items/:mediaId', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('ERROR EN DELETE LIST ITEM:', error);
     res.status(500).json({ error: 'Error al quitar de la lista' });
-  }
-});
-
-// --- MIS LISTAS: obtener todas (opcionalmente marcando si contienen una película concreta) ---
-app.get('/lists', requireAuth, async (req, res) => {
-  try {
-    const mediaId = req.query.mediaId ? parseInt(req.query.mediaId) : null;
-    const lists = await prisma.list.findMany({
-      where: { userId: req.userId },
-      include: { items: true },
-      orderBy: { createdAt: 'desc' }
-    });
-    res.json(lists.map(l => ({
-      id: l.id,
-      nombre: l.nombre,
-      createdAt: l.createdAt,
-      totalItems: l.items.length,
-      contieneMedia: mediaId ? l.items.some(i => i.mediaId === mediaId) : undefined
-    })));
-  } catch (error) {
-    console.error('ERROR EN GET LISTS:', error);
-    res.status(500).json({ error: 'Error al obtener las listas' });
   }
 });
 
