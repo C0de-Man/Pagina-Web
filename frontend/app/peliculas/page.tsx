@@ -50,7 +50,7 @@ export default async function PeliculasLobby() {
         <div className="mb-12">
           <div className="flex justify-between items-end mb-4 border-b border-gray-800 pb-2">
             <h2 className="text-xl font-bold text-white tracking-wide">Populares</h2>
-            <Link href="/peliculas/todas" className="text-sm text-gray-400 hover:text-white transition flex items-center gap-1 cursor-pointer">
+            <Link href="/peliculas/todas?tipo=popular" className="text-sm text-gray-400 hover:text-white transition flex items-center gap-1 cursor-pointer">
               Ver todo <span className="text-lg leading-none">›</span>
             </Link>
           </div>

@@ -223,6 +223,36 @@ app.get('/tmdb/popular-historico', async (req, res) => {
   }
 });
 
+// --- POPULARES HISTÓRICAS, PAGINADAS DE 42 EN 42 ---
+app.get('/tmdb/popular-historico/page/:page', async (req, res) => {
+  try {
+    const page = parseInt(req.params.page) || 1;
+    const apiKey = process.env.TMDB_API_KEY;
+
+    const itemsPerPage = 42;
+    const startIndex = (page - 1) * itemsPerPage;
+    const endIndex = page * itemsPerPage;
+
+    const startTmdbPage = Math.floor(startIndex / 20) + 1;
+    const endTmdbPage = Math.ceil(endIndex / 20);
+
+    let combined = [];
+
+    for (let i = startTmdbPage; i <= endTmdbPage; i++) {
+      const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=es-ES&sort_by=vote_count.desc&page=${i}`);
+      const data = await response.json();
+      if (data.results) combined.push(...data.results);
+    }
+
+    const offsetDentroDeCombined = startIndex - (startTmdbPage - 1) * 20;
+    const resultado = combined.slice(offsetDentroDeCombined, offsetDentroDeCombined + itemsPerPage);
+
+    res.json({ results: resultado });
+  } catch (error) {
+    res.status(500).json({ error: "Error al obtener populares históricas" });
+  }
+});
+
 // --- RUTA PARA EL LOBBY DE UN AÑO (Solo 20 resultados para la vista previa) ---
 app.get('/tmdb/year/:year', async (req, res) => {
   try {
