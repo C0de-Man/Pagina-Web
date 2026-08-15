@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 
 export default function ActionButtons({ mediaId }: { mediaId: number }) {
   const [watched, setWatched] = useState(false);
+  const [liked, setLiked] = useState(false);
   const [watchlist, setWatchlist] = useState(false);
   const router = useRouter();
 
@@ -16,6 +17,7 @@ export default function ActionButtons({ mediaId }: { mediaId: number }) {
       .then((res) => res.json())
       .then((data) => {
         setWatched(!!data.watched);
+        setLiked(!!data.liked);
         setWatchlist(!!data.watchlist);
       })
       .catch(() => {});
@@ -33,7 +35,7 @@ export default function ActionButtons({ mediaId }: { mediaId: number }) {
     return () => window.removeEventListener('mediaWatchedChanged', handleWatchedChange);
   }, [mediaId]);
 
-  const actualizarEstado = async (campo: 'watched' | 'watchlist', valorActual: boolean, setter: (v: boolean) => void) => {
+  const actualizarEstado = async (campo: 'watched' | 'liked' | 'watchlist', valorActual: boolean, setter: (v: boolean) => void) => {
     const token = localStorage.getItem('token');
     if (!token) {
       router.push('/login');
@@ -82,8 +84,13 @@ export default function ActionButtons({ mediaId }: { mediaId: number }) {
         </span>
         <span className="text-[10px] font-bold uppercase tracking-wider">Watched</span>
       </button>
-      <button className="flex flex-col items-center text-gray-400 hover:text-orange-400 transition cursor-pointer">
-        <span className="text-2xl mb-1">❤️</span>
+      <button
+        onClick={() => actualizarEstado('liked', liked, setLiked)}
+        className={`flex flex-col items-center transition cursor-pointer ${
+          liked ? 'text-red-400' : 'text-gray-400 hover:text-red-400'
+        }`}
+      >
+        <span className="text-2xl mb-1">{liked ? '❤️' : '🤍'}</span>
         <span className="text-[10px] font-bold uppercase tracking-wider">Liked</span>
       </button>
       <button

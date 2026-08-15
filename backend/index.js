@@ -111,7 +111,7 @@ app.get('/media/watched', requireAuth, async (req, res) => {
     const resultado = entries
       .map(e => {
         const item = mediaItems.find(m => m.id === e.mediaId);
-        return item ? { ...item, fechaVisto: e.updatedAt } : null;
+        return item ? { ...item, fechaVisto: e.updatedAt, rating: e.rating, liked: e.liked } : null;
       })
       .filter(Boolean);
 
@@ -208,6 +208,18 @@ app.get('/tmdb/popular', async (req, res) => {
     res.json(data.results);
   } catch (error) {
     res.status(500).json({ error: "Error" });
+  }
+});
+
+// --- PELÍCULAS MÁS POPULARES DE LA HISTORIA (por número de votos, no por tendencia del momento) ---
+app.get('/tmdb/popular-historico', async (req, res) => {
+  try {
+    const apiKey = process.env.TMDB_API_KEY;
+    const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=es-ES&sort_by=vote_count.desc&page=1`);
+    const data = await response.json();
+    res.json(data.results || []);
+  } catch (error) {
+    res.status(500).json({ error: "Error al obtener las populares históricas" });
   }
 });
 
@@ -487,14 +499,35 @@ app.get('/media/:id/rating', async (req, res) => {
 });
 
 // --- MIS LISTAS: obtener todas ---
+// --- MIS LISTAS: obtener todas (con miniaturas y, opcionalmente, si contienen una película concreta) ---
 app.get('/lists', requireAuth, async (req, res) => {
   try {
+    const mediaId = req.query.mediaId ? parseInt(req.query.mediaId) : null;
     const lists = await prisma.list.findMany({
       where: { userId: req.userId },
       include: { items: true },
       orderBy: { createdAt: 'desc' }
     });
-    res.json(lists.map(l => ({ id: l.id, nombre: l.nombre, createdAt: l.createdAt, totalItems: l.items.length })));
+
+    // Traemos las portadas de todas las películas usadas en todas las listas, de una vez
+    const todosMediaIds = [...new Set(lists.flatMap(l => l.items.map(i => i.mediaId)))];
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: todosMediaIds } } });
+
+    res.json(lists.map(l => {
+      const portadas = l.items
+        .slice(0, 6)
+        .map(i => mediaItems.find(m => m.id === i.mediaId)?.portada)
+        .filter(Boolean);
+
+      return {
+        id: l.id,
+        nombre: l.nombre,
+        createdAt: l.createdAt,
+        totalItems: l.items.length,
+        portadas,
+        contieneMedia: mediaId ? l.items.some(i => i.mediaId === mediaId) : undefined
+      };
+    }));
   } catch (error) {
     console.error('ERROR EN GET LISTS:', error);
     res.status(500).json({ error: 'Error al obtener las listas' });

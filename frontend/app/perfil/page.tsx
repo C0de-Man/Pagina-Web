@@ -74,7 +74,7 @@ export default function Perfil() {
             <Link href="/series" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Series</Link>
             <Link href="/juegos" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Juegos</Link>
             <Link href="/comics" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Comics</Link>
-            <span className="pb-3 text-sm font-semibold text-gray-400 whitespace-nowrap">Listas</span>
+            <Link href="/perfil/lists" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Listas</Link>
             <span className="pb-3 text-sm font-semibold text-gray-400 whitespace-nowrap">Reseñas</span>
           </div>
         </div>

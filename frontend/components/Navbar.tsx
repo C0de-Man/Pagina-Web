@@ -98,7 +98,6 @@ export default function Navbar() {
                       <div className="bg-[#2c3440] rounded-md shadow-2xl border border-gray-700 py-2">
                         <Link href="/perfil/peliculas" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Films</Link>
                         <Link href="/perfil/watchlist" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Watchlist</Link>
-                        <Link href="/perfil/lists" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Lists</Link>
                         <Link href="/perfil/likes" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Likes</Link>
                       </div>
                     </div>

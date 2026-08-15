@@ -5,6 +5,9 @@ import Link from 'next/link';
 export default function MisListas() {
   const [lists, setLists] = useState<any[]>([]);
   const [logueado, setLogueado] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [creando, setCreando] = useState(false);
 
@@ -26,6 +29,15 @@ export default function MisListas() {
     cargarListas();
   }, []);
 
+  useEffect(() => {
+    if (!isModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsModalOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isModalOpen]);
+
   const crearLista = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nuevoNombre.trim() || creando) return;
@@ -40,6 +52,7 @@ export default function MisListas() {
         body: JSON.stringify({ nombre: nuevoNombre.trim() }),
       });
       setNuevoNombre('');
+      setIsModalOpen(false);
       cargarListas();
     } catch {
       // el usuario puede reintentar
@@ -64,6 +77,10 @@ export default function MisListas() {
     }
   };
 
+  const listasFiltradas = lists.filter((l) =>
+    l.nombre.toLowerCase().includes(busqueda.trim().toLowerCase())
+  );
+
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -75,41 +92,59 @@ export default function MisListas() {
           </p>
         ) : (
           <>
-            <form onSubmit={crearLista} className="flex gap-2 mb-8 max-w-md">
+            <div className="flex items-center gap-3 mb-8">
               <input
                 type="text"
-                value={nuevoNombre}
-                onChange={(e) => setNuevoNombre(e.target.value)}
-                placeholder="Nombre de la nueva lista..."
-                className="flex-grow bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar lista..."
+                className="flex-grow max-w-md bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
               />
               <button
-                type="submit"
-                disabled={creando || !nuevoNombre.trim()}
-                className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold px-4 rounded transition cursor-pointer"
+                onClick={() => setIsModalOpen(true)}
+                className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold px-4 py-2 rounded transition cursor-pointer"
               >
                 Crear lista
               </button>
-            </form>
+            </div>
 
             {lists.length === 0 ? (
               <p className="text-gray-500 text-sm">Aún no tienes ninguna lista. Crea la primera arriba.</p>
+            ) : listasFiltradas.length === 0 ? (
+              <p className="text-gray-500 text-sm">Ninguna lista coincide con "{busqueda}".</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {lists.map((list) => (
+                {listasFiltradas.map((list) => (
                   <div
                     key={list.id}
-                    className="relative group bg-[#1c2228] rounded-lg border border-gray-700 hover:border-gray-500 transition p-5"
+                    className="relative group bg-[#1c2228] rounded-lg border border-gray-700 hover:border-gray-500 transition overflow-hidden h-28"
                   >
-                    <Link href={`/perfil/lists/${list.id}`} className="block">
-                      <h2 className="font-bold text-lg text-white mb-1 pr-6">{list.nombre}</h2>
-                      <p className="text-xs text-gray-400">
-                        {list.totalItems} {list.totalItems === 1 ? 'título' : 'títulos'}
-                      </p>
+                    <Link href={`/perfil/lists/${list.id}`} className="flex items-center h-full">
+                      {list.portadas && list.portadas.length > 0 && (
+                        <div className="flex -space-x-8 h-full flex-shrink-0 pl-1">
+                          {list.portadas.map((src: string, i: number) => (
+                            <img
+                              key={i}
+                              src={src}
+                              alt=""
+                              className="h-full aspect-[2/3] object-cover rounded border-2 border-[#1c2228] shadow-lg"
+                              style={{ zIndex: list.portadas.length - i }}
+                            />
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="flex flex-col justify-between h-full flex-grow min-w-0 items-end text-right p-4">
+                        <h2 className="font-bold text-white truncate max-w-full">{list.nombre}</h2>
+                        <p className="text-xs text-gray-400">
+                          {list.totalItems} {list.totalItems === 1 ? 'título' : 'títulos'}
+                        </p>
+                      </div>
                     </Link>
+
                     <button
                       onClick={() => borrarLista(list.id)}
-                      className="absolute top-4 right-4 text-gray-500 hover:text-red-400 transition cursor-pointer opacity-0 group-hover:opacity-100"
+                      className="absolute top-2 right-2 text-gray-500 hover:text-red-400 transition cursor-pointer opacity-0 group-hover:opacity-100 bg-black/40 rounded-full w-6 h-6 flex items-center justify-center"
                       title="Borrar lista"
                     >
                       ✕
@@ -121,6 +156,40 @@ export default function MisListas() {
           </>
         )}
       </div>
+
+      {isModalOpen && (
+        <div
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+          onClick={() => setIsModalOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-gray-900 border border-gray-700 rounded-lg max-w-sm w-full text-white shadow-2xl p-6"
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">Nueva lista</h2>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white text-2xl font-bold cursor-pointer">✕</button>
+            </div>
+            <form onSubmit={crearLista} className="flex gap-2">
+              <input
+                type="text"
+                autoFocus
+                value={nuevoNombre}
+                onChange={(e) => setNuevoNombre(e.target.value)}
+                placeholder="Nombre de la lista..."
+                className="flex-grow bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
+              />
+              <button
+                type="submit"
+                disabled={creando || !nuevoNombre.trim()}
+                className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold px-4 rounded transition cursor-pointer"
+              >
+                Crear
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
