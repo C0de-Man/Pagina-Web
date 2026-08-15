@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number; mediaId: number }) {
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -42,6 +42,18 @@ export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number;
         window.location.reload();
     };
 
+    // Cerrar con la tecla ESC mientras el modal está abierto
+    useEffect(() => {
+        if (!isModalOpen) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setIsModalOpen(false);
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isModalOpen]);
+
     return (
         <>
             <button
@@ -52,35 +64,47 @@ export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number;
             </button>
 
             {isModalOpen && (
-                <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-                    <div className="bg-gray-900 border border-gray-700 p-6 rounded-lg max-w-4xl w-full max-h-[85vh] overflow-y-auto text-white shadow-2xl">
-                        <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-3 sticky top-0 bg-gray-900 z-10">
+                // Clic fuera del recuadro (en el fondo oscuro) cierra el modal
+                <div
+                    className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+                    onClick={() => setIsModalOpen(false)}
+                >
+                    <div
+                        // Evitamos que un clic DENTRO del recuadro se propague y lo cierre
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-gray-900 border border-gray-700 rounded-lg max-w-4xl w-full max-h-[85vh] text-white shadow-2xl flex flex-col overflow-hidden"
+                    >
+                        {/* Cabecera fija, fuera de la zona con scroll: ya no se solapa con la cuadrícula */}
+                        <div className="flex justify-between items-center px-6 py-4 border-b border-gray-700 flex-shrink-0">
                             <h2 className="text-xl font-bold">
                                 Elige un póster <span className="text-sm font-normal text-gray-400 ml-2">({posters.length} opciones)</span>
                             </h2>
                             <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white text-2xl font-bold cursor-pointer">✕</button>
                         </div>
 
-                        {loading ? (
-                            <div className="text-center py-12 text-gray-400">Cargando pósters desde TMDB...</div>
-                        ) : errorMsg ? (
-                            <div className="text-center py-12 text-red-400">{errorMsg}</div>
-                        ) : posters.length === 0 ? (
-                            <div className="text-center py-12 text-gray-400">No hay pósters disponibles para este título.</div>
-                        ) : (
-                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-4">
-                                {posters.map((p) => (
-                                    <img
-                                        key={p.file_path}
-                                        src={`https://image.tmdb.org/t/p/w300${p.file_path}`}
-                                        onClick={() => selectPoster(p.file_path)}
-                                        className="cursor-pointer rounded-lg hover:scale-105 transition border-2 border-transparent hover:border-blue-500 object-cover aspect-[2/3] bg-gray-800"
-                                        alt="Poster option"
-                                        loading="lazy" // MUY IMPORTANTE: Evita que el navegador se congele al cargar cientos de imágenes
-                                    />
-                                ))}
-                            </div>
-                        )}
+                        {/* Zona con scroll, separada de la cabecera */}
+                        <div className="overflow-y-auto p-6">
+                            {loading ? (
+                                <div className="text-center py-12 text-gray-400">Cargando pósters desde TMDB...</div>
+                            ) : errorMsg ? (
+                                <div className="text-center py-12 text-red-400">{errorMsg}</div>
+                            ) : posters.length === 0 ? (
+                                <div className="text-center py-12 text-gray-400">No hay pósters disponibles para este título.</div>
+                            ) : (
+                                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-4">
+                                    {posters.map((p) => (
+                                        <img
+                                            key={p.file_path}
+                                            src={`https://image.tmdb.org/t/p/w300${p.file_path}`}
+                                            onClick={() => selectPoster(p.file_path)}
+                                            className="cursor-pointer rounded-lg hover:scale-105 transition border-2 border-transparent hover:border-blue-500 object-cover aspect-[2/3] bg-gray-800"
+                                            alt="Poster option"
+                                            loading="lazy" // MUY IMPORTANTE: Evita que el navegador se congele al cargar cientos de imágenes
+                                        />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
