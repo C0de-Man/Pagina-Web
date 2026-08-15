@@ -39,15 +39,17 @@ export default function RemakeOfBadge({
   };
 
   return (
-    <div
-      onClick={handleClick}
-      className={`text-sm text-gray-400 mb-4 -mt-4 cursor-pointer hover:text-gray-200 transition w-fit ${
-        loading ? 'opacity-50' : ''
-      }`}
-    >
+    <div className="text-sm text-gray-400 mb-4 -mt-4 w-fit">
       Remake de{' '}
-      <span className="text-gray-200 font-semibold underline">{remakeOf.titulo}</span>
-      {remakeOf.anio && <span> ({remakeOf.anio})</span>}
+      <span
+        onClick={handleClick}
+        className={`text-blue-400 font-semibold underline cursor-pointer hover:text-blue-300 transition ${
+          loading ? 'opacity-50' : ''
+        }`}
+      >
+        {remakeOf.titulo}
+        {remakeOf.anio && ` (${remakeOf.anio})`}
+      </span>
     </div>
   );
 }
