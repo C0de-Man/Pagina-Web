@@ -31,18 +31,23 @@ export default function Perfil() {
   }, []);
 
   const renderCard = (item: any) => (
-    <Link key={item.id} href={`/media/${item.id}`} className="flex-shrink-0 w-32 md:w-36 group">
+    <Link key={item.id} href={`/media/${item.id}`} className="flex-shrink-0 w-32 md:w-36 group relative">
       {item.portada ? (
         <img
           src={item.portada}
           alt={item.titulo}
-          className="w-32 h-48 md:w-36 md:h-52 object-cover rounded-md border border-gray-700 group-hover:border-gray-400 group-hover:scale-105 transition duration-300 shadow-lg"
+          className="w-32 h-48 md:w-36 md:h-52 object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition duration-300 shadow-lg"
         />
       ) : (
         <div className="w-32 h-48 md:w-36 md:h-52 bg-gray-800 rounded-md border border-gray-700 flex items-center justify-center text-xs text-center p-2 group-hover:border-gray-400 transition shadow-lg">
           {item.titulo}
         </div>
       )}
+      <div className="absolute inset-0 rounded-md bg-black/90 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-center p-2 pointer-events-none">
+        <p className="text-sm font-bold text-white">
+          {item.titulo} <span className="font-normal text-gray-300">({item.anio})</span>
+        </p>
+      </div>
     </Link>
   );
 

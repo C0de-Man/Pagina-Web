@@ -32,21 +32,32 @@ export default function MovieCard({ pelicula, dbId, customPoster }: { pelicula: 
 
   // Magia 3: Si tienes un póster personalizado (customPoster), usa ese. Si no, usa el de TMDB.
   const posterUrl = customPoster || (pelicula.poster_path ? `https://image.tmdb.org/t/p/w500${pelicula.poster_path}` : null);
+  const titulo = pelicula.title || pelicula.name || pelicula.titulo;
+  const anio = pelicula.anio || (pelicula.release_date ? pelicula.release_date.split('-')[0] : (pelicula.first_air_date ? pelicula.first_air_date.split('-')[0] : ''));
 
   return (
     <div onClick={handleClick} className="flex-shrink-0 w-32 md:w-40 group cursor-pointer relative">
       {posterUrl ? (
         <img 
           src={posterUrl} 
-          alt={pelicula.title} 
-          className={`w-full aspect-[2/3] object-cover rounded-md border border-gray-700 group-hover:border-gray-400 group-hover:scale-105 transition duration-300 shadow-lg ${loading ? 'opacity-50 blur-sm' : ''}`}
+          alt={titulo} 
+          className={`w-full aspect-[2/3] object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition duration-300 shadow-lg ${loading ? 'opacity-50 blur-sm' : ''}`}
         />
       ) : (
         <div className="w-full aspect-[2/3] bg-gray-800 rounded-md border border-gray-700 flex items-center justify-center text-xs text-center p-2 group-hover:border-gray-400 transition shadow-lg">
-          {pelicula.title}
+          {titulo}
         </div>
       )}
-      
+
+      {/* Oscurecer y mostrar título + año al pasar el cursor */}
+      {!loading && (
+        <div className="absolute inset-0 rounded-md bg-black/90 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-center p-2 pointer-events-none">
+          <p className="text-sm font-bold text-white">
+            {titulo} <span className="font-normal text-gray-300">({anio})</span>
+          </p>
+        </div>
+      )}
+
       {/* Indicador de carga por si tarda medio segundo en guardarse */}
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center rounded-md pointer-events-none">

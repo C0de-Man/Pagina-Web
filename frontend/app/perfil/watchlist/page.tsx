@@ -33,7 +33,7 @@ export default function Watchlist() {
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
             {items.map((item) => (
-              <Link key={item.id} href={`/media/${item.id}`} className="group">
+              <Link key={item.id} href={`/media/${item.id}`} className="group relative block">
                 {item.portada ? (
                   <img
                     src={item.portada}
@@ -45,7 +45,11 @@ export default function Watchlist() {
                     {item.titulo}
                   </div>
                 )}
-                <p className="text-xs text-gray-400 mt-1 text-center">{item.anio}</p>
+                <div className="absolute inset-0 rounded-md bg-black/90 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-center p-2">
+                  <p className="text-sm font-bold text-white">
+                    {item.titulo} <span className="font-normal text-gray-300">({item.anio})</span>
+                  </p>
+                </div>
               </Link>
             ))}
           </div>
