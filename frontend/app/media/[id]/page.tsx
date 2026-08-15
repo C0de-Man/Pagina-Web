@@ -1,3 +1,4 @@
+import RatingWidget from '@/components/RatingWidget';
 import ActionButtons from '@/components/ActionButtons';
 import PosterButtonModal from '@/components/PosterButtonModal';
 import CollectionLinks from '@/components/CollectionLinks';
@@ -70,12 +71,9 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
             <div className="bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl">
               <ActionButtons mediaId={media.id} />
 
-              <div className="flex justify-between items-center bg-gray-900 rounded p-3 mb-4 cursor-pointer hover:bg-gray-800 transition">
-                <span className="text-sm font-semibold text-gray-300">(5) Average</span>
-                <span className="text-yellow-500">⭐ ▽</span>
-              </div>
+              <div className="border-t border-dashed border-gray-700 my-4"></div>
 
-              <div className="space-y-2">
+              <div className="space-y-2 mb-4">
                 <button className="w-full bg-[#2c3440] hover:bg-gray-600 text-white font-bold py-2 rounded text-sm transition cursor-pointer">
                   Review or log...
                 </button>
@@ -83,14 +81,12 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
                   Add to lists...
                 </button>
               </div>
+
+              <RatingWidget mediaId={media.id} />
             </div>
 
-            <div className="mt-4 bg-[#1c2228] rounded-lg border border-gray-700 p-4 text-center shadow-xl">
-              <div className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">SCORE</div>
-              <div className="text-3xl font-extrabold text-blue-400">8.00</div>
-              <div className="text-xs text-gray-500 mt-1">1,278,028 users</div>
+            <div className="mt-4">
             </div>
-
             <CollectionLinks tmdbId={media.tmdbId} />
           </div>
 

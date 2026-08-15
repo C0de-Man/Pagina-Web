@@ -436,6 +436,129 @@ app.patch('/media/:id/status', requireAuth, async (req, res) => {
   }
 });
 
+// --- NOTA MEDIA DE UNA PELÍCULA (calculada entre todos los usuarios) ---
+app.get('/media/:id/rating', async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id);
+    const ratings = await prisma.userMedia.findMany({
+      where: { mediaId, rating: { not: null } },
+      select: { rating: true }
+    });
+
+    if (ratings.length === 0) {
+      return res.json({ average: null, count: 0 });
+    }
+
+    const suma = ratings.reduce((acc, r) => acc + r.rating, 0);
+    const average = suma / ratings.length;
+
+    res.json({ average: Math.round(average * 10) / 10, count: ratings.length });
+  } catch (error) {
+    console.error('ERROR EN GET RATING:', error);
+    res.status(500).json({ error: 'Error al calcular la nota media' });
+  }
+});
+
+// --- MIS LISTAS: obtener todas ---
+app.get('/lists', requireAuth, async (req, res) => {
+  try {
+    const lists = await prisma.list.findMany({
+      where: { userId: req.userId },
+      include: { items: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(lists.map(l => ({ id: l.id, nombre: l.nombre, createdAt: l.createdAt, totalItems: l.items.length })));
+  } catch (error) {
+    console.error('ERROR EN GET LISTS:', error);
+    res.status(500).json({ error: 'Error al obtener las listas' });
+  }
+});
+
+// --- CREAR UNA LISTA NUEVA ---
+app.post('/lists', requireAuth, async (req, res) => {
+  try {
+    const { nombre } = req.body;
+    if (!nombre || !nombre.trim()) {
+      return res.status(400).json({ error: 'El nombre de la lista es obligatorio' });
+    }
+    const list = await prisma.list.create({
+      data: { userId: req.userId, nombre: nombre.trim() }
+    });
+    res.status(201).json(list);
+  } catch (error) {
+    console.error('ERROR EN POST LISTS:', error);
+    res.status(500).json({ error: 'Error al crear la lista' });
+  }
+});
+
+// --- VER UNA LISTA CONCRETA (con sus películas) ---
+app.get('/lists/:id', requireAuth, async (req, res) => {
+  try {
+    const listId = parseInt(req.params.id);
+    const list = await prisma.list.findUnique({
+      where: { id: listId },
+      include: { items: true }
+    });
+
+    if (!list || list.userId !== req.userId) {
+      return res.status(404).json({ error: 'Lista no encontrada' });
+    }
+
+    const mediaIds = list.items.map(i => i.mediaId);
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+
+    res.json({ id: list.id, nombre: list.nombre, items: mediaItems });
+  } catch (error) {
+    console.error('ERROR EN GET LIST:', error);
+    res.status(500).json({ error: 'Error al obtener la lista' });
+  }
+});
+
+// --- AÑADIR UNA PELÍCULA A UNA LISTA ---
+app.post('/lists/:id/items', requireAuth, async (req, res) => {
+  try {
+    const listId = parseInt(req.params.id);
+    const { mediaId } = req.body;
+
+    const list = await prisma.list.findUnique({ where: { id: listId } });
+    if (!list || list.userId !== req.userId) {
+      return res.status(404).json({ error: 'Lista no encontrada' });
+    }
+
+    const item = await prisma.listItem.create({
+      data: { listId, mediaId }
+    });
+    res.status(201).json(item);
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'Esta película ya está en la lista' });
+    }
+    console.error('ERROR EN POST LIST ITEM:', error);
+    res.status(500).json({ error: 'Error al añadir a la lista' });
+  }
+});
+
+// --- QUITAR UNA PELÍCULA DE UNA LISTA ---
+app.delete('/lists/:id/items/:mediaId', requireAuth, async (req, res) => {
+  try {
+    const listId = parseInt(req.params.id);
+    const mediaId = parseInt(req.params.mediaId);
+
+    const list = await prisma.list.findUnique({ where: { id: listId } });
+    if (!list || list.userId !== req.userId) {
+      return res.status(404).json({ error: 'Lista no encontrada' });
+    }
+
+    await prisma.listItem.delete({
+      where: { listId_mediaId: { listId, mediaId } }
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN DELETE LIST ITEM:', error);
+    res.status(500).json({ error: 'Error al quitar de la lista' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
