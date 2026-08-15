@@ -122,6 +122,31 @@ app.get('/media/watched', requireAuth, async (req, res) => {
   }
 });
 
+// --- MI WATCHLIST (orden: de la última que añadiste a la primera) ---
+app.get('/media/watchlist', requireAuth, async (req, res) => {
+  try {
+    const entries = await prisma.userMedia.findMany({
+      where: { userId: req.userId, watchlist: true },
+      orderBy: { updatedAt: 'desc' }
+    });
+
+    const mediaIds = entries.map(e => e.mediaId);
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+
+    const resultado = entries
+      .map(e => {
+        const item = mediaItems.find(m => m.id === e.mediaId);
+        return item ? { ...item, fechaAgregado: e.updatedAt } : null;
+      })
+      .filter(Boolean);
+
+    res.json(resultado);
+  } catch (error) {
+    console.error('ERROR EN GET WATCHLIST:', error);
+    res.status(500).json({ error: 'Error al obtener la watchlist' });
+  }
+});
+
 // --- RUTA PARA OBTENER UNA SOLA PELÍCULA POR SU ID ---
 app.get('/media/:id', async (req, res) => {
   try {
