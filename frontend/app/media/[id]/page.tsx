@@ -1,3 +1,4 @@
+import ActionButtons from '@/components/ActionButtons';
 import PosterButtonModal from '@/components/PosterButtonModal';
 import CollectionLinks from '@/components/CollectionLinks';
 import MediaTabs from '@/components/MediaTabs';
@@ -67,20 +68,7 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
 
           <div className="flex-shrink-0 w-full md:w-72 pt-24 md:pt-32">
             <div className="bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl">
-              <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-4">
-                <button className="flex flex-col items-center text-gray-400 hover:text-green-400 transition cursor-pointer">
-                  <span className="text-2xl mb-1">👁️</span>
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Watched</span>
-                </button>
-                <button className="flex flex-col items-center text-gray-400 hover:text-orange-400 transition cursor-pointer">
-                  <span className="text-2xl mb-1">❤️</span>
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Liked</span>
-                </button>
-                <button className="flex flex-col items-center text-gray-400 hover:text-blue-400 transition cursor-pointer">
-                  <span className="text-2xl mb-1">⏱️</span>
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Watchlist</span>
-                </button>
-              </div>
+              <ActionButtons mediaId={media.id} />
 
               <div className="flex justify-between items-center bg-gray-900 rounded p-3 mb-4 cursor-pointer hover:bg-gray-800 transition">
                 <span className="text-sm font-semibold text-gray-300">(5) Average</span>

@@ -3,15 +3,34 @@ const express = require('express');
 const cors = require('cors');
 const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 app.use(cors());
-app.use(express.json()); 
+app.use(express.json());
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 const PORT = 3001;
+
+// --- MIDDLEWARE: comprueba el token y añade req.userId ---
+function requireAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'No has iniciado sesión' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    req.userId = payload.userId;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Sesión inválida o caducada' });
+  }
+}
 
 // --- RUTA PARA OBTENER TODOS LOS MEDIOS ---
 app.get('/media', async (req, res) => {
@@ -73,6 +92,33 @@ app.post('/media/tmdb', async (req, res) => {
     res.json(newMedia);
   } catch (error) {
     res.status(500).json({ error: "Hubo un error al guardar" });
+  }
+});
+
+// --- MIS PELÍCULAS/SERIES VISTAS (con la fecha en la que se marcaron) ---
+// IMPORTANTE: esta ruta va ANTES de /media/:id, si no Express confunde "watched" con un id
+app.get('/media/watched', requireAuth, async (req, res) => {
+  try {
+    const entries = await prisma.userMedia.findMany({
+      where: { userId: req.userId, watched: true },
+      orderBy: { updatedAt: 'desc' } // de la más reciente a la más antigua marcada
+    });
+
+    const mediaIds = entries.map(e => e.mediaId);
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+
+    // Unimos cada película con la fecha en la que se marcó como vista, respetando el orden
+    const resultado = entries
+      .map(e => {
+        const item = mediaItems.find(m => m.id === e.mediaId);
+        return item ? { ...item, fechaVisto: e.updatedAt } : null;
+      })
+      .filter(Boolean);
+
+    res.json(resultado);
+  } catch (error) {
+    console.error('ERROR EN GET WATCHED:', error);
+    res.status(500).json({ error: 'Error al obtener las vistas' });
   }
 });
 
@@ -159,18 +205,18 @@ app.get('/tmdb/year/:year/page/:page', async (req, res) => {
     const year = req.params.year;
     const page = parseInt(req.params.page) || 1;
     const apiKey = process.env.TMDB_API_KEY;
-    
+
     // Queremos exactamente 42 por página (7 columnas x 6 filas)
-    const itemsPerPage = 42; 
+    const itemsPerPage = 42;
     const startIndex = (page - 1) * itemsPerPage;
     const endIndex = page * itemsPerPage;
-    
+
     // Las páginas de TMDB traen 20, calculamos cuáles pedir
     const startTmdbPage = Math.floor(startIndex / 20) + 1;
     const endTmdbPage = Math.ceil(endIndex / 20);
 
     let combined = [];
-    
+
     for (let i = startTmdbPage; i <= endTmdbPage; i++) {
       const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=es-ES&primary_release_year=${year}&sort_by=popularity.desc&page=${i}`);
       const data = await response.json();
@@ -256,6 +302,117 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: "Error al obtener detalles" });
+  }
+});
+
+// --- REGISTRO DE USUARIO ---
+app.post('/auth/register', async (req, res) => {
+  try {
+    const { email, username, password } = req.body;
+
+    if (!email || !username || !password) {
+      return res.status(400).json({ error: 'Faltan datos: email, username y password son obligatorios' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const newUser = await prisma.user.create({
+      data: { email, username, password: hashedPassword }
+    });
+
+    // Nunca devolvemos la contraseña, ni siquiera la cifrada
+    const { password: _, ...userSinPassword } = newUser;
+    res.status(201).json(userSinPassword);
+  } catch (error) {
+    console.error('ERROR DETALLADO EN REGISTRO:', error);
+    if (error.code === 'P2002') {
+      // Error de Prisma cuando se viola una restricción @unique
+      return res.status(409).json({ error: 'Ese email o username ya está en uso' });
+    }
+    res.status(500).json({ error: 'Error al registrar el usuario' });
+  }
+});
+
+// --- INICIO DE SESIÓN ---
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Faltan datos: email y password son obligatorios' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(401).json({ error: 'Credenciales incorrectas' });
+    }
+
+    const passwordValida = await bcrypt.compare(password, user.password);
+    if (!passwordValida) {
+      return res.status(401).json({ error: 'Credenciales incorrectas' });
+    }
+
+    const token = jwt.sign(
+      { userId: user.id, username: user.username },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    const { password: _, ...userSinPassword } = user;
+    res.json({ token, user: userSinPassword });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al iniciar sesión' });
+  }
+});
+
+// --- OBTENER MI ESTADO PERSONAL CON UNA PELÍCULA ---
+app.get('/media/:id/status', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id);
+    const status = await prisma.userMedia.findUnique({
+      where: { userId_mediaId: { userId: req.userId, mediaId } }
+    });
+
+    // Si nunca ha interactuado con esta película, devolvemos valores por defecto
+    res.json(status || {
+      watched: false,
+      liked: false,
+      watchlist: false,
+      rating: null,
+      customPoster: null
+    });
+  } catch (error) {
+    console.error('ERROR EN GET STATUS:', error);
+    res.status(500).json({ error: 'Error al obtener el estado' });
+  }
+});
+
+// --- ACTUALIZAR MI ESTADO PERSONAL CON UNA PELÍCULA ---
+app.patch('/media/:id/status', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id);
+    const { watched, liked, watchlist, rating, customPoster } = req.body;
+
+    // Construimos solo con los campos que realmente vienen en la petición
+    const data = {};
+    if (watched !== undefined) data.watched = watched;
+    if (liked !== undefined) data.liked = liked;
+    if (watchlist !== undefined) data.watchlist = watchlist;
+    if (rating !== undefined) data.rating = rating;
+    if (customPoster !== undefined) data.customPoster = customPoster;
+
+    const status = await prisma.userMedia.upsert({
+      where: { userId_mediaId: { userId: req.userId, mediaId } },
+      update: data,
+      create: { userId: req.userId, mediaId, ...data }
+    });
+
+    res.json(status);
+  } catch (error) {
+    console.error('ERROR EN PATCH STATUS:', error);
+    res.status(500).json({ error: 'Error al actualizar el estado' });
   }
 });
 

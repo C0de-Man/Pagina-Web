@@ -26,3 +26,43 @@ model Media {
   sinopsis  String?
   createdAt DateTime  @default(now())
 }
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  username  String   @unique
+  password  String
+  avatar    String?
+  createdAt DateTime @default(now())
+}
+
+model UserMedia {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  mediaId       Int
+  watched       Boolean  @default(false)
+  liked         Boolean  @default(false)
+  watchlist     Boolean  @default(false)
+  rating        Int?     // Nota personal, ej. de 1 a 10
+  customPoster  String?  // Portada elegida por este usuario para este medio
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, mediaId]) // Un usuario solo puede tener UN estado por película
+}
+
+model List {
+  id        Int        @id @default(autoincrement())
+  userId    Int
+  nombre    String
+  createdAt DateTime   @default(now())
+  items     ListItem[]
+}
+
+model ListItem {
+  id      Int  @id @default(autoincrement())
+  listId  Int
+  mediaId Int
+  list    List @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, mediaId]) // No repetir la misma película en la misma lista
+}
