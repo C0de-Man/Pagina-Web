@@ -309,6 +309,7 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
     res.json({
       runtime: data.runtime || null,
       presupuesto: data.budget || 0,
+      ganancias: data.revenue || 0,
       estudios: data.production_companies?.map(c => c.name) || [],
       paises: data.production_countries?.map(c => c.name) || [],
       cast: data.credits?.cast?.slice(0, 15).map(a => ({
@@ -421,6 +422,8 @@ app.patch('/media/:id/status', requireAuth, async (req, res) => {
     if (liked !== undefined) data.liked = liked;
     if (watchlist !== undefined) data.watchlist = watchlist;
     if (rating !== undefined) data.rating = rating;
+    // Si se pone una nota (rating no nulo), se marca automáticamente como visto
+    if (rating !== undefined && rating !== null) data.watched = true;
     if (customPoster !== undefined) data.customPoster = customPoster;
 
     const status = await prisma.userMedia.upsert({
@@ -440,19 +443,43 @@ app.patch('/media/:id/status', requireAuth, async (req, res) => {
 app.get('/media/:id/rating', async (req, res) => {
   try {
     const mediaId = parseInt(req.params.id);
+
     const ratings = await prisma.userMedia.findMany({
       where: { mediaId, rating: { not: null } },
       select: { rating: true }
     });
 
-    if (ratings.length === 0) {
+    const suma = ratings.reduce((acc, r) => acc + r.rating, 0);
+    const count = ratings.length;
+
+    // Intentamos obtener la nota base de TMDB (misma escala 0-10)
+    let tmdbAvg = null;
+    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true } });
+
+    if (media?.tmdbId) {
+      try {
+        const apiKey = process.env.TMDB_API_KEY;
+        const tmdbRes = await fetch(`https://api.themoviedb.org/3/movie/${media.tmdbId}?api_key=${apiKey}`);
+        const tmdbData = await tmdbRes.json();
+        if (tmdbData.vote_average) tmdbAvg = tmdbData.vote_average;
+      } catch (e) {
+        // si falla TMDB, seguimos solo con las notas locales
+      }
+    }
+
+    // Sin nota de TMDB y sin votos locales: no hay nada que mostrar
+    if (tmdbAvg === null && count === 0) {
       return res.json({ average: null, count: 0 });
     }
 
-    const suma = ratings.reduce((acc, r) => acc + r.rating, 0);
-    const average = suma / ratings.length;
+    // TMDB cuenta como "un voto base" que se combina con las notas de los usuarios
+    const pesoBase = tmdbAvg !== null ? 1 : 0;
+    const sumaTotal = suma + (tmdbAvg !== null ? tmdbAvg : 0);
+    const totalVotos = count + pesoBase;
 
-    res.json({ average: Math.round(average * 10) / 10, count: ratings.length });
+    const average = sumaTotal / totalVotos;
+
+    res.json({ average: Math.round(average * 10) / 10, count, tmdbAvg });
   } catch (error) {
     console.error('ERROR EN GET RATING:', error);
     res.status(500).json({ error: 'Error al calcular la nota media' });
@@ -556,6 +583,28 @@ app.delete('/lists/:id/items/:mediaId', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('ERROR EN DELETE LIST ITEM:', error);
     res.status(500).json({ error: 'Error al quitar de la lista' });
+  }
+});
+
+// --- MIS LISTAS: obtener todas (opcionalmente marcando si contienen una película concreta) ---
+app.get('/lists', requireAuth, async (req, res) => {
+  try {
+    const mediaId = req.query.mediaId ? parseInt(req.query.mediaId) : null;
+    const lists = await prisma.list.findMany({
+      where: { userId: req.userId },
+      include: { items: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(lists.map(l => ({
+      id: l.id,
+      nombre: l.nombre,
+      createdAt: l.createdAt,
+      totalItems: l.items.length,
+      contieneMedia: mediaId ? l.items.some(i => i.mediaId === mediaId) : undefined
+    })));
+  } catch (error) {
+    console.error('ERROR EN GET LISTS:', error);
+    res.status(500).json({ error: 'Error al obtener las listas' });
   }
 });
 

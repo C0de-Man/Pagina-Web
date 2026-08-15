@@ -3,6 +3,7 @@ import ActionButtons from '@/components/ActionButtons';
 import PosterButtonModal from '@/components/PosterButtonModal';
 import CollectionLinks from '@/components/CollectionLinks';
 import MediaTabs from '@/components/MediaTabs';
+import AddToListModal from '@/components/AddToListModal';
 
 function formatRuntime(minutes: number | null) {
   if (!minutes) return null;
@@ -77,9 +78,7 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
                 <button className="w-full bg-[#2c3440] hover:bg-gray-600 text-white font-bold py-2 rounded text-sm transition cursor-pointer">
                   Review or log...
                 </button>
-                <button className="w-full bg-[#2c3440] hover:bg-gray-600 text-white font-bold py-2 rounded text-sm transition cursor-pointer">
-                  Add to lists...
-                </button>
+                <AddToListModal mediaId={media.id} />
               </div>
 
               <RatingWidget mediaId={media.id} />

@@ -46,6 +46,11 @@ export default function RatingWidget({ mediaId }: { mediaId: number }) {
         body: JSON.stringify({ rating: valor }),
       });
       cargarMedia(); // refrescamos la media tras puntuar
+
+      // Avisamos a ActionButtons: si se puso una nota, ya está visto (el ojo se abre)
+      if (valor !== null) {
+        window.dispatchEvent(new CustomEvent('mediaWatchedChanged', { detail: { mediaId, watched: true } }));
+      }
     } catch {
       // si falla, se queda como está (podemos afinar esto más adelante)
     }

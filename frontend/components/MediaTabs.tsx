@@ -90,12 +90,22 @@ export default function MediaTabs({ sinopsis, detalles }: { sinopsis: string, de
             <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">País</div>
             <div className="text-gray-200">{detalles?.paises?.length > 0 ? detalles.paises.join(', ') : 'No disponible'}</div>
           </div>
-          <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Presupuesto</div>
-            <div className="text-gray-200">
-              {detalles?.presupuesto
-                ? new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(detalles.presupuesto)
-                : 'No disponible'}
+          <div className="flex flex-col gap-4">
+            <div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Presupuesto</div>
+              <div className="text-gray-200">
+                {detalles?.presupuesto
+                  ? new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(detalles.presupuesto)
+                  : 'No disponible'}
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Ganancias</div>
+              <div className="text-gray-200">
+                {detalles?.ganancias
+                  ? new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(detalles.ganancias)
+                  : 'No disponible'}
+              </div>
             </div>
           </div>
         </div>

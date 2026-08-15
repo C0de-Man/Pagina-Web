@@ -1,0 +1,111 @@
+'use client';
+import { useState, useEffect } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+
+export default function ListaDetalle() {
+  const params = useParams();
+  const router = useRouter();
+  const listId = params.id;
+
+  const [lista, setLista] = useState<{ id: number; nombre: string; items: any[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const cargarLista = () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      router.push('/login');
+      return;
+    }
+    fetch(`http://localhost:3001/lists/${listId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          setLista(null);
+        } else {
+          setLista(data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    cargarLista();
+  }, [listId]);
+
+  const quitarDeLista = async (mediaId: number) => {
+    const token = localStorage.getItem('token');
+    if (!token || !lista) return;
+
+    setLista({ ...lista, items: lista.items.filter((i) => i.id !== mediaId) }); // optimista
+
+    try {
+      await fetch(`http://localhost:3001/lists/${listId}/items/${mediaId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      cargarLista(); // si falla, recargamos de verdad
+    }
+  };
+
+  if (loading) {
+    return <main className="min-h-screen bg-[#14181c] text-white flex items-center justify-center">Cargando...</main>;
+  }
+
+  if (!lista) {
+    return (
+      <main className="min-h-screen bg-[#14181c] text-white flex items-center justify-center">
+        Lista no encontrada
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-[#14181c] text-white font-sans">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <Link href="/perfil/lists" className="text-sm text-gray-400 hover:text-white transition">← Mis listas</Link>
+        <h1 className="text-2xl font-extrabold mt-2 mb-6">{lista.nombre}</h1>
+
+        {lista.items.length === 0 ? (
+          <p className="text-gray-500 text-sm">Esta lista está vacía. Añade títulos desde su ficha con "Add to lists...".</p>
+        ) : (
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
+            {lista.items.map((item) => (
+              <div key={item.id} className="group relative">
+                <Link href={`/media/${item.id}`} className="block">
+                  {item.portada ? (
+                    <img
+                      src={item.portada}
+                      alt={item.titulo}
+                      className="w-full aspect-[2/3] object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition shadow-lg"
+                    />
+                  ) : (
+                    <div className="w-full aspect-[2/3] bg-gray-800 rounded-md border border-gray-700 flex items-center justify-center text-xs text-center p-2">
+                      {item.titulo}
+                    </div>
+                  )}
+                  <div className="absolute inset-0 rounded-md bg-black/90 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-center p-2 pointer-events-none">
+                    <p className="text-sm font-bold text-white">
+                      {item.titulo} <span className="font-normal text-gray-300">({item.anio})</span>
+                    </p>
+                  </div>
+                </Link>
+                <button
+                  onClick={() => quitarDeLista(item.id)}
+                  className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-full bg-black/70 text-white text-xs opacity-0 group-hover:opacity-100 hover:bg-red-500 transition cursor-pointer"
+                  title="Quitar de la lista"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
