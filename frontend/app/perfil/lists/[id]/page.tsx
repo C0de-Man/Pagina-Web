@@ -76,7 +76,7 @@ export default function ListaDetalle() {
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
             {lista.items.map((item) => (
               <div key={item.id} className="group relative">
-                <Link href={`/media/${item.id}`} className="block">
+                <Link href={`/movie/${generarSlug(item.titulo, item.anio, item.id)}`} className="block">
                   {item.portada ? (
                     <img
                       src={item.portada}

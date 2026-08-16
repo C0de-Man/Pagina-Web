@@ -33,7 +33,7 @@ export default function Actividad() {
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
             {vistas.map((item) => (
-              <Link key={item.id} href={`/media/${item.id}`} className="group relative block">
+              <Link key={item.id} href={`/movie/${generarSlug(item.titulo, item.anio, item.id)}`} className="group relative block">
                 {item.portada ? (
                   <img
                     src={item.portada}

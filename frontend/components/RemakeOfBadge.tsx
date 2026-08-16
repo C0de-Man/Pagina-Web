@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { generarSlug } from '@/lib/slug';
 
 export default function RemakeOfBadge({
   remakeOf,
@@ -22,7 +23,7 @@ export default function RemakeOfBadge({
       const local = myDb.find((m: any) => m.tmdbId === remakeOf.tmdbId);
 
       if (local) {
-        router.push(`/media/${local.id}`);
+        router.push(`/movie/${generarSlug(remakeOf.titulo, remakeOf.anio, local.id)}`);
       } else {
         // Si no existe, la creamos automáticamente a partir de TMDB
         const res = await fetch('http://localhost:3001/media/tmdb', {
@@ -31,7 +32,7 @@ export default function RemakeOfBadge({
           body: JSON.stringify({ tmdbId: remakeOf.tmdbId, tipo: 'PELICULA' }),
         });
         const nueva = await res.json();
-        router.push(`/media/${nueva.id}`);
+        router.push(`/movie/${generarSlug(remakeOf.titulo, remakeOf.anio, nueva.id)}`);
       }
     } catch (e) {
       setLoading(false);

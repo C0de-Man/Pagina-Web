@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { generarSlug } from '@/lib/slug';
 
 export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
   const [collection, setCollection] = useState<{ prequel: any, sequel: any, nombreColeccion: string | null, parts: any[] } | null>(null);
@@ -43,8 +44,10 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
     if (loadingId) return;
     setLoadingId(item.id);
 
+    const anioItem = item.release_date ? item.release_date.split('-')[0] : null;
+
     if (dbId) {
-      router.push(`/media/${dbId}`);
+      router.push(`/peliculas/${generarSlug(item.title, anioItem, dbId)}`);
     } else {
       try {
         const res = await fetch('http://localhost:3001/media/tmdb', {
@@ -53,7 +56,7 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
           body: JSON.stringify({ tmdbId: item.id, tipo: 'PELICULA' })
         });
         const nueva = await res.json();
-        router.push(`/media/${nueva.id}`);
+        router.push(`/peliculas/${generarSlug(nueva.titulo, nueva.anio, nueva.id)}`);
       } catch (e) {
         setLoadingId(null);
       }

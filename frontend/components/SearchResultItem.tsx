@@ -1,6 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { generarSlug } from '@/lib/slug';
 
 export default function SearchResultItem({ item, dbId, customPoster }: { item: any, dbId: number | null, customPoster: string | null }) {
   const router = useRouter();
@@ -12,7 +13,7 @@ export default function SearchResultItem({ item, dbId, customPoster }: { item: a
 
     if (dbId) {
       // Si ya la tienes, te lleva directo
-      router.push(`/media/${dbId}`);
+      router.push(`/peliculas/${generarSlug(title, year, dbId)}`);
     } else {
       // Si NO la tienes, la guarda y luego te lleva
       try {
@@ -25,7 +26,7 @@ export default function SearchResultItem({ item, dbId, customPoster }: { item: a
           body: JSON.stringify({ tmdbId: item.id, tipo })
         });
         const nuevaPeli = await res.json();
-        router.push(`/media/${nuevaPeli.id}`);
+        router.push(`/peliculas/${generarSlug(nuevaPeli.titulo, nuevaPeli.anio, nuevaPeli.id)}`);
       } catch (error) {
         console.error("Error al guardar:", error);
         setLoading(false);

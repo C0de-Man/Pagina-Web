@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { generarSlug } from '@/lib/slug';
 
 export default async function Home() {
   // 1. Llamamos a tu backend para pedir los datos (sin guardarlos en caché para que se actualice siempre)
@@ -17,7 +18,7 @@ export default async function Home() {
           {mediaList.map((media: any) => (
             
             <Link 
-              href={`/media/${media.id}`}
+              href={`/peliculas/${generarSlug(media.titulo, media.anio, media.id)}`}
               key={media.id} 
               className="bg-gray-900 rounded-lg overflow-hidden shadow-xl transition-transform hover:scale-105 border border-gray-800 block cursor-pointer"
             >

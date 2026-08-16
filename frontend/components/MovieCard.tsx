@@ -1,6 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { generarSlug } from '@/lib/slug';
 
 export default function MovieCard({ pelicula, dbId, customPoster }: { pelicula: any, dbId: number | null, customPoster: string | null }) {
   const router = useRouter();
@@ -12,7 +13,7 @@ export default function MovieCard({ pelicula, dbId, customPoster }: { pelicula: 
 
     if (dbId) {
       // Magia 1: Si ya la tienes en TU base de datos, te lleva directo a tu página.
-      router.push(`/media/${dbId}`);
+      router.push(`/peliculas/${generarSlug(titulo, anio, dbId)}`);
     } else {
       // Magia 2: Si NO la tienes, la guarda en tu base de datos y luego te lleva a la página.
       try {
@@ -22,7 +23,7 @@ export default function MovieCard({ pelicula, dbId, customPoster }: { pelicula: 
           body: JSON.stringify({ tmdbId: pelicula.id, tipo: 'PELICULA' })
         });
         const nuevaPeli = await res.json();
-        router.push(`/media/${nuevaPeli.id}`);
+        router.push(`/peliculas/${generarSlug(nuevaPeli.titulo, nuevaPeli.anio, nuevaPeli.id)}`);
       } catch (error) {
         console.error("Error al guardar la película", error);
         setLoading(false);
