@@ -31,7 +31,7 @@ export default function Perfil() {
   }, []);
 
   const renderCard = (item: any) => (
-    <Link key={item.id} href={`/movie/${generarSlug(item.titulo, item.anio, item.id)}`} className="flex-shrink-0 w-32 md:w-36 group relative">
+    <Link key={item.id} href={`/media/${item.id}`} className="flex-shrink-0 w-32 md:w-36 group relative">
       {item.portada ? (
         <img
           src={item.portada}

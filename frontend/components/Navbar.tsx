@@ -52,15 +52,15 @@ export default function Navbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const menuLinks = [
-    { label: 'Home', href: '/' },
-    { label: 'Profile', href: '/perfil' },
-    { label: 'Films', href: '/perfil/films' },
-    { label: 'Watchlist', href: '/perfil/watchlist' },
-    { label: 'Lists', href: '/perfil/lists' },
-    { label: 'Likes', href: '/perfil/likes' },
-    { label: 'Amigos', href: '/perfil/amigos' },
-  ];
+const menuLinks = [
+  { label: 'Home', href: '/' },
+  { label: 'Profile', href: '/perfil' },
+  { label: 'Films', href: '/perfil/peliculas' },
+  { label: 'Watchlist', href: '/perfil/watchlist' },
+  { label: 'Lists', href: '/perfil/lists' },
+  { label: 'Likes', href: '/perfil/likes' },
+  { label: 'Amigos', href: '/perfil/amigos' },
+];
 
   return (
     <nav className="bg-[#14181c] text-gray-300 font-sans border-b border-gray-800 sticky top-0 z-50">
