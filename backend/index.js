@@ -407,6 +407,29 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
   }
 });
 
+// --- DÓNDE VER (datos de JustWatch a través de TMDB) ---
+app.get('/tmdb/watch-providers/:tmdbId', async (req, res) => {
+  try {
+    const { tmdbId } = req.params;
+    const apiKey = process.env.TMDB_API_KEY;
+    const region = req.query.region || 'ES';
+
+    const response = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/watch/providers?api_key=${apiKey}`);
+    const data = await response.json();
+
+    const paisData = data.results?.[region] || null;
+
+    res.json({
+      link: paisData?.link || null,
+      flatrate: paisData?.flatrate || [],
+      rent: paisData?.rent || [],
+      buy: paisData?.buy || [],
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Error al obtener dónde ver" });
+  }
+});
+
 // --- REGISTRO DE USUARIO ---
 app.post('/auth/register', async (req, res) => {
   try {

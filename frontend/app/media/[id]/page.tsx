@@ -5,6 +5,7 @@ import CollectionLinks from '@/components/CollectionLinks';
 import MediaTabs from '@/components/MediaTabs';
 import RemakeOfBadge from '@/components/RemakeOfBadge';
 import AddToListModal from '@/components/AddToListModal';
+import WatchProviders from '@/components/WatchProviders';
 
 function formatRuntime(minutes: number | null) {
   if (!minutes) return null;
@@ -90,6 +91,7 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
             <div className="mt-4">
             </div>
             <CollectionLinks tmdbId={media.tmdbId} />
+            <WatchProviders tmdbId={media.tmdbId} />
           </div>
 
         </div>
