@@ -42,6 +42,41 @@ app.get('/media', async (req, res) => {
   }
 });
 
+// --- MI CATÁLOGO: solo lo que YO he marcado de alguna forma (visto, like, watchlist, nota, o en alguna lista) ---
+app.get('/media/mine', requireAuth, async (req, res) => {
+  try {
+    const interacciones = await prisma.userMedia.findMany({
+      where: {
+        userId: req.userId,
+        OR: [
+          { watched: true },
+          { liked: true },
+          { watchlist: true },
+          { rating: { not: null } }
+        ]
+      },
+      select: { mediaId: true }
+    });
+
+    const itemsEnListas = await prisma.listItem.findMany({
+      where: { list: { userId: req.userId } },
+      select: { mediaId: true }
+    });
+
+    const mediaIds = [...new Set([
+      ...interacciones.map(i => i.mediaId),
+      ...itemsEnListas.map(i => i.mediaId)
+    ])];
+
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+    res.json(mediaItems);
+  } catch (error) {
+    console.error('ERROR EN GET /media/mine:', error);
+    res.status(500).json({ error: 'Error al obtener tu catálogo' });
+  }
+});
+
+
 // --- RUTA PARA GUARDAR UN NUEVO MEDIO ---
 app.post('/media', async (req, res) => {
   try {
