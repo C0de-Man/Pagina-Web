@@ -7,6 +7,7 @@ import RemakeOfBadge from '@/components/RemakeOfBadge';
 import AddToListModal from '@/components/AddToListModal';
 import WatchProviders from '@/components/WatchProviders';
 import { extraerIdDeSlug } from '@/lib/slug';
+import { cookies } from 'next/headers';
 
 function formatRuntime(minutes: number | null) {
   if (!minutes) return null;
@@ -23,7 +24,11 @@ export default async function MediaDetail({ params }: { params: Promise<{ slug: 
     return <div className="p-8 text-white text-center min-h-screen bg-gray-950 flex items-center justify-center">Medio no encontrado</div>;
   }
 
-  const res = await fetch(`http://localhost:3001/media/${id}`, { cache: 'no-store' });
+  const cookieStore = await cookies();
+  const idioma = cookieStore.get('idioma')?.value || 'es-ES';
+  const region = cookieStore.get('region')?.value || 'ES';
+
+  const res = await fetch(`http://localhost:3001/media/${id}?language=${idioma}&region=${region}`, { cache: 'no-store' });
   const media = await res.json();
 
   if (!media || media.error) {
@@ -32,7 +37,7 @@ export default async function MediaDetail({ params }: { params: Promise<{ slug: 
 
   let detalles: any = null;
   if (media.tmdbId) {
-    const resDetalles = await fetch(`http://localhost:3001/tmdb/details/${media.tmdbId}`, { cache: 'no-store' });
+    const resDetalles = await fetch(`http://localhost:3001/tmdb/details/${media.tmdbId}?language=${idioma}`, { cache: 'no-store' });
     detalles = await resDetalles.json();
   }
 

@@ -58,6 +58,12 @@ export async function setPreferences(nuevas: Partial<Preferencias>): Promise<voi
   const combinadas = { ...leerPreferencias(), ...nuevas };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(combinadas));
 
+  // También en cookies: localStorage no es accesible desde los server components
+  // (como la ficha de película o el lobby), así que las páginas que hacen fetch
+  // en el servidor leen el idioma/región de aquí.
+  document.cookie = `idioma=${combinadas.idioma}; path=/; max-age=31536000`;
+  document.cookie = `region=${combinadas.region}; path=/; max-age=31536000`;
+
   const token = localStorage.getItem('token');
   if (token) {
     try {

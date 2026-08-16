@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import AvatarCropModal from '@/components/AvatarCropModal';
 import FavoritePickerModal from '@/components/FavoritePickerModal';
+import SettingsIdiomaRegion from '@/components/SettingsIdiomaRegion';
 
 export default function Settings() {
   const [tab, setTab] = useState<'perfil' | 'account'>('perfil');
@@ -23,7 +24,7 @@ export default function Settings() {
         setUsername(data.username);
         setAvatarPreview(data.avatar || null);
       })
-      .catch(() => {});
+      .catch(() => { });
 
     fetch('http://localhost:3001/favorites', { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => res.json())
@@ -32,7 +33,7 @@ export default function Settings() {
         data.slice(0, 7).forEach((m: any, i: number) => (slots[i] = m));
         setFavoritos(slots);
       })
-      .catch(() => {});
+      .catch(() => { });
   };
 
   useEffect(() => {
@@ -81,17 +82,15 @@ export default function Settings() {
         <div className="flex gap-6 border-b border-gray-800 mb-8">
           <button
             onClick={() => setTab('perfil')}
-            className={`pb-3 text-sm font-bold uppercase tracking-wider cursor-pointer ${
-              tab === 'perfil' ? 'text-white border-b-2 border-blue-500' : 'text-gray-400'
-            }`}
+            className={`pb-3 text-sm font-bold uppercase tracking-wider cursor-pointer ${tab === 'perfil' ? 'text-white border-b-2 border-blue-500' : 'text-gray-400'
+              }`}
           >
             Profile
           </button>
           <button
             onClick={() => setTab('account')}
-            className={`pb-3 text-sm font-bold uppercase tracking-wider cursor-pointer ${
-              tab === 'account' ? 'text-white border-b-2 border-blue-500' : 'text-gray-400'
-            }`}
+            className={`pb-3 text-sm font-bold uppercase tracking-wider cursor-pointer ${tab === 'account' ? 'text-white border-b-2 border-blue-500' : 'text-gray-400'
+              }`}
           >
             Account
           </button>
@@ -158,9 +157,12 @@ export default function Settings() {
             </div>
           </div>
         ) : (
-          <div>
+          <div className="max-w-md">
             <h2 className="text-lg font-bold mb-4">Account</h2>
-            <p className="text-gray-500 text-sm">
+
+            <SettingsIdiomaRegion />
+
+            <p className="text-gray-500 text-sm mt-8 pt-6 border-t border-gray-800">
               <Link href="/perfil/settings" className="underline">Cambio de email/contraseña</Link> — pendiente de implementar.
             </p>
           </div>
