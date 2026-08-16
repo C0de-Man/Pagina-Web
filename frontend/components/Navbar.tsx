@@ -153,7 +153,7 @@ const menuLinks = [
                   className="flex items-center gap-2 cursor-pointer group"
                 >
                   <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white uppercase overflow-hidden">
-                    <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="Avatar" className="w-full h-full object-cover" />
+                    <img src={(user as any).avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="Avatar" className="w-full h-full object-cover" />
                   </div>
                   <span className="text-sm font-bold uppercase tracking-wider group-hover:text-white transition">{user.username}</span>
                   <span className={`text-xs transition-transform ${isProfileOpen ? 'rotate-180' : ''}`}>▼</span>

@@ -6,21 +6,34 @@ export default function Perfil() {
   const [favoritos, setFavoritos] = useState<any[]>([]);
   const [vistas, setVistas] = useState<any[]>([]);
   const [username, setUsername] = useState('');
+  const [avatar, setAvatar] = useState<string | null>(null);
   const [logueado, setLogueado] = useState(false);
 
   useEffect(() => {
-    // Catálogo público, para "Favoritos" (esto lo afinaremos más adelante)
-    fetch('http://localhost:3001/media')
-      .then((res) => res.json())
-      .then(setFavoritos)
-      .catch(() => {});
-
     const token = localStorage.getItem('token');
     const rawUser = localStorage.getItem('user');
     if (rawUser) setUsername(JSON.parse(rawUser).username);
 
     if (token) {
       setLogueado(true);
+
+      fetch('http://localhost:3001/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          setUsername(data.username);
+          setAvatar(data.avatar || null);
+        })
+        .catch(() => {});
+
+      fetch('http://localhost:3001/favorites', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => res.json())
+        .then(setFavoritos)
+        .catch(() => {});
+
       fetch('http://localhost:3001/media/watched', {
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -53,13 +66,12 @@ export default function Perfil() {
 
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans">
-      {/* CABECERA DE PERFIL */}
       <div className="border-b border-gray-800">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex items-center gap-4">
             <div className="w-20 h-20 rounded-full overflow-hidden bg-blue-600 flex-shrink-0">
               <img
-                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${username || 'Miguel'}`}
+                src={avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username || 'Miguel'}`}
                 alt="Avatar"
                 className="w-full h-full object-cover"
               />
@@ -67,7 +79,6 @@ export default function Perfil() {
             <h1 className="text-2xl md:text-3xl font-extrabold">{username || 'Invitado'}</h1>
           </div>
 
-          {/* PESTAÑAS DE NAVEGACIÓN DEL PERFIL */}
           <div className="flex gap-8 mt-6 border-b border-gray-800 -mb-8 pb-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
             <span className="pb-3 text-sm font-semibold text-white border-b-2 border-blue-500 whitespace-nowrap">Perfil</span>
             <Link href="/perfil/peliculas" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Peliculas</Link>
@@ -88,25 +99,31 @@ export default function Perfil() {
           </div>
         )}
 
-        {/* FAVORITOS */}
         <section>
-          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Favoritos</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">Favoritos</h2>
+            <Link href="/perfil/settings" className="text-xs text-gray-400 hover:text-white transition">Editar</Link>
+          </div>
           {favoritos.length > 0 ? (
             <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
               {favoritos.map(renderCard)}
             </div>
           ) : (
-            <p className="text-gray-500 text-sm">Aún no tienes favoritos.</p>
+            <p className="text-gray-500 text-sm">
+              {logueado ? (
+                <>Aún no tienes favoritos. <Link href="/perfil/settings" className="underline">Elígelos aquí</Link>.</>
+              ) : (
+                'Inicia sesión para ver tus favoritos.'
+              )}
+            </p>
           )}
         </section>
 
-        {/* SIGUIENDO */}
         <section>
           <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Siguiendo</h2>
           <p className="text-gray-500 text-sm">Aún no sigues a nadie.</p>
         </section>
 
-        {/* ACTIVIDAD RECIENTE: solo lo marcado como visto, de la más antigua a la más reciente */}
         <section>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">Actividad reciente</h2>

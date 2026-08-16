@@ -591,6 +591,69 @@ app.get('/media/:id/status', requireAuth, async (req, res) => {
   }
 });
 
+// --- OBTENER MI PERFIL (avatar, username, etc) ---
+app.get('/auth/me', requireAuth, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+    const { password: _, ...userSinPassword } = user;
+    res.json(userSinPassword);
+  } catch (error) {
+    console.error('ERROR EN GET /auth/me:', error);
+    res.status(500).json({ error: 'Error al obtener el perfil' });
+  }
+});
+
+// --- ACTUALIZAR MI AVATAR (recibe la imagen ya recortada, en base64) ---
+app.patch('/auth/me/avatar', requireAuth, async (req, res) => {
+  try {
+    const { avatar } = req.body;
+    const user = await prisma.user.update({
+      where: { id: req.userId },
+      data: { avatar }
+    });
+    const { password: _, ...userSinPassword } = user;
+    res.json(userSinPassword);
+  } catch (error) {
+    console.error('ERROR EN PATCH /auth/me/avatar:', error);
+    res.status(500).json({ error: 'Error al actualizar el avatar' });
+  }
+});
+
+// --- MIS PELÍCULAS FAVORITAS (máximo 3, ordenadas) ---
+app.get('/favorites', requireAuth, async (req, res) => {
+  try {
+    const favs = await prisma.favorite.findMany({
+      where: { userId: req.userId },
+      orderBy: { orden: 'asc' }
+    });
+    const mediaIds = favs.map(f => f.mediaId);
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+    const resultado = favs.map(f => mediaItems.find(m => m.id === f.mediaId)).filter(Boolean);
+    res.json(resultado);
+  } catch (error) {
+    console.error('ERROR EN GET /favorites:', error);
+    res.status(500).json({ error: 'Error al obtener favoritos' });
+  }
+});
+
+// --- GUARDAR MIS FAVORITAS (reemplaza la lista entera) ---
+app.put('/favorites', requireAuth, async (req, res) => {
+  try {
+    const { mediaIds } = req.body; // array de ids locales, en el orden deseado
+    await prisma.favorite.deleteMany({ where: { userId: req.userId } });
+    const creadas = await Promise.all(
+      (mediaIds || []).slice(0, 7).map((mediaId, index) =>
+        prisma.favorite.create({ data: { userId: req.userId, mediaId, orden: index } })
+      )
+    );
+    res.json(creadas);
+  } catch (error) {
+    console.error('ERROR EN PUT /favorites:', error);
+    res.status(500).json({ error: 'Error al guardar favoritos' });
+  }
+});
+
 // --- ACTUALIZAR MI ESTADO PERSONAL CON UNA PELÍCULA ---
 app.patch('/media/:id/status', requireAuth, async (req, res) => {
   try {

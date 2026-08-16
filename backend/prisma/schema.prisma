@@ -68,3 +68,12 @@ model ListItem {
 
   @@unique([listId, mediaId]) // No repetir la misma película en la misma lista
 }
+
+model Favorite {
+  id      Int @id @default(autoincrement())
+  userId  Int
+  mediaId Int
+  orden   Int
+
+  @@unique([userId, mediaId])
+}
