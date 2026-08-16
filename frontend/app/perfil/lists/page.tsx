@@ -11,6 +11,9 @@ export default function MisListas() {
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [creando, setCreando] = useState(false);
 
+  const [listaABorrar, setListaABorrar] = useState<{ id: number; nombre: string } | null>(null);
+  const [borrando, setBorrando] = useState(false);
+
   const cargarListas = () => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -30,13 +33,16 @@ export default function MisListas() {
   }, []);
 
   useEffect(() => {
-    if (!isModalOpen) return;
+    if (!isModalOpen && !listaABorrar) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsModalOpen(false);
+      if (e.key === 'Escape') {
+        setIsModalOpen(false);
+        if (!borrando) setListaABorrar(null);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isModalOpen]);
+  }, [isModalOpen, listaABorrar, borrando]);
 
   const crearLista = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,21 +66,26 @@ export default function MisListas() {
     setCreando(false);
   };
 
-  const borrarLista = async (id: number) => {
+  const confirmarBorrado = async () => {
+    if (!listaABorrar) return;
     const token = localStorage.getItem('token');
     if (!token) return;
-    if (!confirm('¿Borrar esta lista? Esta acción no se puede deshacer.')) return;
 
-    setLists((prev) => prev.filter((l) => l.id !== id)); // optimista
+    const id = listaABorrar.id;
+    setBorrando(true);
 
     try {
-      await fetch(`http://localhost:3001/lists/${id}`, {
+      const res = await fetch(`http://localhost:3001/lists/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!res.ok) throw new Error('fallo al borrar');
+      setLists((prev) => prev.filter((l) => l.id !== id));
+      setListaABorrar(null);
     } catch {
-      cargarListas(); // si falla, recargamos de verdad
+      alert('No se ha podido eliminar la lista. Inténtalo de nuevo.');
     }
+    setBorrando(false);
   };
 
   const listasFiltradas = lists.filter((l) =>
@@ -143,7 +154,7 @@ export default function MisListas() {
                     </Link>
 
                     <button
-                      onClick={() => borrarLista(list.id)}
+                      onClick={() => setListaABorrar({ id: list.id, nombre: list.nombre })}
                       className="absolute top-2 right-2 text-gray-500 hover:text-red-400 transition cursor-pointer opacity-0 group-hover:opacity-100 bg-black/40 rounded-full w-6 h-6 flex items-center justify-center"
                       title="Borrar lista"
                     >
@@ -187,6 +198,39 @@ export default function MisListas() {
                 Crear
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {listaABorrar && (
+        <div
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+          onClick={() => !borrando && setListaABorrar(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-gray-900 border border-gray-700 rounded-lg max-w-sm w-full text-white shadow-2xl p-6"
+          >
+            <h2 className="text-lg font-bold mb-2">¿Seguro que quieres eliminar esta lista?</h2>
+            <p className="text-sm text-gray-400 mb-6">
+              Se eliminará "{listaABorrar.nombre}" junto con todas las películas que contiene. Esta acción no se puede deshacer.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setListaABorrar(null)}
+                disabled={borrando}
+                className="px-4 py-2 rounded text-sm font-bold bg-[#2c3440] hover:bg-gray-600 transition cursor-pointer disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarBorrado}
+                disabled={borrando}
+                className="px-4 py-2 rounded text-sm font-bold bg-red-600 hover:bg-red-500 transition cursor-pointer disabled:opacity-50"
+              >
+                {borrando ? 'Eliminando...' : 'Eliminar'}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -821,6 +821,27 @@ app.post('/lists/:id/items', requireAuth, async (req, res) => {
   }
 });
 
+// --- BORRAR UNA LISTA ENTERA ---
+app.delete('/lists/:id', requireAuth, async (req, res) => {
+  try {
+    const listId = parseInt(req.params.id);
+
+    const list = await prisma.list.findUnique({ where: { id: listId } });
+    if (!list || list.userId !== req.userId) {
+      return res.status(404).json({ error: 'Lista no encontrada' });
+    }
+
+    // Borramos primero las películas que contiene (ListItem), luego la lista
+    await prisma.listItem.deleteMany({ where: { listId } });
+    await prisma.list.delete({ where: { id: listId } });
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN DELETE LIST:', error);
+    res.status(500).json({ error: 'Error al borrar la lista' });
+  }
+});
+
 // --- QUITAR UNA PELÍCULA DE UNA LISTA ---
 app.delete('/lists/:id/items/:mediaId', requireAuth, async (req, res) => {
   try {
