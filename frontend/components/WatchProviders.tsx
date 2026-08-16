@@ -1,15 +1,15 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { getRegion } from '@/lib/preferences';
 
 export default function WatchProviders({ tmdbId }: { tmdbId: number }) {
   const [data, setData] = useState<{ link: string | null; flatrate: any[]; rent: any[]; buy: any[] } | null>(null);
 
   useEffect(() => {
     if (!tmdbId) return;
-    fetch(`http://localhost:3001/tmdb/watch-providers/${tmdbId}?region=ES`)
-      .then((res) => res.json())
+    fetch(`http://localhost:3001/tmdb/watch-providers/${tmdbId}?region=${getRegion()}`).then((res) => res.json())
       .then(setData)
-      .catch(() => {});
+      .catch(() => { });
   }, [tmdbId]);
 
   if (!data || (data.flatrate.length === 0 && data.rent.length === 0 && data.buy.length === 0)) {
@@ -44,7 +44,7 @@ export default function WatchProviders({ tmdbId }: { tmdbId: number }) {
       {renderFila('Alquiler', data.rent)}
       {renderFila('Compra', data.buy)}
 
-{data.link ? (
+      {data.link ? (
         <a
           href={data.link}
           target="_blank"

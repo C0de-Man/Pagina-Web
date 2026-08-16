@@ -32,6 +32,16 @@ function requireAuth(req, res, next) {
   }
 }
 
+// --- IDIOMA / REGIÓN: el frontend los manda en cada petición (?language=&region=) ---
+// leídos de las preferencias guardadas del usuario (o localStorage si no ha iniciado sesión).
+// Si no llegan, caen a los valores por defecto de siempre.
+function getLang(req) {
+  return req.query.language || 'es-ES';
+}
+function getRegion(req) {
+  return req.query.region || 'ES';
+}
+
 // --- RUTA PARA OBTENER TODOS LOS MEDIOS ---
 app.get('/media', async (req, res) => {
   try {
@@ -93,7 +103,7 @@ app.get('/search', async (req, res) => {
   try {
     const searchQuery = req.query.q;
     if (!searchQuery) return res.status(400).json({ error: 'Falta término' });
-    const url = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(searchQuery)}&language=es-ES&api_key=${process.env.TMDB_API_KEY}`;
+    const url = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(searchQuery)}&language=${getLang(req)}&api_key=${process.env.TMDB_API_KEY}`;
     const response = await fetch(url);
     const data = await response.json();
     res.json(data.results);
@@ -107,7 +117,8 @@ app.post('/media/tmdb', async (req, res) => {
   try {
     const { tmdbId, tipo } = req.body;
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=es-ES`);
+    const lang = getLang(req);
+    const response = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=${lang}`);
     const data = await response.json();
 
     const backdropUrl = data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null;
@@ -117,6 +128,7 @@ app.post('/media/tmdb', async (req, res) => {
       data: {
         tmdbId: data.id,
         titulo: data.title || data.name,
+        tituloOriginal: data.original_title || data.original_name || data.title || data.name,
         tipo: tipo || "PELICULA",
         anio: data.release_date ? parseInt(data.release_date.split('-')[0]) : null,
         portada: posterUrl,
@@ -214,7 +226,7 @@ app.patch('/media/:id/poster', async (req, res) => {
 app.get('/tmdb/now_playing', async (req, res) => {
   try {
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/movie/now_playing?api_key=${apiKey}&language=es-ES&page=1`);
+    const response = await fetch(`https://api.themoviedb.org/3/movie/now_playing?api_key=${apiKey}&language=${getLang(req)}&page=1`);
     const data = await response.json();
     res.json(data.results);
   } catch (error) {
@@ -225,7 +237,7 @@ app.get('/tmdb/now_playing', async (req, res) => {
 app.get('/tmdb/popular', async (req, res) => {
   try {
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/movie/popular?api_key=${apiKey}&language=es-ES&page=1`);
+    const response = await fetch(`https://api.themoviedb.org/3/movie/popular?api_key=${apiKey}&language=${getLang(req)}&page=1`);
     const data = await response.json();
     res.json(data.results);
   } catch (error) {
@@ -237,7 +249,7 @@ app.get('/tmdb/popular', async (req, res) => {
 app.get('/tmdb/popular-historico', async (req, res) => {
   try {
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=es-ES&sort_by=vote_count.desc&page=1`);
+    const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&sort_by=vote_count.desc&page=1`);
     const data = await response.json();
     res.json(data.results || []);
   } catch (error) {
@@ -261,7 +273,7 @@ app.get('/tmdb/popular-historico/page/:page', async (req, res) => {
     let combined = [];
 
     for (let i = startTmdbPage; i <= endTmdbPage; i++) {
-      const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=es-ES&sort_by=vote_count.desc&page=${i}`);
+      const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&sort_by=vote_count.desc&page=${i}`);
       const data = await response.json();
       if (data.results) combined.push(...data.results);
     }
@@ -280,7 +292,7 @@ app.get('/tmdb/year/:year', async (req, res) => {
   try {
     const { year } = req.params;
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=es-ES&primary_release_year=${year}&sort_by=popularity.desc&page=1`);
+    const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&primary_release_year=${year}&sort_by=popularity.desc&page=1`);
     const data = await response.json();
     res.json(data.results || []);
   } catch (error) {
@@ -305,7 +317,7 @@ app.get('/tmdb/year/:year/page/:page', async (req, res) => {
     let combined = [];
 
     for (let i = startTmdbPage; i <= endTmdbPage; i++) {
-      const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=es-ES&primary_release_year=${year}&sort_by=popularity.desc&page=${i}`);
+      const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&primary_release_year=${year}&sort_by=popularity.desc&page=${i}`);
       const data = await response.json();
       if (data.results) combined.push(...data.results);
     }
@@ -356,7 +368,7 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
     const { tmdbId } = req.params;
     const apiKey = process.env.TMDB_API_KEY;
 
-    const movieRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=es-ES`);
+    const movieRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=${getLang(req)}`);
     const movieData = await movieRes.json();
 
     if (!movieData.belongs_to_collection) {
@@ -364,7 +376,7 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
     }
 
     const collectionId = movieData.belongs_to_collection.id;
-    const colRes = await fetch(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${apiKey}&language=es-ES`);
+    const colRes = await fetch(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${apiKey}&language=${getLang(req)}`);
     const colData = await colRes.json();
 
     const parts = colData.parts.sort((a, b) => new Date(a.release_date) - new Date(b.release_date));
@@ -384,7 +396,7 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
         const { followsImdb, followedByImdb } = await buscarOrdenNarrativoWikidata(extData.imdb_id);
 
         const buscarPeliculaPorImdb = async (imdb) => {
-          const findRes = await fetch(`https://api.themoviedb.org/3/find/${imdb}?api_key=${apiKey}&external_source=imdb_id&language=es-ES`);
+          const findRes = await fetch(`https://api.themoviedb.org/3/find/${imdb}?api_key=${apiKey}&external_source=imdb_id&language=${getLang(req)}`);
           const findData = await findRes.json();
           return findData.movie_results?.[0] || null;
         };
@@ -415,7 +427,7 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
     const { tmdbId } = req.params;
     const apiKey = process.env.TMDB_API_KEY;
     const response = await fetch(
-      `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=es-ES&append_to_response=credits`
+      `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=${getLang(req)}&append_to_response=credits`
     );
     const data = await response.json();
 
@@ -582,11 +594,34 @@ app.get('/media/:id', async (req, res) => {
       });
     }
 
+    const lang = getLang(req);
+    const apiKey = process.env.TMDB_API_KEY;
+
+    // El registro local (mediaItem.titulo / .sinopsis) se guardó en el idioma que estuviera
+    // activo la primera vez que alguien abrió esta ficha, y no se actualiza solo.
+    // Para que la ficha respete el idioma elegido AHORA, pedimos una versión fresca a TMDB
+    // en ese idioma y la superponemos, sin tocar lo que hay guardado en la base de datos
+    // (así el dato local sigue sirviendo de fallback si TMDB falla, y el slug/tituloOriginal
+    // nunca se ve afectado por este overlay).
+    let tituloMostrado = mediaItem.titulo;
+    let sinopsisMostrada = mediaItem.sinopsis;
+    if (mediaItem.tmdbId) {
+      try {
+        const liveRes = await fetch(`https://api.themoviedb.org/3/movie/${mediaItem.tmdbId}?api_key=${apiKey}&language=${lang}`);
+        const live = await liveRes.json();
+        if (live && !live.status_code) {
+          tituloMostrado = live.title || tituloMostrado;
+          sinopsisMostrada = live.overview || sinopsisMostrada;
+        }
+      } catch (e) {
+        // si TMDB falla, nos quedamos con lo que había en caché local
+      }
+    }
+
     let remakeOf = null;
     if (mediaItem.remakeOfTmdbId) {
       try {
-        const apiKey = process.env.TMDB_API_KEY;
-        const r = await fetch(`https://api.themoviedb.org/3/movie/${mediaItem.remakeOfTmdbId}?api_key=${apiKey}&language=es-ES`);
+        const r = await fetch(`https://api.themoviedb.org/3/movie/${mediaItem.remakeOfTmdbId}?api_key=${apiKey}&language=${lang}`);
         const original = await r.json();
         remakeOf = {
           tmdbId: mediaItem.remakeOfTmdbId,
@@ -598,7 +633,7 @@ app.get('/media/:id', async (req, res) => {
       }
     }
 
-    res.json({ ...mediaItem, remakeOf });
+    res.json({ ...mediaItem, titulo: tituloMostrado, sinopsis: sinopsisMostrada, remakeOf });
   } catch (error) {
     console.error('ERROR EN GET /media/:id:', error);
     res.status(500).json({ error: 'Error del servidor' });
@@ -652,6 +687,39 @@ app.patch('/auth/me/avatar', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('ERROR EN PATCH /auth/me/avatar:', error);
     res.status(500).json({ error: 'Error al actualizar el avatar' });
+  }
+});
+
+// --- ACTUALIZAR MIS PREFERENCIAS DE IDIOMA Y REGIÓN ---
+// idioma: código ISO 639-1 + país tipo "en-US" (formato que espera TMDB en el parámetro `language`)
+// region: código ISO 3166-1 tipo "US" (formato que espera TMDB en `watch/providers` y `discover`)
+app.patch('/auth/me/preferences', requireAuth, async (req, res) => {
+  try {
+    const { idioma, region } = req.body;
+
+    const data = {};
+    if (idioma) {
+      if (!/^[a-z]{2}-[A-Z]{2}$/.test(idioma)) {
+        return res.status(400).json({ error: 'Formato de idioma inválido (ej: en-US)' });
+      }
+      data.idioma = idioma;
+    }
+    if (region) {
+      if (!/^[A-Z]{2}$/.test(region)) {
+        return res.status(400).json({ error: 'Formato de región inválido (ej: US)' });
+      }
+      data.region = region;
+    }
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'Nada que actualizar' });
+    }
+
+    const user = await prisma.user.update({ where: { id: req.userId }, data });
+    const { password: _, ...userSinPassword } = user;
+    res.json(userSinPassword);
+  } catch (error) {
+    console.error('ERROR EN PATCH /auth/me/preferences:', error);
+    res.status(500).json({ error: 'Error al actualizar las preferencias' });
   }
 });
 

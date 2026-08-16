@@ -19,6 +19,7 @@ model Media {
   id        Int       @id @default(autoincrement())
   tmdbId    Int?
   titulo    String
+  tituloOriginal String? // original_title de TMDB, no cambia con el idioma. Base del slug de la URL.
   tipo      MediaType
   anio      Int?
   portada   String?
@@ -35,6 +36,8 @@ model User {
   username  String   @unique
   password  String
   avatar    String?
+  idioma    String   @default("es-ES") // idioma preferido: título/sinopsis/cast en las peticiones a TMDB
+  region    String   @default("ES")    // región preferida: usada para plataformas de streaming (JustWatch vía TMDB)
   createdAt DateTime @default(now())
 }
 

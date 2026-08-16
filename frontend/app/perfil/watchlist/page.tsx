@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { urlFicha } from '@/lib/slug';
 
 export default function Watchlist() {
   const [items, setItems] = useState<any[]>([]);
@@ -33,7 +34,7 @@ export default function Watchlist() {
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
             {items.map((item) => (
-              <Link key={item.id} href={`/media/${item.id}`} className="group relative block">
+              <Link key={item.id} href={urlFicha(item)} className="group relative block">
                 {item.portada ? (
                   <img
                     src={item.portada}

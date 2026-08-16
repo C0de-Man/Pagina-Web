@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { withLangRegion } from '@/lib/preferences';
 
 export default function FavoritePickerModal({
   onClose,
@@ -19,7 +20,7 @@ export default function FavoritePickerModal({
     }
     const timeout = setTimeout(() => {
       setLoading(true);
-      fetch(`http://localhost:3001/search?q=${encodeURIComponent(query)}`)
+      fetch(withLangRegion(`http://localhost:3001/search?q=${encodeURIComponent(query)}`))
         .then((res) => res.json())
         .then((data) => setResultados(Array.isArray(data) ? data.slice(0, 8) : []))
         .catch(() => setResultados([]))

@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { urlFicha } from '@/lib/slug';
 
 export default function Perfil() {
   const [favoritos, setFavoritos] = useState<any[]>([]);
@@ -44,7 +45,7 @@ export default function Perfil() {
   }, []);
 
   const renderCard = (item: any) => (
-    <Link key={item.id} href={`/media/${item.id}`} className="flex-shrink-0 w-32 md:w-36 group relative">
+    <Link key={item.id} href={urlFicha(item)} className="flex-shrink-0 w-32 md:w-36 group relative">
       {item.portada ? (
         <img
           src={item.portada}

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import StarRating from '@/components/StarRating';
+import { urlFicha } from '@/lib/slug';
 
 export default function MisPeliculas() {
   const [peliculas, setPeliculas] = useState<any[]>([]);
@@ -40,7 +41,7 @@ export default function MisPeliculas() {
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
             {peliculas.map((item) => (
               <div key={item.id} className="flex flex-col gap-1.5">
-                <Link href={`/media/${item.id}`} className="group relative block">
+                <Link href={urlFicha(item)} className="group relative block">
                   {item.portada ? (
                     <img
                       src={item.portada}
