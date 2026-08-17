@@ -4,9 +4,11 @@ import AddToListModal from '@/components/AddToListModal';
 import GameImagesModal from '@/components/GameImagesModal';
 import GameTabs from '@/components/GameTabs';
 import GameCollectionLinks from '@/components/GameCollectionLinks';
+import GameRemakeOfBadge from '@/components/GameRemakeOfBadge';
 import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+
 
 export default async function GameDetail({ params }: { params: Promise<{ slug: string }> }) {
   const resolvedParams = await params;
@@ -68,6 +70,8 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
               <span className="text-lg">{media.anio}</span>
               <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{media.tipo}</span>
             </div>
+
+            <GameRemakeOfBadge igdbId={media.igdbId} />
 
             <GameTabs sinopsis={media.sinopsis} detalles={detalles} igdbId={media.igdbId} />
           </div>

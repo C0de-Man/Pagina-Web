@@ -86,9 +86,8 @@ export default function GameCollectionLinks({
                         className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80"
                     />
                 )}
-                <p className="mt-1 text-sm text-gray-400">{etiqueta}</p>
-                <p className={`text-sm font-medium ${esActual ? '' : 'group-hover:underline'}`}>
-                    {navegandoA === juego.igdbId ? 'Cargando...' : juego.titulo}
+                <p className="mt-1 text-sm text-gray-400 text-center">
+                    {navegandoA === juego.igdbId ? 'Cargando...' : etiqueta}
                 </p>
             </button>
         );
@@ -97,9 +96,17 @@ export default function GameCollectionLinks({
     return (
         <>
             <div className="mt-4 bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl">
-                <div className="grid grid-cols-2 gap-4">
-                    {data.prequel && <Miniatura juego={data.prequel} etiqueta="Precuela" />}
-                    {data.sequel && <Miniatura juego={data.sequel} etiqueta="Secuela" />}
+                <div className={`flex justify-center gap-4 ${data.prequel && data.sequel ? '' : ''}`}>
+                    {data.prequel && (
+                        <div className={data.sequel ? 'w-1/2' : 'w-1/2 max-w-[200px]'}>
+                            <Miniatura juego={data.prequel} etiqueta="Precuela" />
+                        </div>
+                    )}
+                    {data.sequel && (
+                        <div className={data.prequel ? 'w-1/2' : 'w-1/2 max-w-[200px]'}>
+                            <Miniatura juego={data.sequel} etiqueta="Secuela" />
+                        </div>
+                    )}
                 </div>
 
                 <button
@@ -133,8 +140,8 @@ export default function GameCollectionLinks({
                             <button
                                 onClick={() => setTabModal('juegos')}
                                 className={`pb-3 text-sm font-semibold transition cursor-pointer ${tabModal === 'juegos'
-                                        ? 'text-white border-b-2 border-white'
-                                        : 'text-gray-500 hover:text-gray-300'
+                                    ? 'text-white border-b-2 border-white'
+                                    : 'text-gray-500 hover:text-gray-300'
                                     }`}
                             >
                                 Juegos
@@ -143,8 +150,8 @@ export default function GameCollectionLinks({
                                 <button
                                     onClick={() => setTabModal('cancelados')}
                                     className={`pb-3 text-sm font-semibold transition cursor-pointer ${tabModal === 'cancelados'
-                                            ? 'text-white border-b-2 border-white'
-                                            : 'text-gray-500 hover:text-gray-300'
+                                        ? 'text-white border-b-2 border-white'
+                                        : 'text-gray-500 hover:text-gray-300'
                                         }`}
                                 >
                                     Cancelados
@@ -169,8 +176,8 @@ export default function GameCollectionLinks({
                                                 src={g.portada}
                                                 alt={g.titulo}
                                                 className={`w-full aspect-[2/3] object-cover rounded transition ${esActual
-                                                        ? 'ring-2 ring-blue-500'
-                                                        : 'group-hover:opacity-80 group-hover:scale-[1.02]'
+                                                    ? 'ring-2 ring-blue-500'
+                                                    : 'group-hover:opacity-80 group-hover:scale-[1.02]'
                                                     }`}
                                             />
                                         )}

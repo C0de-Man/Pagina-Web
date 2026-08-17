@@ -71,6 +71,48 @@ app.get('/igdb/details/:igdbId', async (req, res) => {
   }
 });
 
+// --- DE QUÉ JUEGO ORIGINAL ES REMAKE ---
+// IGDB no guarda "esto es un remake de X" en el propio remake; lo guarda al
+// revés, en el juego ORIGINAL, como un array remakes: [ids]. Así que buscamos
+// qué juego tiene a igdbId dentro de su lista de remakes.
+app.get('/igdb/remake-of/:igdbId', async (req, res) => {
+  try {
+    const { igdbId } = req.params;
+    const token = await getIgdbToken();
+    const headers = {
+      'Client-ID': process.env.IGDB_CLIENT_ID,
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/json',
+      'Content-Type': 'text/plain'
+    };
+
+    const body = `fields name, cover.url, first_release_date; where remakes = (${igdbId});`;
+    const response = await fetch('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers,
+      body
+    });
+    const data = await response.json();
+    const original = data[0];
+
+    if (!original) return res.json(null);
+
+    res.json({
+      igdbId: original.id,
+      titulo: original.name,
+      anio: original.first_release_date
+        ? new Date(original.first_release_date * 1000).getFullYear()
+        : null,
+      portada: original.cover?.url
+        ? `https:${original.cover.url.replace('t_thumb', 't_cover_big')}`
+        : null,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/remake-of/:igdbId:', error);
+    res.status(500).json({ error: 'Error al buscar el juego original' });
+  }
+});
+
 // --- BUSCAR JUEGOS EN IGDB ---
 app.get('/igdb/search', async (req, res) => {
   try {
