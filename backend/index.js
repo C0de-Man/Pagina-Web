@@ -1439,29 +1439,47 @@ app.get('/media/:id/rating', async (req, res) => {
     const suma = ratings.reduce((acc, r) => acc + r.rating, 0);
     const count = ratings.length;
 
-    let tmdbAvg = null;
-    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true } });
+    let externaAvg = null;
+    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true, igdbId: true } });
 
     if (media?.tmdbId) {
       try {
         const apiKey = process.env.TMDB_API_KEY;
         const tmdbRes = await fetch(`https://api.themoviedb.org/3/movie/${media.tmdbId}?api_key=${apiKey}`);
         const tmdbData = await tmdbRes.json();
-        if (tmdbData.vote_average) tmdbAvg = tmdbData.vote_average;
+        if (tmdbData.vote_average) externaAvg = tmdbData.vote_average;
+      } catch (e) { }
+    } else if (media?.igdbId) {
+      try {
+        const token = await getIgdbToken();
+        const body = `fields total_rating; where id = ${media.igdbId};`;
+        const igdbRes = await fetch('https://api.igdb.com/v4/games', {
+          method: 'POST',
+          headers: {
+            'Client-ID': process.env.IGDB_CLIENT_ID,
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+            'Content-Type': 'text/plain'
+          },
+          body
+        });
+        const igdbData = await igdbRes.json();
+        // IGDB va de 0 a 100; lo pasamos a la misma escala 0-10 que usa TMDB.
+        if (igdbData[0]?.total_rating) externaAvg = igdbData[0].total_rating / 10;
       } catch (e) { }
     }
 
-    if (tmdbAvg === null && count === 0) {
+    if (externaAvg === null && count === 0) {
       return res.json({ average: null, count: 0 });
     }
 
-    const pesoBase = tmdbAvg !== null ? 1 : 0;
-    const sumaTotal = suma + (tmdbAvg !== null ? tmdbAvg : 0);
+    const pesoBase = externaAvg !== null ? 1 : 0;
+    const sumaTotal = suma + (externaAvg !== null ? externaAvg : 0);
     const totalVotos = count + pesoBase;
 
     const average = sumaTotal / totalVotos;
 
-    res.json({ average: Math.round(average * 10) / 10, count, tmdbAvg });
+    res.json({ average: Math.round(average * 10) / 10, count, tmdbAvg: externaAvg });
   } catch (error) {
     console.error('ERROR EN GET RATING:', error);
     res.status(500).json({ error: 'Error al calcular la nota media' });
