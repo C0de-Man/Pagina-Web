@@ -167,6 +167,24 @@ app.post('/media/igdb', async (req, res) => {
       ? `https:${juego.cover.url.replace('t_thumb', 't_cover_big')}`
       : null;
 
+    // IGDB no trae banners tipo "hero" (solo la carátula oficial), así que para el banner
+    // por defecto pedimos a SteamGridDB y nos quedamos con el primer resultado.
+    // Si no encuentra nada o falla la petición, el juego se guarda igualmente sin banner
+    // (el usuario siempre puede elegir uno a mano con "Cambiar carátula / banner").
+    let backdropUrl = null;
+    try {
+      const sgdbId = await buscarJuegoEnSteamGridDB(juego.name);
+      if (sgdbId) {
+        const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}`, {
+          headers: { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` }
+        });
+        const dataHeroes = await resHeroes.json();
+        backdropUrl = dataHeroes?.data?.[0]?.url || null;
+      }
+    } catch (e) {
+      console.error('No se pudo obtener banner de SteamGridDB para', juego.name, e);
+    }
+
     const nuevoMedia = await prisma.media.create({
       data: {
         igdbId: juego.id,
@@ -177,7 +195,8 @@ app.post('/media/igdb', async (req, res) => {
           ? new Date(juego.first_release_date * 1000).getFullYear()
           : null,
         portada: portadaUrl,
-        sinopsis: juego.summary || null, // guardado en inglés, el original de IGDB
+        backdrop: backdropUrl,
+        sinopsis: juego.summary || null,
         sinopsisTraducciones: {}
       }
     });
