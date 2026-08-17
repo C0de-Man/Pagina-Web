@@ -424,7 +424,7 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
       return res.json({ collection: null, games: [], prequel: null, sequel: null });
     }
 
-// game_type es el campo "vivo" de IGDB (sustituye al antiguo "category",
+    // game_type es el campo "vivo" de IGDB (sustituye al antiguo "category",
     // que en muchas entradas viene vacío). Excluimos DLCs (1), expansiones (2),
     // bundles (3), expansiones independientes (4), mods (5), episodios/
     // temporadas (6/7), packs (13) y updates (14). También excluimos "port" (11),
@@ -491,12 +491,38 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
 
 // --- BUSCAR CARÁTULAS Y BANNERS EN STEAMGRIDDB ---
 // SteamGridDB tiene muchas más opciones de carátula por juego que IGDB (que solo da una oficial).
-async function buscarJuegoEnSteamGridDB(nombre) {
+async function buscarJuegoEnSteamGridDB(nombre, anio) {
   const res = await fetch(`https://www.steamgriddb.com/api/v2/search/autocomplete/${encodeURIComponent(nombre)}`, {
     headers: { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` }
   });
   const data = await res.json();
-  return data?.data?.[0]?.id || null; // el primer resultado suele ser el más relevante
+  const candidatos = (data?.data || []).slice(0, 5);
+
+  if (candidatos.length === 0) return null;
+  if (candidatos.length === 1 || !anio) return candidatos[0].id;
+
+  // Cuando hay varios juegos con el mismo nombre (remakes/reboots, como
+  // "Marathon" 1994 vs "Marathon" 2026), comprobamos el año de lanzamiento de
+  // cada candidato en SteamGridDB y nos quedamos con el que coincide con el
+  // año que ya tenemos guardado para este juego.
+  const detalles = await Promise.all(
+    candidatos.map((c) =>
+      fetch(`https://www.steamgriddb.com/api/v2/games/id/${c.id}`, {
+        headers: { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` }
+      }).then((r) => r.json()).catch(() => null)
+    )
+  );
+
+  // Comparación con ±1 año de margen: es habitual que SteamGridDB e IGDB no
+  // coincidan exactamente en la fecha de lanzamiento de juegos muy nuevos o
+  // todavía sin fecha cerrada (uno la tiene como "anunciado 2025", el otro
+  // como "2026" tras un retraso).
+  const coincidencia = detalles.find((d) => {
+    const anioSgdb = d?.data?.release_date ? new Date(d.data.release_date * 1000).getFullYear() : null;
+    return anioSgdb !== null && Math.abs(anioSgdb - anio) <= 1;
+  });
+
+  return coincidencia ? coincidencia.data.id : candidatos[0].id;
 }
 
 app.get('/steamgriddb/images/:mediaId', async (req, res) => {
@@ -505,7 +531,7 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
     const media = await prisma.media.findUnique({ where: { id: mediaId } });
     if (!media) return res.status(404).json({ error: 'No encontrado' });
 
-    const sgdbId = await buscarJuegoEnSteamGridDB(media.tituloOriginal || media.titulo);
+    const sgdbId = await buscarJuegoEnSteamGridDB(media.tituloOriginal || media.titulo, media.anio);
     if (!sgdbId) return res.json({ covers: [], heroes: [] });
 
     const headers = { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` };
