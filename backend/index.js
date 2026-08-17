@@ -263,10 +263,10 @@ async function getIgdbGameCollection(igdbId) {
 
   // IGDB: un juego puede tener 0, 1 o varias "collections" (sagas).
   // Tomamos la primera que tenga más de 1 juego (evita sagas vacías/ruido).
-  const query = `
+const query = `
     fields name, collections.name, collections.games.name, collections.games.slug,
            collections.games.cover.url, collections.games.first_release_date,
-           collections.games.id;
+           collections.games.id, collections.games.game_type, collections.games.status;
     where id = ${igdbId};
   `;
 
@@ -307,7 +307,7 @@ async function getIgdbDlcsUpdates(igdbId) {
   // DLCs y expansiones: se piden como relación DIRECTA del juego principal
   // (campos dlcs / expansions), que IGDB rellena de forma mucho más fiable
   // que el campo inverso parent_game.
-const queryPrincipal = `
+  const queryPrincipal = `
     fields dlcs.name, dlcs.cover.url, dlcs.first_release_date,
            expansions.name, expansions.cover.url, expansions.first_release_date;
     where id = ${igdbId};
@@ -335,7 +335,7 @@ const queryPrincipal = `
     resUpdates.json(),
   ]);
 
-const arreglar = (g) => ({
+  const arreglar = (g) => ({
     igdbId: g.id,
     titulo: g.name,
     portada: g.cover?.url
@@ -382,7 +382,24 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
       return res.json({ collection: null, games: [], prequel: null, sequel: null });
     }
 
-    const games = collection.games
+// game_type es el campo "vivo" de IGDB (sustituye al antiguo "category",
+    // que en muchas entradas viene vacío). Excluimos DLCs (1), expansiones (2),
+    // bundles (3), expansiones independientes (4), mods (5), episodios/
+    // temporadas (6/7), packs (13) y updates (14).
+    const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 13, 14];
+    const gamesFiltrados = collection.games.filter((g) => !TIPOS_EXCLUIDOS.includes(g.game_type));
+
+    // Si algún juego de la saga ya está en tu base de datos local y tiene una
+    // carátula personalizada, la usamos en vez de la de IGDB por defecto.
+    const locales = await prisma.media.findMany({
+      where: { igdbId: { in: gamesFiltrados.map((g) => g.id) } },
+      select: { igdbId: true, portada: true },
+    });
+    const portadaLocalPorIgdbId = Object.fromEntries(
+      locales.filter((l) => l.portada).map((l) => [l.igdbId, l.portada])
+    );
+
+    const todos = gamesFiltrados
       .map((g) => ({
         igdbId: g.id,
         titulo: g.name,
@@ -390,12 +407,18 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
         anio: g.first_release_date
           ? new Date(g.first_release_date * 1000).getFullYear()
           : null,
-        fechaLanzamiento: g.first_release_date || 0,
-        portada: g.cover?.url
-          ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}`
-          : null,
+        // Sin fecha (aún no anunciado) → Infinity, así se va al final al ordenar ascendente.
+        fechaLanzamiento: g.first_release_date || Infinity,
+        portada:
+          portadaLocalPorIgdbId[g.id] ||
+          (g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null),
+        // status === 6 es "cancelled" en IGDB.
+        cancelado: g.status === 6,
       }))
       .sort((a, b) => a.fechaLanzamiento - b.fechaLanzamiento);
+
+    const games = todos.filter((g) => !g.cancelado);
+    const cancelados = todos.filter((g) => g.cancelado);
 
     const indiceActual = games.findIndex((g) => g.igdbId === igdbId);
     const prequel = indiceActual > 0 ? games[indiceActual - 1] : null;
@@ -407,10 +430,12 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
     res.json({
       collection: { nombre: collection.name },
       games,
+      cancelados,
       indiceActual,
       prequel,
       sequel,
     });
+    
   } catch (err) {
     console.error('ERROR EN GET /igdb/collection/:igdbId:', err);
     res.status(500).json({ error: 'Error al obtener la colección de IGDB' });
