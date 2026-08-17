@@ -35,6 +35,42 @@ async function getIgdbToken() {
   return igdbToken;
 }
 
+// --- DETALLES DE UN JUEGO: plataformas, desarrollador, distribuidora, géneros ---
+app.get('/igdb/details/:igdbId', async (req, res) => {
+  try {
+    const { igdbId } = req.params;
+    const token = await getIgdbToken();
+
+    const body = `fields platforms.name, genres.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher; where id = ${igdbId};`;
+    const response = await fetch('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers: {
+        'Client-ID': process.env.IGDB_CLIENT_ID,
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'text/plain'
+      },
+      body
+    });
+    const data = await response.json();
+    const juego = data[0];
+
+    if (!juego) return res.json({ plataformas: [], generos: [], desarrolladoras: [], distribuidoras: [] });
+
+    const companies = juego.involved_companies || [];
+
+    res.json({
+      plataformas: (juego.platforms || []).map(p => p.name),
+      generos: (juego.genres || []).map(g => g.name),
+      desarrolladoras: companies.filter(c => c.developer).map(c => c.company.name),
+      distribuidoras: companies.filter(c => c.publisher).map(c => c.company.name),
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/details:', error);
+    res.status(500).json({ error: 'Error al obtener detalles del juego' });
+  }
+});
+
 // --- BUSCAR JUEGOS EN IGDB ---
 app.get('/igdb/search', async (req, res) => {
   try {

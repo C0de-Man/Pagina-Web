@@ -2,6 +2,7 @@ import RatingWidget from '@/components/RatingWidget';
 import ActionButtons from '@/components/ActionButtons';
 import AddToListModal from '@/components/AddToListModal';
 import GameImagesModal from '@/components/GameImagesModal';
+import GameTabs from '@/components/GameTabs';
 import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -19,6 +20,12 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
 
   const res = await fetch(`http://localhost:3001/media/${id}?language=${idioma}`, { cache: 'no-store' });
   const media = await res.json();
+
+  let detalles: any = null;
+  if (media.igdbId) {
+    const resDetalles = await fetch(`http://localhost:3001/igdb/details/${media.igdbId}`, { cache: 'no-store' });
+    detalles = await resDetalles.json();
+  }
 
   if (!media || media.error) {
     return <div className="p-8 text-white text-center min-h-screen bg-gray-950 flex items-center justify-center">Medio no encontrado</div>;
@@ -61,7 +68,7 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
               <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{media.tipo}</span>
             </div>
 
-            <p className="text-gray-300 leading-relaxed text-base">{media.sinopsis}</p>
+            <GameTabs sinopsis={media.sinopsis} detalles={detalles} />
           </div>
 
           <div className="flex-shrink-0 w-full md:w-72 pt-24 md:pt-32">
