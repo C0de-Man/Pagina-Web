@@ -3,6 +3,7 @@ import ActionButtons from '@/components/ActionButtons';
 import AddToListModal from '@/components/AddToListModal';
 import GameImagesModal from '@/components/GameImagesModal';
 import GameTabs from '@/components/GameTabs';
+import GameCollectionLinks from '@/components/GameCollectionLinks';
 import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -86,6 +87,10 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
 
               <RatingWidget mediaId={media.id} />
             </div>
+
+            {media.igdbId && (
+              <GameCollectionLinks igdbId={media.igdbId} currentMediaIgdbId={media.igdbId} />
+            )}
           </div>
 
         </div>

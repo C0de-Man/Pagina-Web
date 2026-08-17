@@ -258,6 +258,92 @@ async function traducirTexto(texto, idiomaDestino) {
   }
 }
 
+async function getIgdbGameCollection(igdbId) {
+  const token = await getIgdbToken();
+
+  // IGDB: un juego puede tener 0, 1 o varias "collections" (sagas).
+  // Tomamos la primera que tenga más de 1 juego (evita sagas vacías/ruido).
+  const query = `
+    fields name, collections.name, collections.games.name, collections.games.slug,
+           collections.games.cover.url, collections.games.first_release_date,
+           collections.games.id;
+    where id = ${igdbId};
+  `;
+
+  const response = await fetch('https://api.igdb.com/v4/games', {
+    method: 'POST',
+    headers: {
+      'Client-ID': process.env.IGDB_CLIENT_ID,
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'text/plain',
+    },
+    body: query,
+  });
+
+  if (!response.ok) {
+    throw new Error(`IGDB respondió ${response.status}`);
+  }
+
+  const data = await response.json();
+  const collections = data[0]?.collections || [];
+
+  // Preferimos una colección con más de un juego; si no hay, devolvemos null.
+  const mejorColeccion = collections
+    .filter((c) => (c.games?.length || 0) > 1)
+    .sort((a, b) => (b.games?.length || 0) - (a.games?.length || 0))[0];
+
+  return mejorColeccion || null;
+}
+
+// --- SAGA DE UN VIDEOJUEGO (precuela/secuela + colección completa) ---
+app.get('/igdb/collection/:igdbId', async (req, res) => {
+  try {
+    const igdbId = parseInt(req.params.igdbId, 10);
+    if (Number.isNaN(igdbId)) {
+      return res.status(400).json({ error: 'igdbId inválido' });
+    }
+
+    const collection = await getIgdbGameCollection(igdbId);
+
+    if (!collection || !collection.games) {
+      return res.json({ collection: null, games: [], prequel: null, sequel: null });
+    }
+
+    const games = collection.games
+      .map((g) => ({
+        igdbId: g.id,
+        titulo: g.name,
+        slug: g.slug,
+        anio: g.first_release_date
+          ? new Date(g.first_release_date * 1000).getFullYear()
+          : null,
+        fechaLanzamiento: g.first_release_date || 0,
+        portada: g.cover?.url
+          ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}`
+          : null,
+      }))
+      .sort((a, b) => a.fechaLanzamiento - b.fechaLanzamiento);
+
+    const indiceActual = games.findIndex((g) => g.igdbId === igdbId);
+    const prequel = indiceActual > 0 ? games[indiceActual - 1] : null;
+    const sequel =
+      indiceActual >= 0 && indiceActual < games.length - 1
+        ? games[indiceActual + 1]
+        : null;
+
+    res.json({
+      collection: { nombre: collection.name },
+      games,
+      indiceActual,
+      prequel,
+      sequel,
+    });
+  } catch (err) {
+    console.error('ERROR EN GET /igdb/collection/:igdbId:', err);
+    res.status(500).json({ error: 'Error al obtener la colección de IGDB' });
+  }
+});
+
 // --- BUSCAR CARÁTULAS Y BANNERS EN STEAMGRIDDB ---
 // SteamGridDB tiene muchas más opciones de carátula por juego que IGDB (que solo da una oficial).
 async function buscarJuegoEnSteamGridDB(nombre) {
