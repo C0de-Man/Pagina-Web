@@ -27,6 +27,8 @@ model Media {
   sinopsis  String?
   remakeOfTmdbId Int?
   remakeChecked  Boolean @default(false)
+  igdbId    Int?
+  sinopsisTraducciones Json? // caché: { "es-ES": "texto ya traducido", "fr-FR": "..." }
   createdAt DateTime  @default(now())
 }
 

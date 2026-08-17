@@ -15,6 +15,128 @@ const prisma = new PrismaClient({ adapter });
 
 const PORT = 3001;
 
+// --- TOKEN DE IGDB (vía Twitch): se pide una vez y se reutiliza hasta que caduca ---
+let igdbToken = null;
+let igdbTokenExpira = 0;
+
+async function getIgdbToken() {
+  if (igdbToken && Date.now() < igdbTokenExpira) {
+    return igdbToken; // seguimos teniendo uno válido, no pedimos otro
+  }
+
+  const url = `https://id.twitch.tv/oauth2/token?client_id=${process.env.IGDB_CLIENT_ID}&client_secret=${process.env.IGDB_CLIENT_SECRET}&grant_type=client_credentials`;
+  const res = await fetch(url, { method: 'POST' });
+  const data = await res.json();
+
+  igdbToken = data.access_token;
+  // Restamos 60 segundos de margen por seguridad antes de que caduque de verdad
+  igdbTokenExpira = Date.now() + (data.expires_in - 60) * 1000;
+
+  return igdbToken;
+}
+
+// --- BUSCAR JUEGOS EN IGDB ---
+app.get('/igdb/search', async (req, res) => {
+  try {
+    const searchQuery = req.query.q;
+    if (!searchQuery) return res.status(400).json({ error: 'Falta término' });
+
+    const token = await getIgdbToken();
+
+    const body = `search "${searchQuery}"; fields name,cover.url,first_release_date,summary; limit 20;`;
+
+    const response = await fetch('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers: {
+        'Client-ID': process.env.IGDB_CLIENT_ID,
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'text/plain'
+      },
+      body
+    });
+
+    const data = await response.json();
+
+    // IGDB devuelve las URLs sin "https:" y en tamaño miniatura (t_thumb) — las arreglamos aquí
+    const arreglados = (data || []).map(juego => ({
+      ...juego,
+      cover: juego.cover ? {
+        ...juego.cover,
+        url: `https:${juego.cover.url.replace('t_thumb', 't_cover_big')}`
+      } : null
+    }));
+
+    res.json(arreglados);
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/search:', error);
+    res.status(500).json({ error: 'Error al buscar en IGDB' });
+  }
+});
+
+// --- TRADUCTOR AUTOMÁTICO (MyMemory, gratis, sin clave) ---
+// Solo se usa para juegos: es la única fuente de texto que no tenemos en varios idiomas de origen.
+async function traducirTexto(texto, idiomaDestino) {
+  if (!texto) return texto;
+  try {
+    const destino = idiomaDestino.split('-')[0]; // "es-ES" -> "es"
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(texto)}&langpair=en|${destino}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return data.responseData?.translatedText || texto;
+  } catch (e) {
+    console.error('Error al traducir con MyMemory:', e);
+    return texto; // si falla, nos quedamos con el original en inglés
+  }
+}
+
+// --- GUARDAR UN JUEGO DESDE IGDB ---
+app.post('/media/igdb', async (req, res) => {
+  try {
+    const { igdbId } = req.body;
+    const token = await getIgdbToken();
+
+    const body = `fields name,cover.url,first_release_date,summary; where id = ${igdbId};`;
+    const response = await fetch('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers: {
+        'Client-ID': process.env.IGDB_CLIENT_ID,
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'text/plain'
+      },
+      body
+    });
+    const data = await response.json();
+    const juego = data[0];
+    if (!juego) return res.status(404).json({ error: 'Juego no encontrado en IGDB' });
+
+    const portadaUrl = juego.cover
+      ? `https:${juego.cover.url.replace('t_thumb', 't_cover_big')}`
+      : null;
+
+    const nuevoMedia = await prisma.media.create({
+      data: {
+        igdbId: juego.id,
+        titulo: juego.name,
+        tituloOriginal: juego.name,
+        tipo: 'VIDEOJUEGO',
+        anio: juego.first_release_date
+          ? new Date(juego.first_release_date * 1000).getFullYear()
+          : null,
+        portada: portadaUrl,
+        sinopsis: juego.summary || null, // guardado en inglés, el original de IGDB
+        sinopsisTraducciones: {}
+      }
+    });
+
+    res.json(nuevoMedia);
+  } catch (error) {
+    console.error('ERROR EN POST /media/igdb:', error);
+    res.status(500).json({ error: 'Error al guardar el juego' });
+  }
+});
+
 // --- MIDDLEWARE: comprueba el token y añade req.userId ---
 function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -615,6 +737,28 @@ app.get('/media/:id', async (req, res) => {
         }
       } catch (e) {
         // si TMDB falla, nos quedamos con lo que había en caché local
+      }
+    }
+
+    // Para juegos: traducimos el resumen (viene de IGDB, siempre en inglés) al idioma elegido.
+    // Se traduce solo la primera vez por idioma, y se guarda en caché para no volver a llamar
+    // al traductor cada vez que se abre la ficha.
+    if (mediaItem.tipo === 'VIDEOJUEGO' && mediaItem.sinopsis) {
+      if (lang.startsWith('en')) {
+        sinopsisMostrada = mediaItem.sinopsis; // ya está en inglés, el idioma original
+      } else {
+        const cache = mediaItem.sinopsisTraducciones || {};
+        if (cache[lang]) {
+          sinopsisMostrada = cache[lang];
+        } else {
+          const traducido = await traducirTexto(mediaItem.sinopsis, lang);
+          sinopsisMostrada = traducido;
+          const nuevaCache = { ...cache, [lang]: traducido };
+          mediaItem = await prisma.media.update({
+            where: { id: idParam },
+            data: { sinopsisTraducciones: nuevaCache }
+          });
+        }
       }
     }
 
