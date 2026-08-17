@@ -103,6 +103,45 @@ async function traducirTexto(texto, idiomaDestino) {
   }
 }
 
+// --- BUSCAR CARÁTULAS Y BANNERS EN STEAMGRIDDB ---
+// SteamGridDB tiene muchas más opciones de carátula por juego que IGDB (que solo da una oficial).
+async function buscarJuegoEnSteamGridDB(nombre) {
+  const res = await fetch(`https://www.steamgriddb.com/api/v2/search/autocomplete/${encodeURIComponent(nombre)}`, {
+    headers: { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` }
+  });
+  const data = await res.json();
+  return data?.data?.[0]?.id || null; // el primer resultado suele ser el más relevante
+}
+
+app.get('/steamgriddb/images/:mediaId', async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.mediaId);
+    const media = await prisma.media.findUnique({ where: { id: mediaId } });
+    if (!media) return res.status(404).json({ error: 'No encontrado' });
+
+    const sgdbId = await buscarJuegoEnSteamGridDB(media.tituloOriginal || media.titulo);
+    if (!sgdbId) return res.json({ covers: [], heroes: [] });
+
+    const headers = { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` };
+
+    // "grids" en formato vertical (carátula tipo póster) = dimensiones 600x900
+    const resCovers = await fetch(`https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?dimensions=600x900`, { headers });
+    const dataCovers = await resCovers.json();
+
+    // "heroes" = imagen ancha tipo banner
+    const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}`, { headers });
+    const dataHeroes = await resHeroes.json();
+
+    res.json({
+      covers: (dataCovers?.data || []).map(g => g.url),
+      heroes: (dataHeroes?.data || []).map(h => h.url)
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /steamgriddb/images/:mediaId:', error);
+    res.status(500).json({ error: 'Error al buscar imágenes en SteamGridDB' });
+  }
+});
+
 // --- GUARDAR UN JUEGO DESDE IGDB ---
 app.post('/media/igdb', async (req, res) => {
   try {
@@ -354,6 +393,20 @@ app.patch('/media/:id/poster', async (req, res) => {
     res.json(updatedMedia);
   } catch (error) {
     res.status(500).json({ error: "Error al actualizar la portada" });
+  }
+});
+
+app.patch('/media/:id/backdrop', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newBackdropUrl } = req.body;
+    const updatedMedia = await prisma.media.update({
+      where: { id: parseInt(id) },
+      data: { backdrop: newBackdropUrl }
+    });
+    res.json(updatedMedia);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al actualizar el banner' });
   }
 });
 
@@ -761,7 +814,8 @@ app.get('/media/:id', async (req, res) => {
         sinopsisMostrada = mediaItem.sinopsis; // ya está en inglés, el idioma original
       } else {
         const cache = mediaItem.sinopsisTraducciones || {};
-        if (cache[lang]) {
+        const cacheParaError = /LIMIT EXCEEDED|INVALID|ERROR/i.test(cache[lang] || '');
+        if (cache[lang] && !cacheParaError) {
           sinopsisMostrada = cache[lang];
         } else {
           const traducido = await traducirTexto(mediaItem.sinopsis, lang);

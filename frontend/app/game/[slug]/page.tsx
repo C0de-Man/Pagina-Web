@@ -1,6 +1,7 @@
 import RatingWidget from '@/components/RatingWidget';
 import ActionButtons from '@/components/ActionButtons';
 import AddToListModal from '@/components/AddToListModal';
+import GameImagesModal from '@/components/GameImagesModal';
 import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -31,9 +32,16 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
 
   return (
     <main className="min-h-screen bg-gray-950 text-white font-sans pb-16">
-      <div className="w-full h-64 md:h-80 bg-gradient-to-b from-gray-800 to-gray-950 flex items-center justify-center border-b border-gray-800">
-        <span className="text-gray-600 font-bold tracking-widest">VIDEOJUEGO</span>
-      </div>
+      {media.backdrop ? (
+        <div className="w-full h-64 md:h-80 relative border-b border-gray-800 overflow-hidden">
+          <img src={media.backdrop} alt="Banner" className="w-full h-full object-cover opacity-60" />
+          <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/20 to-transparent" />
+        </div>
+      ) : (
+        <div className="w-full h-64 md:h-80 bg-gradient-to-b from-gray-800 to-gray-950 flex items-center justify-center border-b border-gray-800">
+          <span className="text-gray-600 font-bold tracking-widest">VIDEOJUEGO</span>
+        </div>
+      )}
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 -mt-24 md:-mt-32 relative z-10">
         <div className="flex flex-col md:flex-row gap-8">
@@ -44,6 +52,7 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
             ) : (
               <div className="w-full aspect-[3/4] bg-gray-800 rounded-lg shadow-2xl border-2 border-gray-800 flex items-center justify-center">Sin imagen</div>
             )}
+            <GameImagesModal mediaId={media.id} />
           </div>
 
           <div className="flex-grow pt-24 md:pt-32">
