@@ -1,7 +1,5 @@
-import Link from 'next/link';
-import YearMoviesCarousel from '@/components/YearMoviesCarousel';
-import MovieCard from '@/components/MovieCard';
 import { cookies } from 'next/headers';
+import PeliculasLobbyClient from '@/components/PeliculasLobbyClient';
 
 export default async function PeliculasLobby() {
   const currentYear = new Date().getFullYear();
@@ -35,46 +33,19 @@ export default async function PeliculasLobby() {
     ...getLocalData(pelicula.id),
   }));
 
+  const popularConDatos = popular.map((pelicula: any) => ({
+    pelicula,
+    ...getLocalData(pelicula.id),
+  }));
+
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans py-10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
-        {/* PELICULAS DEL AÑO ACTUAL: carrusel de 4 en 4 */}
-        <div className="mb-12">
-          <div className="flex justify-between items-end mb-4 border-b border-gray-800 pb-2">
-            <h2 className="text-xl font-bold text-white tracking-wide">Peliculas {currentYear}</h2>
-            <Link href="/peliculas/todas" className="text-sm text-gray-400 hover:text-white transition flex items-center gap-1 cursor-pointer">
-              Ver todo <span className="text-lg leading-none">›</span>
-            </Link>
-          </div>
-
-          <YearMoviesCarousel items={yearMoviesConDatos} />
-        </div>
-
-        {/* POPULARES DE SIEMPRE */}
-        <div className="mb-12">
-          <div className="flex justify-between items-end mb-4 border-b border-gray-800 pb-2">
-            <h2 className="text-xl font-bold text-white tracking-wide">Populares</h2>
-            <Link href="/peliculas/todas?tipo=popular" className="text-sm text-gray-400 hover:text-white transition flex items-center gap-1 cursor-pointer">
-              Ver todo <span className="text-lg leading-none">›</span>
-            </Link>
-          </div>
-          
-          <div className="flex gap-4 overflow-x-auto pb-4 pt-2" style={{ scrollbarWidth: 'none' }}>
-            {popular.map((pelicula: any) => {
-              const { dbId, customPoster } = getLocalData(pelicula.id);
-              return (
-                <MovieCard 
-                  key={`pop-${pelicula.id}`} 
-                  pelicula={pelicula} 
-                  dbId={dbId} 
-                  customPoster={customPoster} 
-                />
-              );
-            })}
-          </div>
-        </div>
-
+        <PeliculasLobbyClient
+          currentYear={currentYear}
+          yearMoviesConDatos={yearMoviesConDatos}
+          popularConDatos={popularConDatos}
+        />
       </div>
     </main>
   );

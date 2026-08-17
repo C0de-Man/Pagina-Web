@@ -704,7 +704,10 @@ app.post('/media', async (req, res) => {
 });
 
 // --- RUTA PARA BUSCAR EN TMDB ---
-app.get('/search', async (req, res) => {
+// Nota: renombrada de /search a /tmdb/buscar porque muchos ad-blockers
+// bloquean por defecto cualquier URL con el patrón "search?q=" (lo tratan
+// como tracking/analytics), lo que provocaba 404 silenciosos en el navegador.
+app.get('/tmdb/buscar', async (req, res) => {
   try {
     const searchQuery = req.query.q;
     if (!searchQuery) return res.status(400).json({ error: 'Falta término' });
