@@ -48,9 +48,8 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
 
           <div className="flex-shrink-0 w-48 md:w-64">
             {media.portada ? (
-              <img src={media.portada} alt={media.titulo} className="w-full rounded-lg shadow-2xl border-2 border-gray-800 object-cover aspect-[3/4]" />
-            ) : (
-              <div className="w-full aspect-[3/4] bg-gray-800 rounded-lg shadow-2xl border-2 border-gray-800 flex items-center justify-center">Sin imagen</div>
+              <img src={media.portada} alt={media.titulo} className="w-full rounded-lg shadow-2xl border-2 border-gray-800 object-cover aspect-[2/3]" />) : (
+              <div className="w-full aspect-[2/3] bg-gray-800 rounded-lg shadow-2xl border-2 border-gray-800 flex items-center justify-center">Sin imagen</div>
             )}
             <GameImagesModal mediaId={media.id} />
           </div>
