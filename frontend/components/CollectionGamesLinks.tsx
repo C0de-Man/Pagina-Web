@@ -96,11 +96,10 @@ export default function CollectionGamesLinks({ igdbId }: { igdbId: number }) {
       <div
         key={item.id}
         onClick={() => handleClick(item, dbId)}
-        className={`flex flex-col items-center gap-2 p-2 rounded-lg cursor-pointer transition ${
-          esActual ? 'bg-gray-800/80 ring-1 ring-blue-500' : 'hover:bg-gray-800/50'
-        }`}
+        className={`flex flex-col items-center gap-2 p-2 rounded-lg cursor-pointer transition ${esActual ? 'bg-gray-800/80 ring-1 ring-blue-500' : 'hover:bg-gray-800/50'
+          }`}
       >
-        <div className="w-full aspect-[2/3] rounded overflow-hidden border border-gray-700 bg-gray-800">
+        <div className="w-full aspect-[2/3] rounded overflow-hidden border border-gray-700 bg-gray-800 flex items-center justify-center">
           {posterUrl ? (
             <img src={posterUrl} alt={item.name} className="w-full h-full object-cover" />
           ) : (

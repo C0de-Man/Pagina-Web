@@ -263,7 +263,7 @@ async function getIgdbGameCollection(igdbId) {
 
   // IGDB: un juego puede tener 0, 1 o varias "collections" (sagas).
   // Tomamos la primera que tenga más de 1 juego (evita sagas vacías/ruido).
-const query = `
+  const query = `
     fields name, collections.name, collections.games.name, collections.games.slug,
            collections.games.cover.url, collections.games.first_release_date,
            collections.games.id, collections.games.game_type, collections.games.status;
@@ -385,8 +385,12 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
 // game_type es el campo "vivo" de IGDB (sustituye al antiguo "category",
     // que en muchas entradas viene vacío). Excluimos DLCs (1), expansiones (2),
     // bundles (3), expansiones independientes (4), mods (5), episodios/
-    // temporadas (6/7), packs (13) y updates (14).
-    const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 13, 14];
+    // temporadas (6/7), packs (13) y updates (14). También excluimos "port" (11),
+    // "remaster" (9) y "expanded_game" (10) — en la práctica IGDB mete las
+    // "Enhanced/Definitive Edition" bajo el tipo 10, no bajo el 9 oficial de
+    // "remaster", así que hay que excluir ambos para conseguir el mismo resultado.
+    // Se queda "remake" (8), que sí quieres ver (ej. "The Witcher Remake").
+    const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14];
     const gamesFiltrados = collection.games.filter((g) => !TIPOS_EXCLUIDOS.includes(g.game_type));
 
     // Si algún juego de la saga ya está en tu base de datos local y tiene una
@@ -403,6 +407,7 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
       .map((g) => ({
         igdbId: g.id,
         titulo: g.name,
+        gameTypeDebug: g.game_type, // TEMPORAL: para ver qué número usa cada juego. Quitar luego.
         slug: g.slug,
         anio: g.first_release_date
           ? new Date(g.first_release_date * 1000).getFullYear()
@@ -435,7 +440,7 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
       prequel,
       sequel,
     });
-    
+
   } catch (err) {
     console.error('ERROR EN GET /igdb/collection/:igdbId:', err);
     res.status(500).json({ error: 'Error al obtener la colección de IGDB' });

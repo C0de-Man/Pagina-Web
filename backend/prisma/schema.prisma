@@ -82,3 +82,23 @@ model Favorite {
 
   @@unique([userId, mediaId])
 }
+
+model GameLog {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  mediaId     Int
+  nombre      String    @default("Log")
+  plataforma  String?
+  jugadoEn    String?
+  propiedad   String?
+  fechaInicio DateTime?
+  fechaFin    DateTime?
+  rating      Int?
+  review      String?
+  spoilers    Boolean   @default(false)
+  orden       Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  user  User  @relation(fields: [userId], references: [id])
+  media Media @relation(fields: [mediaId], references: [id])
+}
