@@ -80,10 +80,23 @@ async function traducirTexto(texto, idiomaDestino) {
   if (!texto) return texto;
   try {
     const destino = idiomaDestino.split('-')[0]; // "es-ES" -> "es"
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(texto)}&langpair=en|${destino}`;
+
+    // La API gratuita de MyMemory limita las peticiones anónimas a 500 caracteres;
+    // si el resumen es más largo, lo recortamos ANTES de mandarlo para no disparar el error.
+    const textoParaTraducir = texto.length > 490 ? texto.slice(0, 490) : texto;
+
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(textoParaTraducir)}&langpair=en|${destino}`;
     const res = await fetch(url);
     const data = await res.json();
-    return data.responseData?.translatedText || texto;
+
+    const traducido = data.responseData?.translatedText;
+    const statusOk = String(data.responseStatus) === '200';
+    // A veces MyMemory devuelve HTTP 200 pero mete el mensaje de error DENTRO de
+    // translatedText (ej. "QUERY LENGTH LIMIT EXCEEDED..."), así que además de mirar
+    // responseStatus comprobamos que el texto no parezca un error en mayúsculas.
+    const pareceError = !traducido || !statusOk || /LIMIT EXCEEDED|INVALID|ERROR/i.test(traducido);
+
+    return pareceError ? texto : traducido;
   } catch (e) {
     console.error('Error al traducir con MyMemory:', e);
     return texto; // si falla, nos quedamos con el original en inglés

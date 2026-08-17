@@ -1,5 +1,6 @@
 export interface MediaParaSlug {
   id: number;
+  tipo?: string | null;
   tituloOriginal?: string | null;
   original_title?: string | null;
   original_name?: string | null;
@@ -58,5 +59,6 @@ export function extraerIdDeSlug(slug: string): number | null {
 }
 
 export function urlFicha(media: MediaParaSlug): string {
-  return `/movie/${generarSlug(media)}`;
+  const base = media.tipo === 'VIDEOJUEGO' ? '/game' : '/movie';
+  return `${base}/${generarSlug(media)}`;
 }

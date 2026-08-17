@@ -14,23 +14,35 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const query = resolvedParams.q;
   const tipoActivo = resolvedParams.tipo || 'all';
 
-  // 1. Buscamos en la API de TMDB
-  const res = await fetch(`http://localhost:3001/search?q=${query}`, { cache: 'no-store' });
-  const results = await res.json();
+  // 1. Buscamos en la API de TMDB (películas/series) y en IGDB (juegos) a la vez
+  const [resTmdb, resIgdb, resDb] = await Promise.all([
+    fetch(`http://localhost:3001/search?q=${query}`, { cache: 'no-store' }),
+    fetch(`http://localhost:3001/igdb/search?q=${query}`, { cache: 'no-store' }),
+    fetch('http://localhost:3001/media', { cache: 'no-store' }),
+  ]);
 
-  // 2. Obtenemos TU base de datos local para comparar
-  const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
+  const resultsTmdb = await resTmdb.json();
+  const resultsIgdb = await resIgdb.json();
   const myDb = await resDb.json();
 
-  const getLocalData = (tmdbId: number) => {
-    const local = myDb.find((m: any) => m.tmdbId === tmdbId);
+  const resultsJuegos = (Array.isArray(resultsIgdb) ? resultsIgdb : []).map((j: any) => ({
+    ...j,
+    media_type: 'juego',
+  }));
+
+  const results = [...(Array.isArray(resultsTmdb) ? resultsTmdb : []), ...resultsJuegos];
+
+  const getLocalData = (item: any) => {
+    const esJuego = item.media_type === 'juego';
+    const local = esJuego
+      ? myDb.find((m: any) => m.igdbId === item.id)
+      : myDb.find((m: any) => m.tmdbId === item.id);
     return {
       dbId: local ? local.id : null,
       customPoster: local ? local.portada : null
     };
   };
 
-  // 3. Filtramos los resultados según el tipo elegido en la barra lateral
   const resultadosFiltrados = tipoActivo === 'all'
     ? results
     : results.filter((item: any) => item.media_type === tipoActivo);
@@ -47,16 +59,15 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
         <div className="flex flex-col lg:flex-row gap-8">
 
-          {/* RESULTADOS */}
           <div className="flex-1 space-y-6 max-w-2xl">
             {resultadosFiltrados.length === 0 ? (
               <p className="text-gray-400">No se encontraron resultados.</p>
             ) : (
               resultadosFiltrados.map((item: any) => {
-                const { dbId, customPoster } = getLocalData(item.id);
+                const { dbId, customPoster } = getLocalData(item);
                 return (
                   <SearchResultItem
-                    key={item.id}
+                    key={`${item.media_type}-${item.id}`}
                     item={item}
                     dbId={dbId}
                     customPoster={customPoster}
@@ -66,7 +77,6 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             )}
           </div>
 
-          {/* FILTRO POR TIPO DE CONTENIDO */}
           <aside className="w-full lg:w-56 flex-shrink-0">
             <div className="bg-gray-900/60 border border-gray-800 rounded-lg overflow-hidden">
               {FILTROS.map((filtro) => (
