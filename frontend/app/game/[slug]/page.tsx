@@ -69,7 +69,7 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
               <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{media.tipo}</span>
             </div>
 
-            <GameTabs sinopsis={media.sinopsis} detalles={detalles} />
+            <GameTabs sinopsis={media.sinopsis} detalles={detalles} igdbId={media.igdbId} />
           </div>
 
           <div className="flex-shrink-0 w-full md:w-72 pt-24 md:pt-32">

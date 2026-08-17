@@ -295,6 +295,79 @@ async function getIgdbGameCollection(igdbId) {
   return mejorColeccion || null;
 }
 
+async function getIgdbDlcsUpdates(igdbId) {
+  const token = await getIgdbToken();
+
+  const headers = {
+    'Client-ID': process.env.IGDB_CLIENT_ID,
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'text/plain',
+  };
+
+  // DLCs y expansiones: se piden como relación DIRECTA del juego principal
+  // (campos dlcs / expansions), que IGDB rellena de forma mucho más fiable
+  // que el campo inverso parent_game.
+const queryPrincipal = `
+    fields dlcs.name, dlcs.cover.url, dlcs.first_release_date,
+           expansions.name, expansions.cover.url, expansions.first_release_date;
+    where id = ${igdbId};
+  `;
+
+  // Updates: IGDB no tiene un campo directo tipo "updates" en el juego principal,
+  // así que para esto sí hace falta buscar al revés por parent_game + category 14.
+  const queryUpdates = `
+    fields name, cover.url, first_release_date;
+    where parent_game = ${igdbId} & category = 14;
+    limit 50;
+  `;
+
+  const [resPrincipal, resUpdates] = await Promise.all([
+    fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryPrincipal }),
+    fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryUpdates }),
+  ]);
+
+  if (!resPrincipal.ok || !resUpdates.ok) {
+    throw new Error(`IGDB respondió ${resPrincipal.status} / ${resUpdates.status}`);
+  }
+
+  const [dataPrincipal, dataUpdates] = await Promise.all([
+    resPrincipal.json(),
+    resUpdates.json(),
+  ]);
+
+const arreglar = (g) => ({
+    igdbId: g.id,
+    titulo: g.name,
+    portada: g.cover?.url
+      ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}`
+      : null,
+    anio: g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null,
+  });
+
+  // De más antigua a más reciente. Las que no tienen fecha se van al final.
+  const porAnioAsc = (a, b) => (a.anio || 9999) - (b.anio || 9999);
+
+  const juego = dataPrincipal[0] || {};
+  const dlcs = [...(juego.dlcs || []), ...(juego.expansions || [])].map(arreglar).sort(porAnioAsc);
+  const updates = (dataUpdates || []).map(arreglar).sort(porAnioAsc);
+
+  return { dlcs, updates };
+}
+
+// --- DLCs, EXPANSIONES Y UPDATES DE UN JUEGO ---
+app.get('/igdb/dlcs-updates/:igdbId', async (req, res) => {
+  try {
+    const igdbId = parseInt(req.params.igdbId, 10);
+    if (Number.isNaN(igdbId)) return res.status(400).json({ error: 'igdbId inválido' });
+
+    const resultado = await getIgdbDlcsUpdates(igdbId);
+    res.json(resultado);
+  } catch (err) {
+    console.error('ERROR EN GET /igdb/dlcs-updates/:igdbId:', err);
+    res.status(500).json({ error: 'Error al obtener DLCs/updates' });
+  }
+});
+
 // --- SAGA DE UN VIDEOJUEGO (precuela/secuela + colección completa) ---
 app.get('/igdb/collection/:igdbId', async (req, res) => {
   try {
