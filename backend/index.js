@@ -74,6 +74,125 @@ app.get('/igdb/search', async (req, res) => {
   }
 });
 
+// --- ARREGLA LAS URLS DE PORTADA DE IGDB (sin "https:" y en miniatura por defecto) ---
+function arreglarCoverIgdb(juego) {
+  return {
+    ...juego,
+    cover: juego.cover ? {
+      ...juego.cover,
+      url: `https:${juego.cover.url.replace('t_thumb', 't_cover_big')}`
+    } : null
+  };
+}
+
+// --- JUEGOS MÁS POPULARES DE LA HISTORIA (por número de valoraciones) ---
+app.get('/igdb/popular', async (req, res) => {
+  try {
+    const token = await getIgdbToken();
+    const body = `fields name,cover.url,first_release_date,summary; where total_rating_count != null; sort total_rating_count desc; limit 20;`;
+    const response = await fetch('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers: {
+        'Client-ID': process.env.IGDB_CLIENT_ID,
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'text/plain'
+      },
+      body
+    });
+    const data = await response.json();
+    res.json((data || []).map(arreglarCoverIgdb));
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/popular:', error);
+    res.status(500).json({ error: 'Error al obtener juegos populares' });
+  }
+});
+
+// --- POPULARES HISTÓRICOS, PAGINADOS DE 42 EN 42 ---
+app.get('/igdb/popular/page/:page', async (req, res) => {
+  try {
+    const page = parseInt(req.params.page) || 1;
+    const itemsPerPage = 42;
+    const offset = (page - 1) * itemsPerPage;
+
+    const token = await getIgdbToken();
+    const body = `fields name,cover.url,first_release_date,summary; where total_rating_count != null; sort total_rating_count desc; limit ${itemsPerPage}; offset ${offset};`;
+    const response = await fetch('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers: {
+        'Client-ID': process.env.IGDB_CLIENT_ID,
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'text/plain'
+      },
+      body
+    });
+    const data = await response.json();
+    res.json({ results: (data || []).map(arreglarCoverIgdb) });
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/popular/page:', error);
+    res.status(500).json({ error: 'Error al obtener juegos populares' });
+  }
+});
+
+// --- JUEGOS DE UN AÑO CONCRETO (vista previa del lobby, 20 resultados) ---
+app.get('/igdb/year/:year', async (req, res) => {
+  try {
+    const year = parseInt(req.params.year);
+    const desde = Math.floor(new Date(Date.UTC(year, 0, 1)).getTime() / 1000);
+    const hasta = Math.floor(new Date(Date.UTC(year, 11, 31, 23, 59, 59)).getTime() / 1000);
+
+    const token = await getIgdbToken();
+    const body = `fields name,cover.url,first_release_date,summary; where first_release_date >= ${desde} & first_release_date <= ${hasta}; sort hypes desc; limit 20;`;
+    const response = await fetch('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers: {
+        'Client-ID': process.env.IGDB_CLIENT_ID,
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'text/plain'
+      },
+      body
+    });
+    const data = await response.json();
+    res.json((data || []).map(arreglarCoverIgdb));
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/year:', error);
+    res.status(500).json({ error: 'Error al obtener juegos del año' });
+  }
+});
+
+// --- JUEGOS DE UN AÑO, PAGINADOS DE 42 EN 42 ---
+app.get('/igdb/year/:year/page/:page', async (req, res) => {
+  try {
+    const year = parseInt(req.params.year);
+    const page = parseInt(req.params.page) || 1;
+    const itemsPerPage = 42;
+    const offset = (page - 1) * itemsPerPage;
+
+    const desde = Math.floor(new Date(Date.UTC(year, 0, 1)).getTime() / 1000);
+    const hasta = Math.floor(new Date(Date.UTC(year, 11, 31, 23, 59, 59)).getTime() / 1000);
+
+    const token = await getIgdbToken();
+    const body = `fields name,cover.url,first_release_date,summary; where first_release_date >= ${desde} & first_release_date <= ${hasta}; sort hypes desc; limit ${itemsPerPage}; offset ${offset};`;
+    const response = await fetch('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers: {
+        'Client-ID': process.env.IGDB_CLIENT_ID,
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'text/plain'
+      },
+      body
+    });
+    const data = await response.json();
+    res.json({ page, results: (data || []).map(arreglarCoverIgdb) });
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/year/page:', error);
+    res.status(500).json({ error: 'Error al obtener juegos del año' });
+  }
+});
+
 // --- TRADUCTOR AUTOMÁTICO (MyMemory, gratis, sin clave) ---
 // Solo se usa para juegos: es la única fuente de texto que no tenemos en varios idiomas de origen.
 async function traducirTexto(texto, idiomaDestino) {
