@@ -2,6 +2,21 @@ import GameCard from '@/components/GameCard';
 import FiltersSidebar from '@/components/FiltersSidebar';
 import Link from 'next/link';
 
+// Calcula qué números de página mostrar en la barra, centrados en la página actual
+// (máximo 7 botones, igual que en tu captura).
+function getPaginas(actual: number, total: number, maxBotones = 7) {
+  if (total <= maxBotones) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  let inicio = Math.max(1, actual - Math.floor(maxBotones / 2));
+  let fin = inicio + maxBotones - 1;
+  if (fin > total) {
+    fin = total;
+    inicio = fin - maxBotones + 1;
+  }
+  return Array.from({ length: fin - inicio + 1 }, (_, i) => inicio + i);
+}
+
 export default async function TodosLosJuegos({
   searchParams,
 }: {
@@ -24,7 +39,7 @@ export default async function TodosLosJuegos({
   const esPopulares = resolvedParams.tipo === 'popular';
 
   // Querystring con TODOS los filtros activos: se reenvía al backend y también
-  // se usa para no perderlos al pasar de página con los botones laterales
+  // se usa para no perderlos al cambiar de página
   const filtros = new URLSearchParams();
   if (resolvedParams.tipo) filtros.set('tipo', resolvedParams.tipo);
   if (resolvedParams.categorias) filtros.set('categorias', resolvedParams.categorias);
@@ -38,8 +53,6 @@ export default async function TodosLosJuegos({
   const modo = esPopulares ? 'popular' : 'year';
   const paramsBackend = new URLSearchParams(filtros);
   paramsBackend.set('modo', modo);
-  // Si no han elegido año/estado propios en el sidebar, seguimos usando el año
-  // actual por defecto tal y como hacía antes la pestaña "Juegos {currentYear}"
   if (!resolvedParams.anio && !resolvedParams.estado && modo === 'year') {
     paramsBackend.set('anio', String(currentYear));
   }
@@ -47,6 +60,7 @@ export default async function TodosLosJuegos({
   const res = await fetch(`http://localhost:3001/igdb/catalogo/page/${currentPage}?${paramsBackend.toString()}`, { cache: 'no-store' });
   const data = await res.json();
   const juegos = data.results || [];
+  const totalPaginas = data.totalPaginas || 1;
 
   // TU base de datos local
   const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
@@ -65,28 +79,11 @@ export default async function TodosLosJuegos({
   const { generos, plataformas } = await resFiltros.json();
 
   const sufijoTipo = filtros.toString() ? `&${filtros.toString()}` : '';
+  const urlPagina = (p: number) => `/juegos/todas?page=${p}${sufijoTipo}`;
+  const paginasAMostrar = getPaginas(currentPage, totalPaginas);
 
   return (
-    <main className="min-h-screen bg-[#14181c] text-white font-sans py-10 relative">
-
-      {/* BOTÓN LATERAL IZQUIERDO */}
-      {currentPage > 1 && (
-        <Link
-          href={`/juegos/todas?page=${currentPage - 1}${sufijoTipo}`}
-          className="fixed left-4 top-1/2 -translate-y-1/2 bg-gray-900/80 hover:bg-gray-700 text-white w-14 h-14 rounded-full border border-gray-600 z-50 transition hidden lg:flex items-center justify-center shadow-2xl cursor-pointer"
-        >
-          <span className="text-4xl leading-none pb-1 pr-1">‹</span>
-        </Link>
-      )}
-
-      {/* BOTÓN LATERAL DERECHO */}
-      <Link
-        href={`/juegos/todas?page=${currentPage + 1}${sufijoTipo}`}
-        className="fixed right-4 top-1/2 -translate-y-1/2 bg-gray-900/80 hover:bg-gray-700 text-white w-14 h-14 rounded-full border border-gray-600 z-50 transition hidden lg:flex items-center justify-center shadow-2xl cursor-pointer"
-      >
-        <span className="text-4xl leading-none pb-1 pl-1">›</span>
-      </Link>
-
+    <main className="min-h-screen bg-[#14181c] text-white font-sans py-10">
       <div className="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-16">
 
         <div className="border-b border-gray-800 pb-4 mb-6 flex justify-between items-center">
@@ -100,20 +97,63 @@ export default async function TodosLosJuegos({
         <div className="flex flex-col lg:flex-row gap-6">
           <FiltersSidebar generos={generos || []} plataformas={plataformas || []} />
 
-          {/* CUADRÍCULA */}
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4 pt-2 flex-grow">
-            {juegos.map((juego: any) => {
-              const { dbId, customPoster } = getLocalData(juego.id);
-              return (
-                <div key={`all-${juego.id}`} className="w-full">
-                  <GameCard
-                    juego={juego}
-                    dbId={dbId}
-                    customPoster={customPoster}
-                  />
-                </div>
-              );
-            })}
+          <div className="flex-grow">
+            {/* CUADRÍCULA */}
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4 pt-2">
+              {juegos.map((juego: any) => {
+                const { dbId, customPoster } = getLocalData(juego.id);
+                return (
+                  <div key={`all-${juego.id}`} className="w-full">
+                    <GameCard
+                      juego={juego}
+                      dbId={dbId}
+                      customPoster={customPoster}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* BARRA DE PAGINACIÓN */}
+            <div className="flex justify-between items-center mt-10 pt-6 border-t border-gray-800">
+              {currentPage > 1 ? (
+                <Link
+                  href={urlPagina(currentPage - 1)}
+                  className="text-sm text-gray-400 hover:text-white transition cursor-pointer"
+                >
+                  ‹ Prev
+                </Link>
+              ) : (
+                <span className="text-sm text-gray-700 cursor-default">‹ Prev</span>
+              )}
+
+              <div className="flex gap-2">
+                {paginasAMostrar.map((p) => (
+                  <Link
+                    key={p}
+                    href={urlPagina(p)}
+                    className={`w-9 h-9 flex items-center justify-center rounded text-sm font-semibold transition cursor-pointer ${
+                      p === currentPage
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-[#2c3440] text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    {p}
+                  </Link>
+                ))}
+              </div>
+
+              {currentPage < totalPaginas ? (
+                <Link
+                  href={urlPagina(currentPage + 1)}
+                  className="text-sm text-gray-400 hover:text-white transition cursor-pointer"
+                >
+                  Next ›
+                </Link>
+              ) : (
+                <span className="text-sm text-gray-700 cursor-default">Next ›</span>
+              )}
+            </div>
           </div>
         </div>
 

@@ -355,20 +355,23 @@ app.get('/igdb/catalogo/page/:page', async (req, res) => {
     const sort = modo === 'popular' ? 'sort total_rating_count desc;' : 'sort hypes desc;';
 
     const token = await getIgdbToken();
+    const headers = {
+      'Client-ID': process.env.IGDB_CLIENT_ID,
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/json',
+      'Content-Type': 'text/plain'
+    };
     const body = `fields name,cover.url,first_release_date,summary; ${where} ${sort} limit ${itemsPerPage}; offset ${offset};`;
 
-    const response = await fetch('https://api.igdb.com/v4/games', {
-      method: 'POST',
-      headers: {
-        'Client-ID': process.env.IGDB_CLIENT_ID,
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-        'Content-Type': 'text/plain'
-      },
-      body
-    });
+    const [response, countResponse] = await Promise.all([
+      fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body }),
+      fetch('https://api.igdb.com/v4/games/count', { method: 'POST', headers, body: where }),
+    ]);
     const data = await response.json();
-    res.json({ page, results: (data || []).map(arreglarCoverIgdb) });
+    const countData = await countResponse.json();
+    const totalPaginas = Math.max(1, Math.ceil((countData.count || 0) / itemsPerPage));
+
+    res.json({ page, totalPaginas, results: (data || []).map(arreglarCoverIgdb) });
   } catch (error) {
     console.error('ERROR EN GET /igdb/catalogo/page:', error);
     res.status(500).json({ error: 'Error al obtener el catálogo de juegos' });
