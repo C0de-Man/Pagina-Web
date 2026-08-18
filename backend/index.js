@@ -113,6 +113,63 @@ app.get('/igdb/remake-of/:igdbId', async (req, res) => {
   }
 });
 
+// A diferencia de los remakes, IGDB SÍ guarda esta relación en el propio DLC/expansión,
+// en el campo parent_game — así que aquí no hace falta búsqueda inversa.
+app.get('/igdb/dlc-of/:igdbId', async (req, res) => {
+  try {
+    const { igdbId } = req.params;
+    const token = await getIgdbToken();
+    const headers = {
+      'Client-ID': process.env.IGDB_CLIENT_ID,
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/json',
+      'Content-Type': 'text/plain'
+    };
+
+    // Antes filtrábamos por el campo "category" del propio juego, pero IGDB lo
+    // deja vacío en bastantes títulos (como pasaba con parent_game). En vez de
+    // eso, comprobamos directamente lo único que de verdad queríamos descartar:
+    // que el juego sea un REMAKE de otro (esos también traen parent_game
+    // relleno, para enlazar contenido incluido, pero no son un DLC).
+    const bodyEsRemake = `fields id; where remakes = (${igdbId}); limit 1;`;
+    const respEsRemake = await fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: bodyEsRemake });
+    const dataEsRemake = await respEsRemake.json();
+    if (Array.isArray(dataEsRemake) && dataEsRemake.length > 0) {
+      return res.json(null);
+    }
+
+    const body = `fields parent_game.name, parent_game.cover.url, parent_game.first_release_date; where id = ${igdbId};`;
+    const response = await fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body });
+    const data = await response.json();
+    let base = data[0]?.parent_game;
+
+    // Si el propio DLC no tiene relleno su parent_game, buscamos al revés: el
+    // juego base que sí lo tenga listado en dlcs/expansions/standalone_expansions/bundles.
+    if (!base) {
+      const bodyInverso = `fields name, cover.url, first_release_date; where dlcs = (${igdbId}) | expansions = (${igdbId}) | standalone_expansions = (${igdbId}) | bundles = (${igdbId});`;
+      const respInverso = await fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: bodyInverso });
+      const dataInverso = await respInverso.json();
+      base = dataInverso[0];
+    }
+
+    if (!base) return res.json(null);
+
+    res.json({
+      igdbId: base.id,
+      titulo: base.name,
+      anio: base.first_release_date
+        ? new Date(base.first_release_date * 1000).getFullYear()
+        : null,
+      portada: base.cover?.url
+        ? `https:${base.cover.url.replace('t_thumb', 't_cover_big')}`
+        : null,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/dlc-of/:igdbId:', error);
+    res.status(500).json({ error: 'Error al buscar el juego base' });
+  }
+});
+
 // --- BUSCAR JUEGOS EN IGDB ---
 app.get('/igdb/search', async (req, res) => {
   try {
@@ -481,12 +538,21 @@ async function getIgdbDlcsUpdates(igdbId) {
   };
 
   // DLCs y expansiones: se piden como relación DIRECTA del juego principal
-  // (campos dlcs / expansions), que IGDB rellena de forma mucho más fiable
-  // que el campo inverso parent_game.
+  // (campos dlcs / expansions / standalone_expansions), que suele ser fiable...
   const queryPrincipal = `
     fields dlcs.name, dlcs.cover.url, dlcs.first_release_date,
-           expansions.name, expansions.cover.url, expansions.first_release_date;
+           expansions.name, expansions.cover.url, expansions.first_release_date,
+           standalone_expansions.name, standalone_expansions.cover.url, standalone_expansions.first_release_date;
     where id = ${igdbId};
+  `;
+
+  // ...pero no siempre: hay juegos base sin esos campos rellenos aunque el DLC
+  // sí tenga bien puesto su propio parent_game. Por eso también buscamos al
+  // revés (excluyendo remakes/remasters/updates, que van por otro lado).
+  const queryInverso = `
+    fields name, cover.url, first_release_date, category;
+    where parent_game = ${igdbId} & category != (8,9,14);
+    limit 50;
   `;
 
   // Updates: IGDB no tiene un campo directo tipo "updates" en el juego principal,
@@ -497,17 +563,19 @@ async function getIgdbDlcsUpdates(igdbId) {
     limit 50;
   `;
 
-  const [resPrincipal, resUpdates] = await Promise.all([
+  const [resPrincipal, resInverso, resUpdates] = await Promise.all([
     fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryPrincipal }),
+    fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryInverso }),
     fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryUpdates }),
   ]);
 
-  if (!resPrincipal.ok || !resUpdates.ok) {
-    throw new Error(`IGDB respondió ${resPrincipal.status} / ${resUpdates.status}`);
+  if (!resPrincipal.ok || !resInverso.ok || !resUpdates.ok) {
+    throw new Error(`IGDB respondió ${resPrincipal.status} / ${resInverso.status} / ${resUpdates.status}`);
   }
 
-  const [dataPrincipal, dataUpdates] = await Promise.all([
+  const [dataPrincipal, dataInverso, dataUpdates] = await Promise.all([
     resPrincipal.json(),
+    resInverso.json(),
     resUpdates.json(),
   ]);
 
@@ -524,7 +592,18 @@ async function getIgdbDlcsUpdates(igdbId) {
   const porAnioAsc = (a, b) => (a.anio || 9999) - (b.anio || 9999);
 
   const juego = dataPrincipal[0] || {};
-  const dlcs = [...(juego.dlcs || []), ...(juego.expansions || [])].map(arreglar).sort(porAnioAsc);
+  const dlcsDirectos = [
+    ...(juego.dlcs || []),
+    ...(juego.expansions || []),
+    ...(juego.standalone_expansions || []),
+  ];
+
+  // Deduplicamos por id: un mismo DLC puede salir tanto por la vía directa
+  // como por la inversa.
+  const idsYaVistos = new Set(dlcsDirectos.map((g) => g.id));
+  const dlcsInversos = (dataInverso || []).filter((g) => !idsYaVistos.has(g.id));
+
+  const dlcs = [...dlcsDirectos, ...dlcsInversos].map(arreglar).sort(porAnioAsc);
   const updates = (dataUpdates || []).map(arreglar).sort(porAnioAsc);
 
   return { dlcs, updates };

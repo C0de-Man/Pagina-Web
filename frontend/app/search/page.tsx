@@ -16,7 +16,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
   // 1. Buscamos en la API de TMDB (películas/series) y en IGDB (juegos) a la vez
   const [resTmdb, resIgdb, resDb] = await Promise.all([
-    fetch(`http://localhost:3001/search?q=${query}`, { cache: 'no-store' }),
+    fetch(`http://localhost:3001/tmdb/buscar?q=${query}`, { cache: 'no-store' }),
     fetch(`http://localhost:3001/igdb/search?q=${query}`, { cache: 'no-store' }),
     fetch('http://localhost:3001/media', { cache: 'no-store' }),
   ]);
@@ -25,12 +25,17 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const resultsIgdb = await resIgdb.json();
   const myDb = await resDb.json();
 
+  // /tmdb/buscar usa TMDB search/multi: además de películas y series trae
+  // personas (actores, directores...) mezcladas, que aquí no queremos mostrar.
+  const resultsTmdbFiltrados = (Array.isArray(resultsTmdb) ? resultsTmdb : [])
+    .filter((item: any) => item.media_type === 'movie' || item.media_type === 'tv');
+
   const resultsJuegos = (Array.isArray(resultsIgdb) ? resultsIgdb : []).map((j: any) => ({
     ...j,
     media_type: 'juego',
   }));
 
-  const results = [...(Array.isArray(resultsTmdb) ? resultsTmdb : []), ...resultsJuegos];
+  const results = [...resultsTmdbFiltrados, ...resultsJuegos];
 
   const getLocalData = (item: any) => {
     const esJuego = item.media_type === 'juego';

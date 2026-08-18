@@ -55,8 +55,16 @@ export default function GameTabs({
     let cancelado = false;
     fetch(`${API_URL}/igdb/dlcs-updates/${igdbId}`)
       .then((r) => r.json())
-      .then((d: DlcsUpdatesResponse) => {
-        if (!cancelado) setDlcsData(d);
+      .then((d: Partial<DlcsUpdatesResponse>) => {
+        if (!cancelado) {
+          // Nos aseguramos de que dlcs/updates sean siempre arrays, aunque el
+          // backend falle y devuelva algo distinto a la forma esperada (p. ej.
+          // { error: '...' }), para que el resto del componente no reviente.
+          setDlcsData({
+            dlcs: Array.isArray(d?.dlcs) ? d.dlcs : [],
+            updates: Array.isArray(d?.updates) ? d.updates : [],
+          });
+        }
       })
       .catch((err) => console.error('Error cargando DLCs/updates', err));
     return () => {
@@ -64,7 +72,7 @@ export default function GameTabs({
     };
   }, [igdbId]);
 
-  const hayDlcsOUpdates = (dlcsData?.dlcs.length || 0) > 0 || (dlcsData?.updates.length || 0) > 0;
+  const hayDlcsOUpdates = (dlcsData?.dlcs?.length || 0) > 0 || (dlcsData?.updates?.length || 0) > 0;
 
   const tabs: { key: typeof tab; label: string }[] = [
     { key: 'descripcion', label: 'Descripcion' },
