@@ -569,13 +569,44 @@ async function traducirTexto(texto, idiomaDestino) {
 
 async function getIgdbGameCollection(igdbId) {
   const token = await getIgdbToken();
+  const headers = {
+    'Client-ID': process.env.IGDB_CLIENT_ID,
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'text/plain',
+  };
 
-  // IGDB reparte a veces los juegos de una misma saga en VARIAS "collections"
-  // pequeñas (subseries) en lugar de una sola completa, así que quedarnos solo
-  // con "la colección más grande" dejaba fuera títulos (p. ej. Resident Evil
-  // clásicos en una collection y los spin-off en otra). Por eso pedimos TODAS
-  // las collections Y también "franchises" (la agrupación más amplia de IGDB,
-  // pensada para toda la saga) y las combinamos, deduplicando por id.
+  // Paso 1: averiguar a qué collections/franchises pertenece ESTE juego.
+  // Consulta ligera — todavía no pedimos los juegos de cada una aquí.
+  const queryBase = `
+    fields name, collections.id, collections.name, franchises.id, franchises.name;
+    where id = ${igdbId};
+  `;
+  const respBase = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryBase });
+  if (!respBase.ok) throw new Error(`IGDB respondió ${respBase.status}`);
+
+  const dataBase = await respBase.json();
+  const juegoActual = dataBase[0];
+  if (!juegoActual) return null;
+
+  const collections = juegoActual.collections || [];
+  const franchises = juegoActual.franchises || [];
+  if (collections.length === 0 && franchises.length === 0) return null;
+
+  // Nombre para mostrar: preferimos la primera collection (suele ser más
+  // específica, p. ej. "Resident Evil" en vez de "Capcom Survival Horror");
+  // si no hay ninguna, usamos la primera franchise.
+  const nombre = collections[0]?.name || franchises[0]?.name || null;
+  if (!nombre) return null;
+
+  // Paso 2: pedimos los juegos de esas collections/franchises con consultas
+  // de NIVEL SUPERIOR (where collections = (...) / where franchises = (...)),
+  // no como lista anidada dentro del juego (collections.games.*). IGDB aplica
+  // un límite implícito a las listas anidadas dentro de un único registro, lo
+  // que estaba dejando fuera las primeras entregas de sagas largas (p. ej.
+  // "Resident Evil" y "Resident Evil 2" desaparecían de la saga al consultar
+  // desde su propia ficha, aunque sí aparecían consultando desde otra
+  // entrega). Con una consulta de nivel superior y "limit" explícito alto,
+  // ese tope oculto deja de aplicar.
   // version_parent: cuando una entrada es un SKU/edición concreta ("Launch
   // Edition", "Ultimate Edition"...) de OTRO juego ya existente en IGDB, este
   // campo apunta a esa versión canónica. Lo pedimos para poder usar siempre
@@ -584,38 +615,33 @@ async function getIgdbGameCollection(igdbId) {
     'name', 'slug', 'cover.url', 'first_release_date', 'id', 'game_type', 'status',
     'version_parent.name', 'version_parent.slug', 'version_parent.cover.url',
     'version_parent.first_release_date', 'version_parent.id',
-  ];
-  const camposCollections = camposJuego.map((c) => `collections.games.${c}`).join(', ');
-  const camposFranchises = camposJuego.map((c) => `franchises.games.${c}`).join(', ');
-  const query = `
-    fields name, collections.name, ${camposCollections},
-           franchises.name, ${camposFranchises};
-    where id = ${igdbId};
-  `;
+  ].join(', ');
 
-  const response = await fetchIgdb('https://api.igdb.com/v4/games', {
-    method: 'POST',
-    headers: {
-      'Client-ID': process.env.IGDB_CLIENT_ID,
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'text/plain',
-    },
-    body: query,
-  });
+  const collectionIds = collections.map((c) => c.id);
+  const franchiseIds = franchises.map((f) => f.id);
 
-  if (!response.ok) {
-    throw new Error(`IGDB respondió ${response.status}`);
-  }
+  const [respColecciones, respFranquicias] = await Promise.all([
+    collectionIds.length > 0
+      ? fetchIgdb('https://api.igdb.com/v4/games', {
+          method: 'POST',
+          headers,
+          body: `fields ${camposJuego}; where collections = (${collectionIds.join(',')}); limit 500;`,
+        })
+      : Promise.resolve(null),
+    franchiseIds.length > 0
+      ? fetchIgdb('https://api.igdb.com/v4/games', {
+          method: 'POST',
+          headers,
+          body: `fields ${camposJuego}; where franchises = (${franchiseIds.join(',')}); limit 500;`,
+        })
+      : Promise.resolve(null),
+  ]);
 
-  const data = await response.json();
-  const collections = data[0]?.collections || [];
-  const franchises = data[0]?.franchises || [];
+  if (respColecciones && !respColecciones.ok) throw new Error(`IGDB respondió ${respColecciones.status}`);
+  if (respFranquicias && !respFranquicias.ok) throw new Error(`IGDB respondió ${respFranquicias.status}`);
 
-  // Nombre para mostrar: preferimos la primera collection (suele ser más
-  // específica, p. ej. "Resident Evil" en vez de "Capcom Survival Horror");
-  // si no hay ninguna, usamos la primera franchise.
-  const nombre = collections[0]?.name || franchises[0]?.name || null;
-  if (!nombre) return null;
+  const datosColecciones = respColecciones ? await respColecciones.json() : [];
+  const datosFranquicias = respFranquicias ? await respFranquicias.json() : [];
 
   // Las "collections" de IGDB ya vienen bien acotadas al propio juego, así
   // que las aceptamos todas. Las "franchises" son mucho más amplias y a veces
@@ -623,22 +649,21 @@ async function getIgdbGameCollection(igdbId) {
   // Capcom, Puzzle Fighter o Teppen para la franquicia de Resident Evil), así
   // que de ahí solo colamos los que además tengan el nombre de la saga en el
   // propio título.
-  const juegosDeCollections = new Map();
-  for (const c of collections) {
-    for (const g of c.games || []) {
-      if (!juegosDeCollections.has(g.id)) juegosDeCollections.set(g.id, g);
+  const juegosPorId = new Map();
+  for (const g of datosColecciones || []) juegosPorId.set(g.id, g);
+
+  const nombreSaga = nombre.toLowerCase();
+  for (const g of datosFranquicias || []) {
+    if (juegosPorId.has(g.id)) continue;
+    if (g.name && g.name.toLowerCase().includes(nombreSaga)) {
+      juegosPorId.set(g.id, g);
     }
   }
 
-  const nombreSaga = nombre.toLowerCase();
-  const juegosPorId = new Map(juegosDeCollections);
-  for (const f of franchises) {
-    for (const g of f.games || []) {
-      if (juegosPorId.has(g.id)) continue;
-      if (g.name && g.name.toLowerCase().includes(nombreSaga)) {
-        juegosPorId.set(g.id, g);
-      }
-    }
+  // Red de seguridad: el propio juego consultado siempre debe estar presente,
+  // pase lo que pase con las dos consultas de arriba.
+  if (!juegosPorId.has(igdbId)) {
+    juegosPorId.set(igdbId, juegoActual);
   }
 
   const gamesCombinados = Array.from(juegosPorId.values());
@@ -893,30 +918,79 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
     // "Miles Morales", con su propio id/carátula/fecha reales.
     gamesFiltrados = gamesFiltrados.map((g) => (g.version_parent ? { ...g.version_parent, game_type: g.game_type } : g));
 
+    // Justo este paso puede introducir IDs duplicados de verdad: si dos SKUs
+    // distintos (p. ej. "Deluxe Edition" y "GOTY Edition") apuntan al MISMO
+    // version_parent, ambos se convierten en el mismo juego canónico. Hay que
+    // deduplicar por id ANTES de la lógica de nombres de abajo, que ya no
+    // colapsa por nombre a propósito (ver comentario más abajo) y dejaría
+    // pasar dos copias idénticas con el mismo id — rompiendo las "key" de
+    // React en el listado.
+    const porId = new Map();
+    for (const g of gamesFiltrados) {
+      if (!porId.has(g.id)) porId.set(g.id, g);
+    }
+    gamesFiltrados = Array.from(porId.values());
+
     // Red de seguridad para cuando IGDB tampoco tiene puesto version_parent:
     // si hay dos entradas con el mismo nombre base (uno con sufijo de edición
     // y otro sin él), nos quedamos con la que NO lleve sufijo.
     const sufijoEdicion = /\s*[-–:]\s*[^-–:]*\b(edici[oó]n|edition)\b[^-–:]*$/i;
     const quitarSufijoEdicion = (nombre) => nombre.replace(sufijoEdicion, '').trim();
     const nombreBase = (nombre) => quitarSufijoEdicion(nombre).toLowerCase();
+    const anioDe = (g) => (g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null);
 
-    const porNombreBase = new Map();
+    // OJO: si NINGUNA de las dos entradas lleva sufijo de edición, puede
+    // tratarse de dos cosas muy distintas:
+    //   a) Dos juegos DISTINTOS que comparten título por casualidad — el caso
+    //      típico es un remake con el mismo nombre que el original (p. ej.
+    //      "Resident Evil" de 1996 y su remake de 2002, también llamado solo
+    //      "Resident Evil"). Aquí SÍ hay que quedarse con los dos.
+    //   b) La MISMA versión del juego listada dos veces en IGDB, una entrada
+    //      por plataforma/región (p. ej. "Resident Evil 4" de PS2 y de
+    //      GameCube, ambas de 2005, sin ningún sufijo que las distinga). Aquí
+    //      hay que quedarse con una sola.
+    // La forma de distinguir (a) de (b) es el AÑO: si coincide (o ninguna de
+    // las dos tiene fecha), es el caso (b) y nos quedamos con la más antigua
+    // por fecha exacta ("la original"); si el año es distinto, es el caso (a).
+    let resultado = [];
     for (const g of gamesFiltrados) {
       const clave = nombreBase(g.name);
-      const actual = porNombreBase.get(clave);
-      if (!actual) {
-        porNombreBase.set(clave, g);
+      const idxExistente = resultado.findIndex((r) => nombreBase(r.name) === clave);
+      if (idxExistente === -1) {
+        resultado.push(g);
         continue;
       }
+      const existente = resultado[idxExistente];
       const gEsEdicionEspecial = sufijoEdicion.test(g.name);
-      const actualEsEdicionEspecial = sufijoEdicion.test(actual.name);
-      // Si el que ya teníamos es una edición especial y el nuevo no lo es,
-      // el nuevo gana (preferimos siempre la versión sin sufijo).
-      if (actualEsEdicionEspecial && !gEsEdicionEspecial) {
-        porNombreBase.set(clave, g);
+      const existenteEsEdicionEspecial = sufijoEdicion.test(existente.name);
+
+      if (gEsEdicionEspecial || existenteEsEdicionEspecial) {
+        // Relación edición/SKU de verdad: nos quedamos con el que NO lleve
+        // sufijo (si el que ya teníamos SÍ lo llevaba, el nuevo lo sustituye).
+        if (existenteEsEdicionEspecial && !gEsEdicionEspecial) {
+          resultado[idxExistente] = g;
+        }
+        continue;
       }
+
+      const anioG = anioDe(g);
+      const anioExistente = anioDe(existente);
+      if (anioG !== null && anioExistente !== null && anioG !== anioExistente) {
+        // Caso (a): años distintos, son juegos de verdad distintos.
+        resultado.push(g);
+        continue;
+      }
+
+      // Caso (b): mismo año (o sin fecha ninguno de los dos) — nos quedamos
+      // con la fecha exacta más antigua como "la original".
+      const fechaG = g.first_release_date ?? Infinity;
+      const fechaExistente = existente.first_release_date ?? Infinity;
+      if (fechaG < fechaExistente) {
+        resultado[idxExistente] = g;
+      }
+      // si no, nos quedamos con "existente" (ya guardado)
     }
-    gamesFiltrados = Array.from(porNombreBase.values());
+    gamesFiltrados = resultado;
 
     // Si algún juego de la saga ya está en tu base de datos local y tiene una
     // carátula personalizada, la usamos en vez de la de IGDB por defecto.
