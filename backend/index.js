@@ -904,6 +904,150 @@ app.get('/igdb/dlcs-updates/:igdbId', async (req, res) => {
 
 // --- Construye la respuesta de /igdb/collection a partir de lo GUARDADO en
 // CuratedCollection/CuratedCollectionItem (ya no consulta IGDB en absoluto). ---
+// --- Calcula una colección DIRECTAMENTE desde IGDB (sin tocar la base de
+// datos). La usan tanto la siembra inicial (primera vez que se ve una saga)
+// como el botón "Reiniciar" del admin — así las dos siempre usan exactamente
+// la misma lógica, sin que se puedan desincronizar entre sí con el tiempo.
+// Devuelve null si el juego no pertenece a ninguna saga reconocible, o
+// { nombre, todos } donde "todos" ya viene mezclado (juegos + cancelados,
+// según status) y ordenado por fecha de lanzamiento.
+async function calcularColeccionDesdeIgdb(igdbId) {
+  const collection = await getIgdbGameCollection(igdbId);
+  if (!collection || !collection.games) return null;
+
+  // game_type es el campo "vivo" de IGDB (sustituye al antiguo "category",
+  // que en muchas entradas viene vacío). Excluimos DLCs (1), expansiones (2),
+  // bundles (3), expansiones independientes (4), mods (5), episodios/
+  // temporadas (6/7), packs (13) y updates (14). También excluimos "port" (11),
+  // "remaster" (9) y "expanded_game" (10) — en la práctica IGDB mete las
+  // "Enhanced/Definitive Edition" bajo el tipo 10, no bajo el 9 oficial de
+  // "remaster", así que hay que excluir ambos para conseguir el mismo resultado.
+  // Se queda "remake" (8), que sí quieres ver (ej. "The Witcher Remake").
+  // EXCEPCIÓN: si el juego está cancelado (status = 6), lo dejamos pasar
+  // sin importar su game_type — así un DLC/expansión cancelado (p. ej.
+  // "Half-Life: Hostile Takeover") aparece junto a las entradas principales
+  // canceladas (p. ej. "Half-Life 2: Episode Three") en el apartado de
+  // Cancelados, en vez de mezclarse con el contenido publicado de verdad
+  // en la pestaña "Más contenido".
+  const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14];
+  let gamesFiltrados = collection.games.filter(
+    (g) => g.status === 6 || !TIPOS_EXCLUIDOS.includes(g.game_type)
+  );
+
+  // Si esta entrada es un SKU/edición concreto de OTRO juego ya existente
+  // en IGDB (version_parent relleno), usamos ese juego canónico en su lugar
+  // — así "Miles Morales - Launch Edition" pasa a ser directamente
+  // "Miles Morales", con su propio id/carátula/fecha reales.
+  gamesFiltrados = gamesFiltrados.map((g) => (g.version_parent ? { ...g.version_parent, game_type: g.game_type } : g));
+
+  // Justo este paso puede introducir IDs duplicados de verdad: si dos SKUs
+  // distintos (p. ej. "Deluxe Edition" y "GOTY Edition") apuntan al MISMO
+  // version_parent, ambos se convierten en el mismo juego canónico. Hay que
+  // deduplicar por id ANTES de la lógica de nombres de abajo, que ya no
+  // colapsa por nombre a propósito (ver comentario más abajo) y dejaría
+  // pasar dos copias idénticas con el mismo id — rompiendo las "key" de
+  // React en el listado.
+  const porId = new Map();
+  for (const g of gamesFiltrados) {
+    if (!porId.has(g.id)) porId.set(g.id, g);
+  }
+  gamesFiltrados = Array.from(porId.values());
+
+  // Red de seguridad para cuando IGDB tampoco tiene puesto version_parent:
+  // si hay dos entradas con el mismo nombre base (uno con sufijo de edición
+  // y otro sin él), nos quedamos con la que NO lleve sufijo.
+  const sufijoEdicion = /\s*[-–:]\s*[^-–:]*\b(edici[oó]n|edition)\b[^-–:]*$/i;
+  const quitarSufijoEdicion = (nombre) => nombre.replace(sufijoEdicion, '').trim();
+  const nombreBase = (nombre) => quitarSufijoEdicion(nombre).toLowerCase();
+  const anioDe = (g) => (g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null);
+
+  // OJO: si NINGUNA de las dos entradas lleva sufijo de edición, puede
+  // tratarse de dos cosas muy distintas:
+  //   a) Dos juegos DISTINTOS que comparten título por casualidad — el caso
+  //      típico es un remake con el mismo nombre que el original (p. ej.
+  //      "Resident Evil" de 1996 y su remake de 2002, también llamado solo
+  //      "Resident Evil"). Aquí SÍ hay que quedarse con los dos.
+  //   b) La MISMA versión del juego listada dos veces en IGDB, una entrada
+  //      por plataforma/región (p. ej. "Resident Evil 4" de PS2 y de
+  //      GameCube, ambas de 2005, sin ningún sufijo que las distinga). Aquí
+  //      hay que quedarse con una sola.
+  // La forma de distinguir (a) de (b) es el AÑO: si coincide (o ninguna de
+  // las dos tiene fecha), es el caso (b) y nos quedamos con la más antigua
+  // por fecha exacta ("la original"); si el año es distinto, es el caso (a).
+  let resultado = [];
+  for (const g of gamesFiltrados) {
+    const clave = nombreBase(g.name);
+    const idxExistente = resultado.findIndex((r) => nombreBase(r.name) === clave);
+    if (idxExistente === -1) {
+      resultado.push(g);
+      continue;
+    }
+    const existente = resultado[idxExistente];
+    const gEsEdicionEspecial = sufijoEdicion.test(g.name);
+    const existenteEsEdicionEspecial = sufijoEdicion.test(existente.name);
+
+    if (gEsEdicionEspecial || existenteEsEdicionEspecial) {
+      // Relación edición/SKU de verdad: nos quedamos con el que NO lleve
+      // sufijo (si el que ya teníamos SÍ lo llevaba, el nuevo lo sustituye).
+      if (existenteEsEdicionEspecial && !gEsEdicionEspecial) {
+        resultado[idxExistente] = g;
+      }
+      continue;
+    }
+
+    const anioG = anioDe(g);
+    const anioExistente = anioDe(existente);
+    if (anioG !== null && anioExistente !== null && anioG !== anioExistente) {
+      // Caso (a): años distintos, son juegos de verdad distintos.
+      resultado.push(g);
+      continue;
+    }
+
+    // Caso (b): mismo año (o sin fecha ninguno de los dos) — nos quedamos
+    // con la fecha exacta más antigua como "la original".
+    const fechaG = g.first_release_date ?? Infinity;
+    const fechaExistente = existente.first_release_date ?? Infinity;
+    if (fechaG < fechaExistente) {
+      resultado[idxExistente] = g;
+    }
+    // si no, nos quedamos con "existente" (ya guardado)
+  }
+  gamesFiltrados = resultado;
+
+  // Si algún juego de la saga ya está en tu base de datos local y tiene una
+  // carátula personalizada, la usamos en vez de la de IGDB por defecto.
+  const locales = await prisma.media.findMany({
+    where: { igdbId: { in: gamesFiltrados.map((g) => g.id) } },
+    select: { igdbId: true, portada: true },
+  });
+  const portadaLocalPorIgdbId = Object.fromEntries(
+    locales.filter((l) => l.portada).map((l) => [l.igdbId, l.portada])
+  );
+
+  const todos = gamesFiltrados
+    .map((g) => ({
+      igdbId: g.id,
+      // Aunque solo exista ESTA entrada (sin una "versión normal" con la que
+      // deduplicar, como pasaba con "Miles Morales - Launch Edition"),
+      // igualmente le quitamos el sufijo de edición para mostrar el título
+      // limpio — el SKU de tienda no aporta nada útil aquí.
+      titulo: quitarSufijoEdicion(g.name),
+      anio: g.first_release_date
+        ? new Date(g.first_release_date * 1000).getFullYear()
+        : null,
+      // Sin fecha (aún no anunciado) → Infinity, así se va al final al ordenar ascendente.
+      fechaLanzamiento: g.first_release_date || Infinity,
+      portada:
+        portadaLocalPorIgdbId[g.id] ||
+        (g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null),
+      // status === 6 es "cancelled" en IGDB.
+      cancelado: g.status === 6,
+    }))
+    .sort((a, b) => a.fechaLanzamiento - b.fechaLanzamiento);
+
+  return { nombre: collection.name, todos };
+}
+
 async function construirRespuestaDesdeCurated(collectionId, igdbId) {
   const collection = await prisma.curatedCollection.findUnique({
     where: { id: collectionId },
@@ -911,7 +1055,7 @@ async function construirRespuestaDesdeCurated(collectionId, igdbId) {
   });
 
   if (!collection) {
-    return { collection: null, games: [], cancelados: [], indiceActual: -1, prequel: null, sequel: null };
+    return { collection: null, games: [], cancelados: [], otros: [], indiceActual: -1, prequel: null, sequel: null };
   }
 
   // Si algún juego de la saga ya está guardado en Media con una carátula
@@ -932,10 +1076,12 @@ async function construirRespuestaDesdeCurated(collectionId, igdbId) {
     anio: item.anio,
     portada: portadaLocalPorIgdbId[item.igdbId] || item.portada,
     cancelado: item.cancelado,
+    esOtro: item.esOtro,
   }));
 
-  const games = todos.filter((g) => !g.cancelado);
+  const games = todos.filter((g) => !g.cancelado && !g.esOtro);
   const cancelados = todos.filter((g) => g.cancelado);
+  const otros = todos.filter((g) => g.esOtro);
 
   const indiceActual = games.findIndex((g) => g.igdbId === igdbId);
   const prequel = indiceActual > 0 ? games[indiceActual - 1] : null;
@@ -946,6 +1092,7 @@ async function construirRespuestaDesdeCurated(collectionId, igdbId) {
     collection: { id: collection.id, nombre: collection.nombre },
     games,
     cancelados,
+    otros,
     indiceActual,
     prequel,
     sequel,
@@ -972,150 +1119,19 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
       return res.json(await construirRespuestaDesdeCurated(itemExistente.collectionId, igdbId));
     }
 
-    const collection = await getIgdbGameCollection(igdbId);
-
-    if (!collection || !collection.games) {
-      return res.json({ collection: null, games: [], prequel: null, sequel: null });
+    const calculada = await calcularColeccionDesdeIgdb(igdbId);
+    if (!calculada) {
+      return res.json({ collection: null, games: [], cancelados: [], otros: [], prequel: null, sequel: null });
     }
-
-    // game_type es el campo "vivo" de IGDB (sustituye al antiguo "category",
-    // que en muchas entradas viene vacío). Excluimos DLCs (1), expansiones (2),
-    // bundles (3), expansiones independientes (4), mods (5), episodios/
-    // temporadas (6/7), packs (13) y updates (14). También excluimos "port" (11),
-    // "remaster" (9) y "expanded_game" (10) — en la práctica IGDB mete las
-    // "Enhanced/Definitive Edition" bajo el tipo 10, no bajo el 9 oficial de
-    // "remaster", así que hay que excluir ambos para conseguir el mismo resultado.
-    // Se queda "remake" (8), que sí quieres ver (ej. "The Witcher Remake").
-    // EXCEPCIÓN: si el juego está cancelado (status = 6), lo dejamos pasar
-    // sin importar su game_type — así un DLC/expansión cancelado (p. ej.
-    // "Half-Life: Hostile Takeover") aparece junto a las entradas principales
-    // canceladas (p. ej. "Half-Life 2: Episode Three") en el apartado de
-    // Cancelados, en vez de mezclarse con el contenido publicado de verdad
-    // en la pestaña "Más contenido".
-    const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14];
-    let gamesFiltrados = collection.games.filter(
-      (g) => g.status === 6 || !TIPOS_EXCLUIDOS.includes(g.game_type)
-    );
-
-    // Si esta entrada es un SKU/edición concreto de OTRO juego ya existente
-    // en IGDB (version_parent relleno), usamos ese juego canónico en su lugar
-    // — así "Miles Morales - Launch Edition" pasa a ser directamente
-    // "Miles Morales", con su propio id/carátula/fecha reales.
-    gamesFiltrados = gamesFiltrados.map((g) => (g.version_parent ? { ...g.version_parent, game_type: g.game_type } : g));
-
-    // Justo este paso puede introducir IDs duplicados de verdad: si dos SKUs
-    // distintos (p. ej. "Deluxe Edition" y "GOTY Edition") apuntan al MISMO
-    // version_parent, ambos se convierten en el mismo juego canónico. Hay que
-    // deduplicar por id ANTES de la lógica de nombres de abajo, que ya no
-    // colapsa por nombre a propósito (ver comentario más abajo) y dejaría
-    // pasar dos copias idénticas con el mismo id — rompiendo las "key" de
-    // React en el listado.
-    const porId = new Map();
-    for (const g of gamesFiltrados) {
-      if (!porId.has(g.id)) porId.set(g.id, g);
-    }
-    gamesFiltrados = Array.from(porId.values());
-
-    // Red de seguridad para cuando IGDB tampoco tiene puesto version_parent:
-    // si hay dos entradas con el mismo nombre base (uno con sufijo de edición
-    // y otro sin él), nos quedamos con la que NO lleve sufijo.
-    const sufijoEdicion = /\s*[-–:]\s*[^-–:]*\b(edici[oó]n|edition)\b[^-–:]*$/i;
-    const quitarSufijoEdicion = (nombre) => nombre.replace(sufijoEdicion, '').trim();
-    const nombreBase = (nombre) => quitarSufijoEdicion(nombre).toLowerCase();
-    const anioDe = (g) => (g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null);
-
-    // OJO: si NINGUNA de las dos entradas lleva sufijo de edición, puede
-    // tratarse de dos cosas muy distintas:
-    //   a) Dos juegos DISTINTOS que comparten título por casualidad — el caso
-    //      típico es un remake con el mismo nombre que el original (p. ej.
-    //      "Resident Evil" de 1996 y su remake de 2002, también llamado solo
-    //      "Resident Evil"). Aquí SÍ hay que quedarse con los dos.
-    //   b) La MISMA versión del juego listada dos veces en IGDB, una entrada
-    //      por plataforma/región (p. ej. "Resident Evil 4" de PS2 y de
-    //      GameCube, ambas de 2005, sin ningún sufijo que las distinga). Aquí
-    //      hay que quedarse con una sola.
-    // La forma de distinguir (a) de (b) es el AÑO: si coincide (o ninguna de
-    // las dos tiene fecha), es el caso (b) y nos quedamos con la más antigua
-    // por fecha exacta ("la original"); si el año es distinto, es el caso (a).
-    let resultado = [];
-    for (const g of gamesFiltrados) {
-      const clave = nombreBase(g.name);
-      const idxExistente = resultado.findIndex((r) => nombreBase(r.name) === clave);
-      if (idxExistente === -1) {
-        resultado.push(g);
-        continue;
-      }
-      const existente = resultado[idxExistente];
-      const gEsEdicionEspecial = sufijoEdicion.test(g.name);
-      const existenteEsEdicionEspecial = sufijoEdicion.test(existente.name);
-
-      if (gEsEdicionEspecial || existenteEsEdicionEspecial) {
-        // Relación edición/SKU de verdad: nos quedamos con el que NO lleve
-        // sufijo (si el que ya teníamos SÍ lo llevaba, el nuevo lo sustituye).
-        if (existenteEsEdicionEspecial && !gEsEdicionEspecial) {
-          resultado[idxExistente] = g;
-        }
-        continue;
-      }
-
-      const anioG = anioDe(g);
-      const anioExistente = anioDe(existente);
-      if (anioG !== null && anioExistente !== null && anioG !== anioExistente) {
-        // Caso (a): años distintos, son juegos de verdad distintos.
-        resultado.push(g);
-        continue;
-      }
-
-      // Caso (b): mismo año (o sin fecha ninguno de los dos) — nos quedamos
-      // con la fecha exacta más antigua como "la original".
-      const fechaG = g.first_release_date ?? Infinity;
-      const fechaExistente = existente.first_release_date ?? Infinity;
-      if (fechaG < fechaExistente) {
-        resultado[idxExistente] = g;
-      }
-      // si no, nos quedamos con "existente" (ya guardado)
-    }
-    gamesFiltrados = resultado;
-
-    // Si algún juego de la saga ya está en tu base de datos local y tiene una
-    // carátula personalizada, la usamos en vez de la de IGDB por defecto.
-    const locales = await prisma.media.findMany({
-      where: { igdbId: { in: gamesFiltrados.map((g) => g.id) } },
-      select: { igdbId: true, portada: true },
-    });
-    const portadaLocalPorIgdbId = Object.fromEntries(
-      locales.filter((l) => l.portada).map((l) => [l.igdbId, l.portada])
-    );
-
-    const todos = gamesFiltrados
-      .map((g) => ({
-        igdbId: g.id,
-        // Aunque solo exista ESTA entrada (sin una "versión normal" con la que
-        // deduplicar, como pasaba con "Miles Morales - Launch Edition"),
-        // igualmente le quitamos el sufijo de edición para mostrar el título
-        // limpio — el SKU de tienda no aporta nada útil aquí.
-        titulo: quitarSufijoEdicion(g.name),
-        anio: g.first_release_date
-          ? new Date(g.first_release_date * 1000).getFullYear()
-          : null,
-        // Sin fecha (aún no anunciado) → Infinity, así se va al final al ordenar ascendente.
-        fechaLanzamiento: g.first_release_date || Infinity,
-        portada:
-          portadaLocalPorIgdbId[g.id] ||
-          (g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null),
-        // status === 6 es "cancelled" en IGDB.
-        cancelado: g.status === 6,
-      }))
-      .sort((a, b) => a.fechaLanzamiento - b.fechaLanzamiento);
 
     // Primera vez que se ve esta saga: la guardamos como semilla editable en
     // vez de solo devolverla. A partir de aquí, esta saga ya no se vuelve a
     // calcular desde IGDB (ver el bloque de arriba con curatedCollectionItem).
     const nuevaCollection = await prisma.curatedCollection.create({
       data: {
-        nombre: collection.name,
+        nombre: calculada.nombre,
         items: {
-          create: todos.map((g, index) => ({
+          create: calculada.todos.map((g, index) => ({
             igdbId: g.igdbId,
             titulo: g.titulo,
             anio: g.anio,
@@ -1223,6 +1239,18 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
 app.post('/media/igdb', async (req, res) => {
   try {
     const { igdbId } = req.body;
+
+    // Si este juego ya está guardado, devolvemos la fila que ya existe tal
+    // cual — sin volver a preguntarle nada a IGDB/SteamGridDB. Esto es
+    // importante: sin esta comprobación, cada vez que se navegaba a un juego
+    // (p. ej. desde precuela/secuela en la saga) se creaba una fila NUEVA en
+    // la base de datos con la carátula/banner por defecto de IGDB, en vez de
+    // reutilizar la que ya tenías — así que cualquier carátula personalizada
+    // que hubieras elegido a mano se "perdía" (en realidad no se borraba,
+    // pero acababas viendo una fila duplicada distinta, con la de IGDB).
+    const existente = await prisma.media.findFirst({ where: { igdbId: parseInt(igdbId, 10) } });
+    if (existente) return res.json(existente);
+
     const token = await getIgdbToken();
 
     const body = `fields name,cover.url,first_release_date,summary; where id = ${igdbId};`;
@@ -1382,31 +1410,36 @@ app.patch('/admin/curated-collection-items/reorder', requireAuth, requireAdmin, 
 // cover, first_release_date), así que aquí no hace falta volver a preguntarle
 // nada a IGDB — solo insertar la fila en el sitio correcto.
 //
-// "En el sitio correcto" = por año, dentro del grupo (games o cancelados) al
-// que se añade, PERO respetando el orden que el admin ya haya dejado a mano
-// con el arrastrar-y-soltar para el resto de juegos: se recorre la lista tal
-// como está ahora mismo y se inserta justo antes del primer juego con año
-// posterior (los que no tienen año van siempre al final, igual que en el
-// resto de la app), en vez de reordenar todo el grupo entero por fecha.
+// "En el sitio correcto" = por año, dentro del grupo (juegos, cancelados u
+// otros) al que se añade, PERO respetando el orden que el admin ya haya
+// dejado a mano con el arrastrar-y-soltar para el resto de juegos: se
+// recorre la lista tal como está ahora mismo y se inserta justo antes del
+// primer juego con año posterior (los que no tienen año van siempre al
+// final, igual que en el resto de la app), en vez de reordenar todo el grupo
+// entero por fecha.
 app.post('/admin/curated-collection-items', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { collectionId, igdbId, titulo, anio, portada, cancelado } = req.body;
+    const { collectionId, igdbId, titulo, anio, portada, grupo } = req.body;
 
     const collectionIdNum = parseInt(collectionId, 10);
     const igdbIdNum = parseInt(igdbId, 10);
     if (Number.isNaN(collectionIdNum) || Number.isNaN(igdbIdNum) || !titulo) {
       return res.status(400).json({ error: 'Faltan datos: collectionId, igdbId y titulo son obligatorios' });
     }
+    if (!['juegos', 'cancelados', 'otros'].includes(grupo)) {
+      return res.status(400).json({ error: 'grupo debe ser "juegos", "cancelados" u "otros"' });
+    }
 
     const coleccion = await prisma.curatedCollection.findUnique({ where: { id: collectionIdNum } });
     if (!coleccion) return res.status(404).json({ error: 'Colección no encontrada' });
 
-    const esCancelado = !!cancelado;
+    const esCancelado = grupo === 'cancelados';
+    const esOtro = grupo === 'otros';
     const anioNum = anio === null || anio === undefined || anio === '' ? null : parseInt(anio, 10);
 
-    // Lista actual del mismo grupo (games o cancelados), en su orden vigente.
+    // Lista actual del mismo grupo, en su orden vigente.
     const itemsDelGrupo = await prisma.curatedCollectionItem.findMany({
-      where: { collectionId: collectionIdNum, cancelado: esCancelado },
+      where: { collectionId: collectionIdNum, cancelado: esCancelado, esOtro },
       orderBy: { orden: 'asc' },
       select: { id: true, anio: true },
     });
@@ -1427,6 +1460,7 @@ app.post('/admin/curated-collection-items', requireAuth, requireAdmin, async (re
           anio: anioNum,
           portada: portada || null,
           cancelado: esCancelado,
+          esOtro,
           orden: itemsDelGrupo.length, // provisional, se recoloca justo debajo
         },
       });
@@ -1452,6 +1486,56 @@ app.post('/admin/curated-collection-items', requireAuth, requireAdmin, async (re
   } catch (error) {
     console.error('ERROR EN POST /admin/curated-collection-items:', error);
     res.status(500).json({ error: 'Error al añadir el juego a la colección' });
+  }
+});
+
+// --- COLECCIONES CURADAS: reiniciar (solo admin) ---
+// Borra TODO lo que haya en la colección (orden manual, juegos borrados,
+// juegos añadidos a mano, cancelados marcados a mano, absolutamente todo,
+// incluido el grupo "Other") y la vuelve a calcular desde cero con IGDB —
+// exactamente lo mismo que pasaría si esta saga no se hubiera visto nunca
+// antes. Usa la MISMA función que la siembra inicial (calcularColeccionDesdeIgdb),
+// así que nunca se puede desincronizar de cómo se sembraría hoy.
+app.post('/admin/curated-collections/:collectionId/reset', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const collectionId = parseInt(req.params.collectionId, 10);
+    const igdbId = parseInt(req.body.igdbId, 10);
+    if (Number.isNaN(collectionId) || Number.isNaN(igdbId)) {
+      return res.status(400).json({ error: 'collectionId e igdbId son obligatorios' });
+    }
+
+    const coleccion = await prisma.curatedCollection.findUnique({ where: { id: collectionId } });
+    if (!coleccion) return res.status(404).json({ error: 'Colección no encontrada' });
+
+    const calculada = await calcularColeccionDesdeIgdb(igdbId);
+    if (!calculada) {
+      return res.status(422).json({ error: 'IGDB ya no reconoce ninguna saga para este juego' });
+    }
+
+    // Fuera todo lo que hubiera (borrados, añadidos, orden manual, "Other"...)
+    await prisma.curatedCollectionItem.deleteMany({ where: { collectionId } });
+
+    await prisma.curatedCollection.update({
+      where: { id: collectionId },
+      data: {
+        nombre: calculada.nombre,
+        items: {
+          create: calculada.todos.map((g, index) => ({
+            igdbId: g.igdbId,
+            titulo: g.titulo,
+            anio: g.anio,
+            portada: g.portada,
+            cancelado: g.cancelado,
+            orden: index,
+          })),
+        },
+      },
+    });
+
+    res.json(await construirRespuestaDesdeCurated(collectionId, igdbId));
+  } catch (error) {
+    console.error('ERROR EN POST /admin/curated-collections/:collectionId/reset:', error);
+    res.status(500).json({ error: 'Error al reiniciar la colección' });
   }
 });
 

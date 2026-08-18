@@ -129,6 +129,7 @@ model CuratedCollectionItem {
   anio         Int?
   portada      String?
   cancelado    Boolean  @default(false) // true = va en el apartado "Cancelados"
+  esOtro       Boolean  @default(false) // true = va en el apartado "Other" (grupo libre definido a mano por el admin)
   orden        Int      @default(0)     // controla el orden dentro de la saga (arrastrar y soltar)
   createdAt    DateTime @default(now())
 

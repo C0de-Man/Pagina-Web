@@ -18,6 +18,7 @@ interface CollectionResponse {
     collection: { id: number; nombre: string } | null;
     games: JuegoSaga[];
     cancelados: JuegoSaga[];
+    otros: JuegoSaga[];
     indiceActual: number;
     prequel: JuegoSaga | null;
     sequel: JuegoSaga | null;
@@ -59,10 +60,12 @@ export default function GameCollectionLinks({
     const [data, setData] = useState<CollectionResponse | null>(null);
     const [modalAbierto, setModalAbierto] = useState(false);
     const [navegandoA, setNavegandoA] = useState<number | null>(null);
-    const [tabModal, setTabModal] = useState<'juegos' | 'cancelados'>('juegos');
+    const [tabModal, setTabModal] = useState<'juegos' | 'cancelados' | 'otros'>('juegos');
     const [juegoABorrar, setJuegoABorrar] = useState<JuegoSaga | null>(null);
     const [borrando, setBorrando] = useState(false);
     const [arrastrandoId, setArrastrandoId] = useState<number | null>(null);
+    const [confirmandoReinicio, setConfirmandoReinicio] = useState(false);
+    const [reiniciando, setReiniciando] = useState(false);
 
     // --- Buscador para añadir juegos (solo admin) ---
     const [busquedaTexto, setBusquedaTexto] = useState('');
@@ -148,6 +151,7 @@ export default function GameCollectionLinks({
                     ...prev,
                     games: prev.games.filter((g) => g.id !== juegoABorrar.id),
                     cancelados: prev.cancelados.filter((g) => g.id !== juegoABorrar.id),
+                    otros: prev.otros.filter((g) => g.id !== juegoABorrar.id),
                     prequel: prev.prequel?.id === juegoABorrar.id ? null : prev.prequel,
                     sequel: prev.sequel?.id === juegoABorrar.id ? null : prev.sequel,
                 };
@@ -160,18 +164,20 @@ export default function GameCollectionLinks({
     }
 
     // --- Arrastrar y soltar para reordenar (solo dentro de la pestaña actual,
-    // Juegos y Cancelados nunca se mezclan porque cada una es una lista
+    // Juegos, Cancelados y Other nunca se mezclan porque cada una es una lista
     // separada dentro de "data"). Solo activo para admins.
     function listaDeLaPestanaActual(): JuegoSaga[] {
-        return tabModal === 'juegos' ? data!.games : data!.cancelados;
+        if (tabModal === 'juegos') return data!.games;
+        if (tabModal === 'cancelados') return data!.cancelados;
+        return data!.otros;
     }
 
     function actualizarListaDeLaPestanaActual(nuevaLista: JuegoSaga[]) {
         setData((prev) => {
             if (!prev) return prev;
-            return tabModal === 'juegos'
-                ? { ...prev, games: nuevaLista }
-                : { ...prev, cancelados: nuevaLista };
+            if (tabModal === 'juegos') return { ...prev, games: nuevaLista };
+            if (tabModal === 'cancelados') return { ...prev, cancelados: nuevaLista };
+            return { ...prev, otros: nuevaLista };
         });
     }
 
@@ -222,7 +228,7 @@ export default function GameCollectionLinks({
         }
     }
 
-    function cambiarTab(nuevaTab: 'juegos' | 'cancelados') {
+    function cambiarTab(nuevaTab: 'juegos' | 'cancelados' | 'otros') {
         setTabModal(nuevaTab);
         setBusquedaTexto('');
         setResultadosBusqueda([]);
@@ -230,8 +236,8 @@ export default function GameCollectionLinks({
     }
 
     // Añade el juego elegido del buscador al grupo de la pestaña actual
-    // (Juegos o Cancelados) — así es como el admin "elige a cuál añadirlo":
-    // cambiando de pestaña antes de buscar.
+    // (Juegos, Cancelados u Other) — así es como el admin "elige a cuál
+    // añadirlo": cambiando de pestaña antes de buscar.
     async function anadirJuego(resultado: ResultadoIgdb) {
         if (!data?.collection) return;
         setAnadiendoId(resultado.id);
@@ -249,7 +255,7 @@ export default function GameCollectionLinks({
                         ? new Date(resultado.first_release_date * 1000).getFullYear()
                         : null,
                     portada: resultado.cover?.url || null,
-                    cancelado: tabModal === 'cancelados',
+                    grupo: tabModal,
                 }),
             });
             const body = await res.json();
@@ -266,6 +272,30 @@ export default function GameCollectionLinks({
         } finally {
             setAnadiendoId(null);
         }
+    }
+
+    // Borra TODO lo guardado a mano en esta colección y la recalcula desde
+    // IGDB de cero, como si nunca se hubiera tocado. Acción destructiva —
+    // por eso pide confirmación antes de ejecutarse.
+    async function confirmarReinicio() {
+        if (!data?.collection) return;
+        setReiniciando(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/admin/curated-collections/${data.collection.id}/reset`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ igdbId }),
+            });
+            if (!res.ok) throw new Error('No se pudo reiniciar la colección');
+            const nuevaData: CollectionResponse = await res.json();
+            setData(nuevaData);
+            setTabModal('juegos');
+            setConfirmandoReinicio(false);
+        } catch (err) {
+            console.error('Error al reiniciar la colección', err);
+        }
+        setReiniciando(false);
     }
 
     if (!data || !data.collection || data.games.length <= 1) return null;
@@ -351,12 +381,22 @@ export default function GameCollectionLinks({
                     >
                         <div className="mb-6 flex items-center justify-between">
                             <h2 className="text-xl font-bold text-white">{data.collection?.nombre} — Colección</h2>
-                            <button
-                                onClick={() => setModalAbierto(false)}
-                                className="text-2xl text-gray-400 hover:text-white cursor-pointer transition"
-                            >
-                                ×
-                            </button>
+                            <div className="flex items-center gap-4">
+                                {esAdmin && (
+                                    <button
+                                        onClick={() => setConfirmandoReinicio(true)}
+                                        className="text-xs font-semibold text-amber-400 hover:text-amber-300 underline cursor-pointer transition"
+                                    >
+                                        Reiniciar
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setModalAbierto(false)}
+                                    className="text-2xl text-gray-400 hover:text-white cursor-pointer transition"
+                                >
+                                    ×
+                                </button>
+                            </div>
                         </div>
 
                         <div className="flex gap-6 border-b border-gray-800 mb-6">
@@ -380,6 +420,17 @@ export default function GameCollectionLinks({
                                     Cancelados
                                 </button>
                             )}
+                            {(data.otros.length > 0 || esAdmin) && (
+                                <button
+                                    onClick={() => cambiarTab('otros')}
+                                    className={`pb-3 text-sm font-semibold transition cursor-pointer ${tabModal === 'otros'
+                                        ? 'text-white border-b-2 border-white'
+                                        : 'text-gray-500 hover:text-gray-300'
+                                        }`}
+                                >
+                                    Other
+                                </button>
+                            )}
                         </div>
 
                         {esAdmin && (
@@ -391,7 +442,9 @@ export default function GameCollectionLinks({
                                     placeholder={
                                         tabModal === 'cancelados'
                                             ? 'Añadir un juego cancelado a esta saga...'
-                                            : 'Añadir un juego a esta saga...'
+                                            : tabModal === 'otros'
+                                                ? 'Añadir un juego a "Other"...'
+                                                : 'Añadir un juego a esta saga...'
                                     }
                                     className="w-full max-w-md bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
                                 />
@@ -409,7 +462,7 @@ export default function GameCollectionLinks({
                                                 const anioResultado = r.first_release_date
                                                     ? new Date(r.first_release_date * 1000).getFullYear()
                                                     : null;
-                                                const yaEnLaLista = [...data.games, ...data.cancelados].some(
+                                                const yaEnLaLista = [...data.games, ...data.cancelados, ...data.otros].some(
                                                     (g) => g.igdbId === r.id
                                                 );
                                                 return (
@@ -442,7 +495,7 @@ export default function GameCollectionLinks({
                         )}
 
                         <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-5">
-                            {(tabModal === 'juegos' ? data.games : data.cancelados).map((g) => {
+                            {(tabModal === 'juegos' ? data.games : tabModal === 'cancelados' ? data.cancelados : data.otros).map((g) => {
                                 const esActual = g.igdbId === currentMediaIgdbId;
                                 return (
                                     <div
@@ -518,6 +571,42 @@ export default function GameCollectionLinks({
                                 className="px-4 py-2 text-sm rounded bg-red-600 hover:bg-red-500 text-white font-semibold transition cursor-pointer disabled:opacity-50"
                             >
                                 {borrando ? 'Eliminando...' : 'Sí, eliminar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal de confirmación de reinicio */}
+            {confirmandoReinicio && (
+                <div
+                    className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80"
+                    onClick={() => !reiniciando && setConfirmandoReinicio(false)}
+                >
+                    <div
+                        className="w-[90vw] max-w-sm rounded-lg bg-[#1c2228] border border-gray-700 p-6 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 className="text-lg font-bold text-white mb-2">¿Reiniciar esta colección?</h3>
+                        <p className="text-sm text-gray-400 mb-6">
+                            Se va a borrar <span className="text-white font-semibold">todo</span> lo que hayas editado a
+                            mano en "{data?.collection?.nombre}" — orden, juegos borrados, juegos añadidos, cancelados y
+                            "Other" — y se va a recalcular desde cero con los datos de IGDB. Esto no se puede deshacer.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setConfirmandoReinicio(false)}
+                                disabled={reiniciando}
+                                className="px-4 py-2 text-sm text-gray-300 hover:text-white transition cursor-pointer disabled:opacity-50"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={confirmarReinicio}
+                                disabled={reiniciando}
+                                className="px-4 py-2 text-sm rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold transition cursor-pointer disabled:opacity-50"
+                            >
+                                {reiniciando ? 'Reiniciando...' : 'Sí, reiniciar'}
                             </button>
                         </div>
                     </div>
