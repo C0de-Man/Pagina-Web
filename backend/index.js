@@ -1198,6 +1198,66 @@ async function buscarJuegoEnSteamGridDB(nombre, anio) {
   return coincidencia ? coincidencia.data.id : candidatos[0].id;
 }
 
+// --- BÚSQUEDA DE RESPALDO EN STEAMGRIDDB, MÁS FLEXIBLE ---
+// Solo se usa cuando la búsqueda exacta de arriba no encuentra el juego o no
+// tiene ninguna imagen del tamaño que buscamos. Muchos juegos están en
+// SteamGridDB bajo el nombre de una versión concreta ("Grand Theft Auto IV:
+// The Complete Edition", "... & Episodes From Liberty City"...) en vez del
+// nombre "pelado" que tenemos guardado — la coincidencia exacta los descarta,
+// aunque tengan cientos de carátulas disponibles para el mismo juego.
+// Aquí relajamos la comparación: basta con que coincidan las primeras
+// palabras (mínimo 2, hasta 4) del nombre, así "Grand Theft Auto IV" case
+// con "Grand Theft Auto IV: The Complete Edition" pero NO con "Grand Theft
+// Auto V" (la 4ª palabra ya no coincide).
+async function buscarJuegoEnSteamGridDBFlexible(nombre) {
+  const res = await fetch(`https://www.steamgriddb.com/api/v2/search/autocomplete/${encodeURIComponent(nombre)}`, {
+    headers: { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` }
+  });
+  const data = await res.json();
+
+  const normalizar = (s) => (s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, ' ').trim();
+  const palabrasNombre = normalizar(nombre).split(' ').filter(Boolean);
+
+  const coincideEnLasPrimerasPalabras = (candidatoNombre) => {
+    const palabrasCandidato = normalizar(candidatoNombre).split(' ').filter(Boolean);
+    const n = Math.min(4, palabrasNombre.length, palabrasCandidato.length);
+    if (n < 2) return false; // títulos demasiado cortos, no arriesgamos
+    for (let i = 0; i < n; i++) {
+      if (palabrasNombre[i] !== palabrasCandidato[i]) return false;
+    }
+    return true;
+  };
+
+  const candidato = (data?.data || []).find((c) => coincideEnLasPrimerasPalabras(c.name));
+  return candidato ? candidato.id : null;
+}
+
+// --- Trae TODAS las carátulas de SteamGridDB para un juego, no solo las
+// primeras 50 --- La API de SteamGridDB pagina de 50 en 50 (no admite pedir
+// más por página), así que hay que ir pidiendo página a página. Ponemos un
+// tope de páginas para no disparar peticiones sin fin en juegos muy
+// populares con cientos de carátulas subidas (con MAX_PAGINAS = 4 llegamos
+// hasta 200, de sobra para elegir sin sobrecargar el desplegable).
+// Nota: el campo "total" que devuelve la propia API de SteamGridDB es poco
+// fiable (a veces cuenta duplicado), así que en vez de fiarnos de ese número
+// paramos en cuanto una página devuelve menos de 50 resultados — eso es lo
+// que de verdad indica que ya no queda nada más.
+const SGDB_MAX_PAGINAS = 4;
+async function obtenerTodasLasGridsSteamGridDB(sgdbId, headers) {
+  let todas = [];
+  for (let pagina = 0; pagina < SGDB_MAX_PAGINAS; pagina++) {
+    const resp = await fetch(
+      `https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?dimensions=600x900,342x482,660x930&page=${pagina}`,
+      { headers }
+    );
+    const data = await resp.json();
+    const pagina_data = data?.data || [];
+    todas = todas.concat(pagina_data.map((g) => g.url));
+    if (pagina_data.length < 50) break; // última página, no hace falta seguir
+  }
+  return todas;
+}
+
 app.get('/steamgriddb/images/:mediaId', async (req, res) => {
   try {
     const mediaId = parseInt(req.params.mediaId);
@@ -1211,15 +1271,54 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
     let heroes = [];
 
     if (sgdbId) {
-      // "grids" en formato vertical (carátula tipo póster) = dimensiones 600x900
-      const resCovers = await fetch(`https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?dimensions=600x900`, { headers });
-      const dataCovers = await resCovers.json();
-      covers = (dataCovers?.data || []).map(g => g.url);
+      // "grids" en formato vertical (carátula tipo póster). Antes solo
+      // pedíamos 600x900 — pero muchos juegos tienen carátulas subidas por
+      // la comunidad en otros tamaños verticales habituales (342x482,
+      // 660x930) y ninguna en 600x900 concretamente, lo que dejaba la
+      // pestaña "Carátula" vacía aunque SÍ hubiera opciones disponibles.
+      covers = await obtenerTodasLasGridsSteamGridDB(sgdbId, headers);
 
       // "heroes" = imagen ancha tipo banner
       const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}`, { headers });
       const dataHeroes = await resHeroes.json();
       heroes = (dataHeroes?.data || []).map(h => h.url);
+    }
+
+    // Si la búsqueda exacta no encontró ninguna carátula (aunque el juego
+    // SÍ exista en SteamGridDB bajo otro nombre, tipo edición/versión — "The
+    // Complete Edition", "& Episodes From Liberty City"...), probamos con la
+    // búsqueda flexible antes de rendirnos y caer al respaldo de IGDB.
+    if (covers.length === 0) {
+      const sgdbIdAlternativo = await buscarJuegoEnSteamGridDBFlexible(media.tituloOriginal || media.titulo);
+      if (sgdbIdAlternativo && sgdbIdAlternativo !== sgdbId) {
+        covers = await obtenerTodasLasGridsSteamGridDB(sgdbIdAlternativo, headers);
+      }
+    }
+
+    // Si SteamGridDB no tiene ninguna carátula en ningún tamaño (o no
+    // encontró el juego), al menos ofrecemos la carátula oficial de IGDB
+    // como opción, en vez de dejar la pestaña completamente vacía.
+    if (covers.length === 0 && media.igdbId) {
+      try {
+        const token = await getIgdbToken();
+        const body = `fields cover.url; where id = ${media.igdbId};`;
+        const respIgdb = await fetchIgdb('https://api.igdb.com/v4/games', {
+          method: 'POST',
+          headers: {
+            'Client-ID': process.env.IGDB_CLIENT_ID,
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'text/plain',
+          },
+          body,
+        });
+        const dataIgdb = await respIgdb.json();
+        const coverUrl = dataIgdb?.[0]?.cover?.url;
+        if (coverUrl) {
+          covers = [`https:${coverUrl.replace('t_thumb', 't_cover_big')}`];
+        }
+      } catch (e) {
+        console.error('No se pudo obtener carátula de respaldo desde IGDB', e);
+      }
     }
 
     // Si SteamGridDB no tiene banners (o no encontró el juego), probamos con

@@ -27,7 +27,7 @@ model Media {
   sinopsis  String?
   remakeOfTmdbId Int?
   remakeChecked  Boolean @default(false)
-  igdbId    Int?
+  igdbId    Int?      @unique // un juego solo puede tener UNA fila (evita duplicados como los que tuvimos que limpiar a mano)
   sinopsisTraducciones Json? // caché: { "es-ES": "texto ya traducido", "fr-FR": "..." }
   createdAt DateTime  @default(now())
   gameLogs  GameLog[]
