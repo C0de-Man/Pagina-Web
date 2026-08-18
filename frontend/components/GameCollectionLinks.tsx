@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { urlFicha } from '@/lib/slug';
 
@@ -66,6 +66,7 @@ export default function GameCollectionLinks({
     const [arrastrandoId, setArrastrandoId] = useState<number | null>(null);
     const [confirmandoReinicio, setConfirmandoReinicio] = useState(false);
     const [reiniciando, setReiniciando] = useState(false);
+    const idPeticionRef = useRef(0);
 
     // --- Buscador para añadir juegos (solo admin) ---
     const [busquedaTexto, setBusquedaTexto] = useState('');
@@ -75,23 +76,18 @@ export default function GameCollectionLinks({
     const [errorAnadir, setErrorAnadir] = useState<string | null>(null);
 
     function cargarColeccion() {
+        const miId = ++idPeticionRef.current;
         fetch(`${API_URL}/igdb/collection/${igdbId}`)
             .then((r) => r.json())
-            .then((d: CollectionResponse) => setData(d))
+            .then((d: CollectionResponse) => {
+                if (miId === idPeticionRef.current) setData(d);
+            })
             .catch((err) => console.error('Error cargando saga del juego', err));
     }
 
     useEffect(() => {
-        let cancelado = false;
-        fetch(`${API_URL}/igdb/collection/${igdbId}`)
-            .then((r) => r.json())
-            .then((d: CollectionResponse) => {
-                if (!cancelado) setData(d);
-            })
-            .catch((err) => console.error('Error cargando saga del juego', err));
-        return () => {
-            cancelado = true;
-        };
+        cargarColeccion();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [igdbId]);
 
     // Busca en IGDB mientras se escribe (con un pequeño debounce), igual que
