@@ -39,30 +39,41 @@ async function getIgdbToken() {
 // Su API gratuita limita a unas 4 peticiones por segundo. Como cada ficha de
 // juego ahora dispara varias llamadas casi a la vez (remake, DLC, updates,
 // colección, detalles...), sin esto IGDB responde 429 y esas secciones se
-// quedan vacías o con datos viejos. Centralizamos AQUÍ todas las llamadas para
-// espaciarlas, y reintentamos una vez si aun así nos limitan.
-const IGDB_INTERVALO_MS = 260; // ~3.8 peticiones/segundo, con margen bajo el límite real
-let igdbColaUltimaEjecucion = Promise.resolve();
+// quedan vacías o con datos viejos. En vez de espaciarlas una a una (que
+// notabas lento al recargar), dejamos pasar varias A LA VEZ hasta un límite,
+// y el resto espera en cola hasta que se libera un hueco.
+const IGDB_MAX_CONCURRENTE = 4;
+let igdbPeticionesEnVuelo = 0;
+const igdbCola = [];
+
+function procesarColaIgdb() {
+  while (igdbPeticionesEnVuelo < IGDB_MAX_CONCURRENTE && igdbCola.length > 0) {
+    const tarea = igdbCola.shift();
+    igdbPeticionesEnVuelo++;
+    tarea().finally(() => {
+      igdbPeticionesEnVuelo--;
+      procesarColaIgdb();
+    });
+  }
+}
 
 function fetchIgdb(url, options) {
-  const ejecutar = async () => {
-    const res = await fetch(url, options);
-    if (res.status === 429) {
-      await new Promise((r) => setTimeout(r, 1000));
-      return fetch(url, options);
-    }
-    return res;
-  };
-
-  const resultado = igdbColaUltimaEjecucion.then(
-    () => new Promise((resolve) => setTimeout(resolve, IGDB_INTERVALO_MS))
-  ).then(ejecutar);
-
-  // Encadenamos la cola al resultado, pero sin dejar que un fallo aquí bloquee
-  // las peticiones siguientes en espera.
-  igdbColaUltimaEjecucion = resultado.catch(() => {});
-
-  return resultado;
+  return new Promise((resolve, reject) => {
+    const ejecutar = async () => {
+      try {
+        let res = await fetch(url, options);
+        if (res.status === 429) {
+          await new Promise((r) => setTimeout(r, 1000));
+          res = await fetch(url, options);
+        }
+        resolve(res);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    igdbCola.push(ejecutar);
+    procesarColaIgdb();
+  });
 }
 
 // --- DETALLES DE UN JUEGO: plataformas, desarrollador, distribuidora, géneros ---
@@ -524,19 +535,26 @@ async function traducirTexto(texto, idiomaDestino) {
 async function getIgdbGameCollection(igdbId) {
   const token = await getIgdbToken();
 
-  // IGDB: un juego puede tener 0, 1 o varias "collections" (sagas).
-  // Tomamos la primera que tenga más de 1 juego (evita sagas vacías/ruido).
+  // IGDB reparte a veces los juegos de una misma saga en VARIAS "collections"
+  // pequeñas (subseries) en lugar de una sola completa, así que quedarnos solo
+  // con "la colección más grande" dejaba fuera títulos (p. ej. Resident Evil
+  // clásicos en una collection y los spin-off en otra). Por eso pedimos TODAS
+  // las collections Y también "franchises" (la agrupación más amplia de IGDB,
+  // pensada para toda la saga) y las combinamos, deduplicando por id.
   // version_parent: cuando una entrada es un SKU/edición concreta ("Launch
   // Edition", "Ultimate Edition"...) de OTRO juego ya existente en IGDB, este
   // campo apunta a esa versión canónica. Lo pedimos para poder usar siempre
   // el juego "de verdad" en vez de la edición de tienda.
+  const camposJuego = [
+    'name', 'slug', 'cover.url', 'first_release_date', 'id', 'game_type', 'status',
+    'version_parent.name', 'version_parent.slug', 'version_parent.cover.url',
+    'version_parent.first_release_date', 'version_parent.id',
+  ];
+  const camposCollections = camposJuego.map((c) => `collections.games.${c}`).join(', ');
+  const camposFranchises = camposJuego.map((c) => `franchises.games.${c}`).join(', ');
   const query = `
-    fields name, collections.name, collections.games.name, collections.games.slug,
-           collections.games.cover.url, collections.games.first_release_date,
-           collections.games.id, collections.games.game_type, collections.games.status,
-           collections.games.version_parent.name, collections.games.version_parent.slug,
-           collections.games.version_parent.cover.url, collections.games.version_parent.first_release_date,
-           collections.games.version_parent.id;
+    fields name, collections.name, ${camposCollections},
+           franchises.name, ${camposFranchises};
     where id = ${igdbId};
   `;
 
@@ -556,13 +574,43 @@ async function getIgdbGameCollection(igdbId) {
 
   const data = await response.json();
   const collections = data[0]?.collections || [];
+  const franchises = data[0]?.franchises || [];
 
-  // Preferimos una colección con más de un juego; si no hay, devolvemos null.
-  const mejorColeccion = collections
-    .filter((c) => (c.games?.length || 0) > 1)
-    .sort((a, b) => (b.games?.length || 0) - (a.games?.length || 0))[0];
+  // Nombre para mostrar: preferimos la primera collection (suele ser más
+  // específica, p. ej. "Resident Evil" en vez de "Capcom Survival Horror");
+  // si no hay ninguna, usamos la primera franchise.
+  const nombre = collections[0]?.name || franchises[0]?.name || null;
+  if (!nombre) return null;
 
-  return mejorColeccion || null;
+  // Las "collections" de IGDB ya vienen bien acotadas al propio juego, así
+  // que las aceptamos todas. Las "franchises" son mucho más amplias y a veces
+  // arrastran crossovers/cameos con personajes prestados (p. ej. Marvel vs.
+  // Capcom, Puzzle Fighter o Teppen para la franquicia de Resident Evil), así
+  // que de ahí solo colamos los que además tengan el nombre de la saga en el
+  // propio título.
+  const juegosDeCollections = new Map();
+  for (const c of collections) {
+    for (const g of c.games || []) {
+      if (!juegosDeCollections.has(g.id)) juegosDeCollections.set(g.id, g);
+    }
+  }
+
+  const nombreSaga = nombre.toLowerCase();
+  const juegosPorId = new Map(juegosDeCollections);
+  for (const f of franchises) {
+    for (const g of f.games || []) {
+      if (juegosPorId.has(g.id)) continue;
+      if (g.name && g.name.toLowerCase().includes(nombreSaga)) {
+        juegosPorId.set(g.id, g);
+      }
+    }
+  }
+
+  const gamesCombinados = Array.from(juegosPorId.values());
+
+  if (gamesCombinados.length <= 1) return null;
+
+  return { name: nombre, games: gamesCombinados };
 }
 
 async function getIgdbDlcsUpdates(igdbId) {
