@@ -10,6 +10,7 @@ interface JuegoBase {
   titulo: string;
   anio: number | null;
   portada: string | null;
+  etiqueta?: string;
 }
 
 export default function GameDlcOfBadge({ igdbId }: { igdbId?: number }) {
@@ -61,7 +62,7 @@ export default function GameDlcOfBadge({ igdbId }: { igdbId?: number }) {
 
   return (
     <div className="text-sm text-gray-400 mb-4 -mt-4 w-fit">
-      DLC:{' '}
+      {dlcOf.etiqueta || 'DLC'}:{' '}
       <span
         onClick={handleClick}
         className={`text-blue-400 font-semibold underline cursor-pointer hover:text-blue-300 transition ${

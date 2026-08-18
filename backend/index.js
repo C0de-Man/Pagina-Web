@@ -214,21 +214,43 @@ app.get('/igdb/dlc-of/:igdbId', async (req, res) => {
       return res.json(null);
     }
 
-    const body = `fields parent_game.name, parent_game.cover.url, parent_game.first_release_date; where id = ${igdbId};`;
+    // Pedimos también game_type del propio juego (el que se está consultando,
+    // no el juego base) — es lo que de verdad indica qué TIPO de relación es
+    // esta: DLC, expansión, remaster, port, update... IGDB metía todo bajo
+    // "parent_game" indistintamente, así que había que mirar el game_type
+    // para no etiquetarlo todo como "DLC" por defecto.
+    const body = `fields parent_game.name, parent_game.cover.url, parent_game.first_release_date, game_type; where id = ${igdbId};`;
     const response = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body });
     const data = await response.json();
-    let base = data[0]?.parent_game;
+    const juegoActual = data[0] || {};
+    let base = juegoActual.parent_game;
 
     // Si el propio DLC no tiene relleno su parent_game, buscamos al revés: el
     // juego base que sí lo tenga listado en dlcs/expansions/standalone_expansions/bundles.
     if (!base) {
-      const bodyInverso = `fields name, cover.url, first_release_date; where dlcs = (${igdbId}) | expansions = (${igdbId}) | bundles = (${igdbId});`;
+      const bodyInverso = `fields name, cover.url, first_release_date; where dlcs = (${igdbId}) | expansions = (${igdbId}) | standalone_expansions = (${igdbId}) | bundles = (${igdbId});`;
       const respInverso = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: bodyInverso });
       const dataInverso = await respInverso.json();
       base = dataInverso[0];
     }
 
     if (!base) return res.json(null);
+
+    // Etiqueta según el game_type REAL de este juego (no del juego base).
+    // IGDB category/game_type: 1 dlc_addon, 2 expansion, 3 bundle,
+    // 4 standalone_expansion, 9 remaster, 10 expanded_game, 11 port, 14 update.
+    // 8 (remake) no debería llegar aquí porque ya se descarta más arriba.
+    const ETIQUETAS_POR_TIPO = {
+      1: 'DLC',
+      2: 'Expansión',
+      3: 'Bundle',
+      4: 'Expansión',
+      9: 'Remaster',
+      10: 'Edición ampliada',
+      11: 'Port',
+      14: 'Update',
+    };
+    const etiqueta = ETIQUETAS_POR_TIPO[juegoActual.game_type] || 'DLC';
 
     res.json({
       igdbId: base.id,
@@ -239,6 +261,7 @@ app.get('/igdb/dlc-of/:igdbId', async (req, res) => {
       portada: base.cover?.url
         ? `https:${base.cover.url.replace('t_thumb', 't_cover_big')}`
         : null,
+      etiqueta,
     });
   } catch (error) {
     console.error('ERROR EN GET /igdb/dlc-of/:igdbId:', error);
