@@ -671,12 +671,18 @@ async function getIgdbDlcsUpdates(igdbId) {
 
   // DLCs y expansiones: se piden como relación DIRECTA del juego principal
   // (campos dlcs / expansions), que suele ser fiable...
-  // standalone_expansions (p. ej. "Miles Morales") NO se incluye aquí a propósito:
-  // son juegos jugables por sí mismos, no un añadido sobre el original, así que
-  // ya aparecen en el panel de la saga/secuela en vez de en esta lista.
+  // standalone_expansions (category 4, p. ej. "Miles Morales") ya NO se excluye
+  // aquí: en IGDB varios add-ons oficiales que sí requieren el juego base
+  // (p. ej. "Half-Life: Opposing Force" / "Blue Shift") están etiquetados como
+  // standalone_expansion en vez de expansion, y si los descartamos desaparecen
+  // sin más porque tampoco es seguro que la sección de saga los recoja.
+  // status se pide para poder separar lo cancelado (status = 6 en IGDB) del
+  // contenido publicado de verdad.
   const queryPrincipal = `
-    fields name, dlcs.name, dlcs.cover.url, dlcs.first_release_date,
-           expansions.name, expansions.cover.url, expansions.first_release_date;
+    fields name, dlcs.name, dlcs.cover.url, dlcs.first_release_date, dlcs.status,
+           expansions.name, expansions.cover.url, expansions.first_release_date, expansions.status,
+           standalone_expansions.name, standalone_expansions.cover.url,
+           standalone_expansions.first_release_date, standalone_expansions.status;
     where id = ${igdbId};
   `;
 
@@ -684,21 +690,22 @@ async function getIgdbDlcsUpdates(igdbId) {
   // sí tenga bien puesto su propio parent_game. Por eso también buscamos al
   // revés TODO lo que cuelgue de este juego (parent_game = X), salvo lo que
   // sabemos que no es DLC/update (mods, que tienen su propia consulta abajo;
-  // remakes/remasters/standalone_expansions, que van a la sección de saga; y
-  // bundles, que son packs/compilaciones). No filtramos por category = 14 de
-  // forma estricta para "updates": la propia web de IGDB etiqueta algunas
-  // entradas como "Update" sin que su category interno sea literalmente 14
-  // (p. ej. "MindsEye: Blacklisted"), así que clasificamos DESPUÉS según la
-  // category que traiga cada una, en vez de descartar la que no encaje.
+  // remakes/remasters, que van a la sección de saga; y bundles, que son
+  // packs/compilaciones). Ya NO excluimos category 4 (standalone_expansion) por
+  // el mismo motivo de arriba. No filtramos por category = 14 de forma estricta
+  // para "updates": la propia web de IGDB etiqueta algunas entradas como
+  // "Update" sin que su category interno sea literalmente 14 (p. ej. "MindsEye:
+  // Blacklisted"), así que clasificamos DESPUÉS según la category que traiga
+  // cada una, en vez de descartar la que no encaje.
   const queryInverso = `
-    fields name, cover.url, first_release_date, category;
-    where parent_game = ${igdbId} & category != (3,4,5,8,9);
+    fields name, cover.url, first_release_date, category, status;
+    where parent_game = ${igdbId} & category != (3,5,8,9);
     limit 50;
   `;
 
   // Mods: se buscan al revés por parent_game + category 5.
   const queryMods = `
-    fields name, cover.url, first_release_date;
+    fields name, cover.url, first_release_date, status;
     where parent_game = ${igdbId} & category = 5;
     limit 50;
   `;
@@ -769,6 +776,9 @@ async function getIgdbDlcsUpdates(igdbId) {
     }
   }
 
+  // status = 6 es "Cancelled" en IGDB.
+  const ESTA_CANCELADO = (g) => g.status === 6;
+
   const arreglar = (g) => ({
     igdbId: g.id,
     titulo: g.name,
@@ -776,6 +786,7 @@ async function getIgdbDlcsUpdates(igdbId) {
       ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}`
       : null,
     anio: g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null,
+    cancelado: ESTA_CANCELADO(g),
   });
 
   // De más antigua a más reciente. Las que no tienen fecha se van al final.
@@ -784,6 +795,7 @@ async function getIgdbDlcsUpdates(igdbId) {
   const dlcsDirectos = [
     ...(juego.dlcs || []),
     ...(juego.expansions || []),
+    ...(juego.standalone_expansions || []),
   ];
 
   // Deduplicamos por id: un mismo DLC puede salir tanto por la vía directa
@@ -791,9 +803,16 @@ async function getIgdbDlcsUpdates(igdbId) {
   const idsYaVistos = new Set(dlcsDirectos.map((g) => g.id));
   const dlcsInversos = dataInversoSinUpdates.filter((g) => !idsYaVistos.has(g.id));
 
-  let dlcs = [...dlcsDirectos, ...dlcsInversos].map(arreglar).sort(porAnioAsc);
-  let updates = updatesEncontrados.map(arreglar).sort(porAnioAsc);
-  let mods = (dataMods || []).map(arreglar).sort(porAnioAsc);
+  const dlcsTodos = [...dlcsDirectos, ...dlcsInversos].map(arreglar).sort(porAnioAsc);
+  const updatesTodos = updatesEncontrados.map(arreglar).sort(porAnioAsc);
+  const modsTodos = (dataMods || []).map(arreglar).sort(porAnioAsc);
+
+  // Lo cancelado NO se muestra en "Más contenido": ya aparece en el modal de
+  // la saga (endpoint /igdb/collection), junto con entradas principales
+  // canceladas como "Half-Life 2: Episode Three". Aquí simplemente se descarta.
+  let dlcs = dlcsTodos.filter((g) => !g.cancelado);
+  let updates = updatesTodos.filter((g) => !g.cancelado);
+  let mods = modsTodos.filter((g) => !g.cancelado);
 
   // Aplicamos las vinculaciones manuales de arriba, si las hay para este juego.
   const manuales = VINCULACIONES_MANUALES[igdbId] || [];
@@ -808,6 +827,7 @@ async function getIgdbDlcsUpdates(igdbId) {
       const juegoManual = dataManual[0];
       if (!juegoManual) continue;
       const arreglado = arreglar(juegoManual);
+      if (arreglado.cancelado) continue; // idem: lo cancelado no va en "Más contenido"
       if (m.grupo === 'update') updates.push(arreglado);
       else if (m.grupo === 'mod') mods.push(arreglado);
       else dlcs.push(arreglado);
@@ -856,8 +876,16 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
     // "Enhanced/Definitive Edition" bajo el tipo 10, no bajo el 9 oficial de
     // "remaster", así que hay que excluir ambos para conseguir el mismo resultado.
     // Se queda "remake" (8), que sí quieres ver (ej. "The Witcher Remake").
+    // EXCEPCIÓN: si el juego está cancelado (status = 6), lo dejamos pasar
+    // sin importar su game_type — así un DLC/expansión cancelado (p. ej.
+    // "Half-Life: Hostile Takeover") aparece junto a las entradas principales
+    // canceladas (p. ej. "Half-Life 2: Episode Three") en el apartado de
+    // Cancelados, en vez de mezclarse con el contenido publicado de verdad
+    // en la pestaña "Más contenido".
     const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14];
-    let gamesFiltrados = collection.games.filter((g) => !TIPOS_EXCLUIDOS.includes(g.game_type));
+    let gamesFiltrados = collection.games.filter(
+      (g) => g.status === 6 || !TIPOS_EXCLUIDOS.includes(g.game_type)
+    );
 
     // Si esta entrada es un SKU/edición concreto de OTRO juego ya existente
     // en IGDB (version_parent relleno), usamos ese juego canónico en su lugar
