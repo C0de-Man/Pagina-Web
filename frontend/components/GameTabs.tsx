@@ -16,6 +16,7 @@ interface JuegoDlc {
 interface DlcsUpdatesResponse {
   dlcs: JuegoDlc[];
   updates: JuegoDlc[];
+  mods: JuegoDlc[];
 }
 
 export default function GameTabs({
@@ -63,6 +64,7 @@ export default function GameTabs({
           setDlcsData({
             dlcs: Array.isArray(d?.dlcs) ? d.dlcs : [],
             updates: Array.isArray(d?.updates) ? d.updates : [],
+            mods: Array.isArray(d?.mods) ? d.mods : [],
           });
         }
       })
@@ -72,12 +74,15 @@ export default function GameTabs({
     };
   }, [igdbId]);
 
-  const hayDlcsOUpdates = (dlcsData?.dlcs?.length || 0) > 0 || (dlcsData?.updates?.length || 0) > 0;
+  const hayMasContenido =
+    (dlcsData?.dlcs?.length || 0) > 0 ||
+    (dlcsData?.updates?.length || 0) > 0 ||
+    (dlcsData?.mods?.length || 0) > 0;
 
   const tabs: { key: typeof tab; label: string }[] = [
     { key: 'descripcion', label: 'Descripcion' },
     { key: 'mas', label: 'Mas' },
-    ...(hayDlcsOUpdates ? [{ key: 'dlcs' as const, label: 'DLCs' }] : []),
+    ...(hayMasContenido ? [{ key: 'dlcs' as const, label: 'Más contenido' }] : []),
   ];
 
   // --- Carrusel de 5 con flechas, sin texto debajo de cada carátula ---
@@ -174,7 +179,7 @@ export default function GameTabs({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="mb-6 flex items-center justify-between">
-            <h2 className="text-xl font-bold text-white">DLCs y Updates</h2>
+            <h2 className="text-xl font-bold text-white">Más contenido</h2>
             <button
               onClick={() => setModalAbierto(false)}
               className="text-2xl text-gray-400 hover:text-white cursor-pointer transition"
@@ -213,7 +218,7 @@ export default function GameTabs({
           )}
 
           {dlcsData.updates.length > 0 && (
-            <div>
+            <div className="mb-8">
               <h3 className="text-lg font-bold text-white mb-3">Updates</h3>
               <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-5">
                 {dlcsData.updates.map((g) => (
@@ -234,6 +239,35 @@ export default function GameTabs({
                     {navegandoA === g.igdbId && (
                       <p className="mt-1 text-xs text-gray-400">Cargando...</p>
                     )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {dlcsData.mods.length > 0 && (
+            <div>
+              <h3 className="text-lg font-bold text-white mb-3">Mods</h3>
+              <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-5">
+                {dlcsData.mods.map((g) => (
+                  <button
+                    key={g.igdbId}
+                    onClick={() => irAlJuego(g)}
+                    disabled={navegandoA !== null}
+                    className="cursor-pointer disabled:cursor-default group text-left"
+                  >
+                    {g.portada && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={g.portada}
+                        alt={g.titulo}
+                        className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80"
+                      />
+                    )}
+                    <p className="mt-2 text-sm font-semibold text-white">
+                      {navegandoA === g.igdbId ? 'Cargando...' : g.titulo}
+                    </p>
+                    <p className="text-xs text-gray-400">{g.anio}</p>
                   </button>
                 ))}
               </div>
@@ -289,11 +323,12 @@ export default function GameTabs({
         </div>
       )}
 
-      {/* DLCs */}
+      {/* MÁS CONTENIDO */}
       {tab === 'dlcs' && dlcsData && (
         <div>
           <GrupoJuegos titulo="DLCs" juegos={dlcsData.dlcs} />
           <GrupoJuegos titulo="Updates" juegos={dlcsData.updates} />
+          <GrupoJuegos titulo="Mods" juegos={dlcsData.mods} />
         </div>
       )}
 

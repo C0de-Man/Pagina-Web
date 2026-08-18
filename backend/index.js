@@ -57,16 +57,51 @@ function procesarColaIgdb() {
   }
 }
 
+// Caché corta en memoria: varios componentes de una misma ficha (remake, DLC,
+// colección, más contenido...) suelen preguntar por el mismo juego casi a la
+// vez, con la misma consulta exacta. En vez de volver a preguntarle a IGDB,
+// reutilizamos la respuesta si se pidió hace menos de 5 minutos — esto reduce
+// muchísimo el número de peticiones reales y, con ello, los 429.
+const IGDB_CACHE_TTL_MS = 5 * 60 * 1000;
+const igdbCache = new Map();
+
 function fetchIgdb(url, options) {
+  const clave = `${url}::${options?.body || ''}`;
+  const cacheado = igdbCache.get(clave);
+  if (cacheado && Date.now() < cacheado.expira) {
+    return Promise.resolve({
+      ok: cacheado.ok,
+      status: cacheado.status,
+      json: async () => JSON.parse(cacheado.bodyText),
+    });
+  }
+
   return new Promise((resolve, reject) => {
     const ejecutar = async () => {
       try {
         let res = await fetch(url, options);
-        if (res.status === 429) {
-          await new Promise((r) => setTimeout(r, 1000));
+        let intentos = 0;
+        // Con varias fichas pidiendo datos a la vez, a veces hasta el
+        // reintento se topa otra vez con el límite — reintentamos varias
+        // veces con espera creciente (1s, 2s, 3s) en vez de solo una.
+        while (res.status === 429 && intentos < 3) {
+          intentos++;
+          await new Promise((r) => setTimeout(r, 1000 * intentos));
           res = await fetch(url, options);
         }
-        resolve(res);
+
+        // Leemos el cuerpo UNA vez aquí (un Response solo se puede leer una
+        // vez) y lo guardamos en caché para que la próxima consulta idéntica
+        // no tenga que volver a preguntarle a IGDB.
+        const bodyText = await res.text();
+        if (res.ok) {
+          igdbCache.set(clave, { ok: res.ok, status: res.status, bodyText, expira: Date.now() + IGDB_CACHE_TTL_MS });
+        }
+        resolve({
+          ok: res.ok,
+          status: res.status,
+          json: async () => JSON.parse(bodyText),
+        });
       } catch (err) {
         reject(err);
       }
@@ -613,6 +648,18 @@ async function getIgdbGameCollection(igdbId) {
   return { name: nombre, games: gamesCombinados };
 }
 
+// --- VINCULACIONES MANUALES DE DLC/UPDATE/MOD ---
+// Para casos comprobados donde IGDB muestra la relación en su propia web pero
+// no la expone vía API (ni por parent_game, ni por búsqueda de texto) — como
+// "MindsEye: Blacklisted", que su web lista bajo "Related Content > Updates"
+// pero cuyo parent_game no viene relleno en ningún endpoint público.
+// Clave: igdbId del juego BASE. grupo: 'dlc' | 'update' | 'mod'.
+const VINCULACIONES_MANUALES = {
+  320873: [ // MindsEye
+    { igdbId: 400290, grupo: 'update' }, // MindsEye: Blacklisted
+  ],
+};
+
 async function getIgdbDlcsUpdates(igdbId) {
   const token = await getIgdbToken();
 
@@ -635,38 +682,48 @@ async function getIgdbDlcsUpdates(igdbId) {
 
   // ...pero no siempre: hay juegos base sin esos campos rellenos aunque el DLC
   // sí tenga bien puesto su propio parent_game. Por eso también buscamos al
-  // revés (excluyendo remakes/remasters/updates/standalone_expansions, que van
-  // por otro lado: los tres primeros no son DLC, y las standalone_expansions
-  // van a la sección de saga/secuela en vez de a esta lista).
+  // revés TODO lo que cuelgue de este juego (parent_game = X), salvo lo que
+  // sabemos que no es DLC/update (mods, que tienen su propia consulta abajo;
+  // remakes/remasters/standalone_expansions, que van a la sección de saga; y
+  // bundles, que son packs/compilaciones). No filtramos por category = 14 de
+  // forma estricta para "updates": la propia web de IGDB etiqueta algunas
+  // entradas como "Update" sin que su category interno sea literalmente 14
+  // (p. ej. "MindsEye: Blacklisted"), así que clasificamos DESPUÉS según la
+  // category que traiga cada una, en vez de descartar la que no encaje.
   const queryInverso = `
     fields name, cover.url, first_release_date, category;
-    where parent_game = ${igdbId} & category != (4,8,9,14);
+    where parent_game = ${igdbId} & category != (3,4,5,8,9);
     limit 50;
   `;
 
-  // Updates: IGDB no tiene un campo directo tipo "updates" en el juego principal,
-  // así que para esto sí hace falta buscar al revés por parent_game + category 14.
-  const queryUpdates = `
+  // Mods: se buscan al revés por parent_game + category 5.
+  const queryMods = `
     fields name, cover.url, first_release_date;
-    where parent_game = ${igdbId} & category = 14;
+    where parent_game = ${igdbId} & category = 5;
     limit 50;
   `;
 
-  const [resPrincipal, resInverso, resUpdates] = await Promise.all([
+  const [resPrincipal, resInverso, resMods] = await Promise.all([
     fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryPrincipal }),
     fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryInverso }),
-    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryUpdates }),
+    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryMods }),
   ]);
 
-  if (!resPrincipal.ok || !resInverso.ok || !resUpdates.ok) {
-    throw new Error(`IGDB respondió ${resPrincipal.status} / ${resInverso.status} / ${resUpdates.status}`);
+  if (!resPrincipal.ok || !resInverso.ok || !resMods.ok) {
+    throw new Error(`IGDB respondió ${resPrincipal.status} / ${resInverso.status} / ${resMods.status}`);
   }
 
-  const [dataPrincipal, dataInverso, dataUpdates] = await Promise.all([
+  const [dataPrincipal, dataInverso, dataMods] = await Promise.all([
     resPrincipal.json(),
     resInverso.json(),
-    resUpdates.json(),
+    resMods.json(),
   ]);
+
+  // De lo encontrado por la vía inversa, lo que tenga category = 14 (update)
+  // va a "updates"; el resto (dlc_addon, expansion, episode, season, pack...)
+  // se suma a los DLCs directos.
+  const dataUpdates = (dataInverso || []).filter((g) => g.category === 14);
+  const dataInversoSinUpdates = (dataInverso || []).filter((g) => g.category !== 14);
 
   const juego = dataPrincipal[0] || {};
 
@@ -693,13 +750,21 @@ async function getIgdbDlcsUpdates(igdbId) {
       updatesEncontrados = (dataUpdatesTexto || []).filter((g) => {
         if (!g.name || g.id === igdbId) return false;
         const nombreNormalizado = g.name.toLowerCase();
-        if (!nombreNormalizado.includes('update')) return false;
-        // "Marvel's Spider-Man" es subcadena de "Marvel's Spider-Man 2", así
-        // que un includes() simple confundiría el update de la secuela con el
-        // del juego base. Comparamos EXACTO lo que hay antes de los dos puntos
-        // (p. ej. "Marvel's Spider-Man: New Game Plus Update" -> "marvel's spider-man").
-        const prefijo = nombreNormalizado.split(':')[0].trim();
-        return prefijo === nombreBaseNormalizado;
+        // No todos los títulos separan el nombre base del resto con dos
+        // puntos (p. ej. "MindsEye Blacklisted" en vez de "MindsEye: Blacklisted"),
+        // así que comprobamos que empiece por el nombre base seguido de
+        // CUALQUIER separador (":", "-", espacio...), pero bloqueando el caso
+        // "nombre base + número" para no confundir "Marvel's Spider-Man" con
+        // su secuela "Marvel's Spider-Man 2".
+        if (!nombreNormalizado.startsWith(nombreBaseNormalizado)) return false;
+        const resto = nombreNormalizado.slice(nombreBaseNormalizado.length);
+        if (resto !== '' && /^[a-z0-9]/.test(resto)) return false; // pegado sin separador
+        if (/^\s*\d/.test(resto)) return false; // "... 2", "... 3"...
+        // No todos los updates llevan la palabra "update" en el título (p. ej.
+        // "MindsEye: Blacklisted"), así que también vale si IGDB ya lo tiene
+        // categorizado como update (14) — con la comprobación de arriba ya
+        // descartamos falsos positivos de secuelas/otros juegos.
+        return g.category === 14 || nombreNormalizado.includes('update');
       });
     }
   }
@@ -724,12 +789,35 @@ async function getIgdbDlcsUpdates(igdbId) {
   // Deduplicamos por id: un mismo DLC puede salir tanto por la vía directa
   // como por la inversa.
   const idsYaVistos = new Set(dlcsDirectos.map((g) => g.id));
-  const dlcsInversos = (dataInverso || []).filter((g) => !idsYaVistos.has(g.id));
+  const dlcsInversos = dataInversoSinUpdates.filter((g) => !idsYaVistos.has(g.id));
 
-  const dlcs = [...dlcsDirectos, ...dlcsInversos].map(arreglar).sort(porAnioAsc);
-  const updates = updatesEncontrados.map(arreglar).sort(porAnioAsc);
+  let dlcs = [...dlcsDirectos, ...dlcsInversos].map(arreglar).sort(porAnioAsc);
+  let updates = updatesEncontrados.map(arreglar).sort(porAnioAsc);
+  let mods = (dataMods || []).map(arreglar).sort(porAnioAsc);
 
-  return { dlcs, updates };
+  // Aplicamos las vinculaciones manuales de arriba, si las hay para este juego.
+  const manuales = VINCULACIONES_MANUALES[igdbId] || [];
+  if (manuales.length > 0) {
+    const idsYaIncluidos = new Set([...dlcs, ...updates, ...mods].map((g) => g.igdbId));
+    for (const m of manuales) {
+      if (idsYaIncluidos.has(m.igdbId)) continue;
+      const bodyManual = `fields name, cover.url, first_release_date; where id = ${m.igdbId};`;
+      const respManual = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: bodyManual });
+      if (!respManual.ok) continue;
+      const dataManual = await respManual.json();
+      const juegoManual = dataManual[0];
+      if (!juegoManual) continue;
+      const arreglado = arreglar(juegoManual);
+      if (m.grupo === 'update') updates.push(arreglado);
+      else if (m.grupo === 'mod') mods.push(arreglado);
+      else dlcs.push(arreglado);
+    }
+    dlcs = dlcs.sort(porAnioAsc);
+    updates = updates.sort(porAnioAsc);
+    mods = mods.sort(porAnioAsc);
+  }
+
+  return { dlcs, updates, mods };
 }
 
 // --- DLCs, EXPANSIONES Y UPDATES DE UN JUEGO ---
