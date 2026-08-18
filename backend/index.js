@@ -163,6 +163,33 @@ function arreglarCoverIgdb(juego) {
   };
 }
 
+// --- ARTWORKS DE IGDB (imágenes anchas tipo key art) COMO RESPALDO DE BANNER ---
+// SteamGridDB no siempre tiene "heroes" para juegos muy nuevos o poco conocidos;
+// IGDB sí suele tener artworks, que sirven igual de bien como banner.
+async function obtenerArtworksIgdb(igdbId) {
+  if (!igdbId) return [];
+  try {
+    const token = await getIgdbToken();
+    const body = `fields artworks.image_id; where id = ${igdbId};`;
+    const response = await fetch('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers: {
+        'Client-ID': process.env.IGDB_CLIENT_ID,
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'text/plain'
+      },
+      body
+    });
+    const data = await response.json();
+    const artworks = data?.[0]?.artworks || [];
+    return artworks.map((a) => `https://images.igdb.com/igdb/image/upload/t_1080p/${a.image_id}.jpg`);
+  } catch (error) {
+    console.error('Error obteniendo artworks de IGDB:', error);
+    return [];
+  }
+}
+
 // --- JUEGOS MÁS POPULARES DE LA HISTORIA (por número de valoraciones) ---
 app.get('/igdb/popular', async (req, res) => {
   try {
@@ -603,7 +630,18 @@ async function buscarJuegoEnSteamGridDB(nombre, anio) {
     headers: { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` }
   });
   const data = await res.json();
-  const candidatos = (data?.data || []).slice(0, 5);
+
+  // El autocomplete de SteamGridDB es difuso: si no tiene el juego exacto
+  // (habitual en títulos muy nuevos o aún sin salir), devuelve "parecidos"
+  // en vez de nada — p. ej. "Code Violet" -> "Code of Princess". Antes
+  // aceptábamos igualmente el primer resultado; ahora exigimos que el
+  // nombre coincida EXACTAMENTE (normalizado) para no mezclar carátulas
+  // de un juego distinto.
+  const normalizar = (s) => (s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, ' ').trim();
+  const nombreNormalizado = normalizar(nombre);
+  const candidatos = (data?.data || [])
+    .filter((c) => normalizar(c.name) === nombreNormalizado)
+    .slice(0, 5);
 
   if (candidatos.length === 0) return null;
   if (candidatos.length === 1 || !anio) return candidatos[0].id;
@@ -639,22 +677,30 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
     if (!media) return res.status(404).json({ error: 'No encontrado' });
 
     const sgdbId = await buscarJuegoEnSteamGridDB(media.tituloOriginal || media.titulo, media.anio);
-    if (!sgdbId) return res.json({ covers: [], heroes: [] });
 
     const headers = { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` };
+    let covers = [];
+    let heroes = [];
 
-    // "grids" en formato vertical (carátula tipo póster) = dimensiones 600x900
-    const resCovers = await fetch(`https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?dimensions=600x900`, { headers });
-    const dataCovers = await resCovers.json();
+    if (sgdbId) {
+      // "grids" en formato vertical (carátula tipo póster) = dimensiones 600x900
+      const resCovers = await fetch(`https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?dimensions=600x900`, { headers });
+      const dataCovers = await resCovers.json();
+      covers = (dataCovers?.data || []).map(g => g.url);
 
-    // "heroes" = imagen ancha tipo banner
-    const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}`, { headers });
-    const dataHeroes = await resHeroes.json();
+      // "heroes" = imagen ancha tipo banner
+      const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}`, { headers });
+      const dataHeroes = await resHeroes.json();
+      heroes = (dataHeroes?.data || []).map(h => h.url);
+    }
 
-    res.json({
-      covers: (dataCovers?.data || []).map(g => g.url),
-      heroes: (dataHeroes?.data || []).map(h => h.url)
-    });
+    // Si SteamGridDB no tiene banners (o no encontró el juego), probamos con
+    // los artworks de IGDB antes de dejar la pestaña de banner vacía del todo.
+    if (heroes.length === 0) {
+      heroes = await obtenerArtworksIgdb(media.igdbId);
+    }
+
+    res.json({ covers, heroes });
   } catch (error) {
     console.error('ERROR EN GET /steamgriddb/images/:mediaId:', error);
     res.status(500).json({ error: 'Error al buscar imágenes en SteamGridDB' });
@@ -699,6 +745,10 @@ app.post('/media/igdb', async (req, res) => {
         });
         const dataHeroes = await resHeroes.json();
         backdropUrl = dataHeroes?.data?.[0]?.url || null;
+      }
+      if (!backdropUrl) {
+        const artworks = await obtenerArtworksIgdb(igdbId);
+        backdropUrl = artworks[0] || null;
       }
     } catch (e) {
       console.error('No se pudo obtener banner de SteamGridDB para', juego.name, e);
