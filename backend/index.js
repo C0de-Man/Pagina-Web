@@ -902,12 +902,74 @@ app.get('/igdb/dlcs-updates/:igdbId', async (req, res) => {
   }
 });
 
+// --- Construye la respuesta de /igdb/collection a partir de lo GUARDADO en
+// CuratedCollection/CuratedCollectionItem (ya no consulta IGDB en absoluto). ---
+async function construirRespuestaDesdeCurated(collectionId, igdbId) {
+  const collection = await prisma.curatedCollection.findUnique({
+    where: { id: collectionId },
+    include: { items: { orderBy: { orden: 'asc' } } },
+  });
+
+  if (!collection) {
+    return { collection: null, games: [], cancelados: [], indiceActual: -1, prequel: null, sequel: null };
+  }
+
+  // Si algún juego de la saga ya está guardado en Media con una carátula
+  // personalizada (elegida a mano por el usuario), la preferimos sobre la
+  // que se guardó al sembrar la colección — puede haber cambiado después.
+  const locales = await prisma.media.findMany({
+    where: { igdbId: { in: collection.items.map((i) => i.igdbId) } },
+    select: { igdbId: true, portada: true },
+  });
+  const portadaLocalPorIgdbId = Object.fromEntries(
+    locales.filter((l) => l.portada).map((l) => [l.igdbId, l.portada])
+  );
+
+  const todos = collection.items.map((item) => ({
+    id: item.id, // id de la fila en CuratedCollectionItem — lo necesita el frontend para poder borrarla
+    igdbId: item.igdbId,
+    titulo: item.titulo,
+    anio: item.anio,
+    portada: portadaLocalPorIgdbId[item.igdbId] || item.portada,
+    cancelado: item.cancelado,
+  }));
+
+  const games = todos.filter((g) => !g.cancelado);
+  const cancelados = todos.filter((g) => g.cancelado);
+
+  const indiceActual = games.findIndex((g) => g.igdbId === igdbId);
+  const prequel = indiceActual > 0 ? games[indiceActual - 1] : null;
+  const sequel =
+    indiceActual >= 0 && indiceActual < games.length - 1 ? games[indiceActual + 1] : null;
+
+  return {
+    collection: { id: collection.id, nombre: collection.nombre },
+    games,
+    cancelados,
+    indiceActual,
+    prequel,
+    sequel,
+  };
+}
+
 // --- SAGA DE UN VIDEOJUEGO (precuela/secuela + colección completa) ---
 app.get('/igdb/collection/:igdbId', async (req, res) => {
   try {
     const igdbId = parseInt(req.params.igdbId, 10);
     if (Number.isNaN(igdbId)) {
       return res.status(400).json({ error: 'igdbId inválido' });
+    }
+
+    // Si esta saga ya está guardada a mano en la base de datos (porque ya se
+    // vio antes, o porque un admin ya la editó), servimos desde ahí y no
+    // volvemos a tocar IGDB para nada — así lo que el admin edite no se
+    // sobrescribe nunca al volver a entrar.
+    const itemExistente = await prisma.curatedCollectionItem.findFirst({
+      where: { igdbId },
+      select: { collectionId: true },
+    });
+    if (itemExistente) {
+      return res.json(await construirRespuestaDesdeCurated(itemExistente.collectionId, igdbId));
     }
 
     const collection = await getIgdbGameCollection(igdbId);
@@ -1033,7 +1095,6 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
         // igualmente le quitamos el sufijo de edición para mostrar el título
         // limpio — el SKU de tienda no aporta nada útil aquí.
         titulo: quitarSufijoEdicion(g.name),
-        slug: g.slug,
         anio: g.first_release_date
           ? new Date(g.first_release_date * 1000).getFullYear()
           : null,
@@ -1047,24 +1108,26 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
       }))
       .sort((a, b) => a.fechaLanzamiento - b.fechaLanzamiento);
 
-    const games = todos.filter((g) => !g.cancelado);
-    const cancelados = todos.filter((g) => g.cancelado);
-
-    const indiceActual = games.findIndex((g) => g.igdbId === igdbId);
-    const prequel = indiceActual > 0 ? games[indiceActual - 1] : null;
-    const sequel =
-      indiceActual >= 0 && indiceActual < games.length - 1
-        ? games[indiceActual + 1]
-        : null;
-
-    res.json({
-      collection: { nombre: collection.name },
-      games,
-      cancelados,
-      indiceActual,
-      prequel,
-      sequel,
+    // Primera vez que se ve esta saga: la guardamos como semilla editable en
+    // vez de solo devolverla. A partir de aquí, esta saga ya no se vuelve a
+    // calcular desde IGDB (ver el bloque de arriba con curatedCollectionItem).
+    const nuevaCollection = await prisma.curatedCollection.create({
+      data: {
+        nombre: collection.name,
+        items: {
+          create: todos.map((g, index) => ({
+            igdbId: g.igdbId,
+            titulo: g.titulo,
+            anio: g.anio,
+            portada: g.portada,
+            cancelado: g.cancelado,
+            orden: index,
+          })),
+        },
+      },
     });
+
+    return res.json(await construirRespuestaDesdeCurated(nuevaCollection.id, igdbId));
 
   } catch (err) {
     console.error('ERROR EN GET /igdb/collection/:igdbId:', err);
@@ -1242,6 +1305,155 @@ function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Sesión inválida o caducada' });
   }
 }
+
+// --- MIDDLEWARE: solo administradores ---
+// Se usa SIEMPRE encadenado después de requireAuth (que es quien rellena
+// req.userId), nunca solo: app.post('/ruta', requireAuth, requireAdmin, handler).
+// Cualquier ruta que permita editar/borrar/reordenar colecciones curadas a
+// mano debe llevar este middleware; ver usuarios normales solo deben poder
+// leer esos datos (rutas GET normales, sin este middleware).
+async function requireAdmin(req, res, next) {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    if (!user || !user.isAdmin) {
+      return res.status(403).json({ error: 'No tienes permisos de administrador' });
+    }
+    next();
+  } catch (error) {
+    console.error('ERROR EN requireAdmin:', error);
+    res.status(500).json({ error: 'Error al comprobar permisos de administrador' });
+  }
+}
+
+// --- COLECCIONES CURADAS: quitar un juego de una saga (solo admin) ---
+// Esto SOLO borra la fila de CuratedCollectionItem: nunca toca Media ni
+// UserMedia, así que el catálogo del usuario (visto/liked/watchlist/nota)
+// no se ve afectado aunque el juego borrado ya estuviera guardado ahí.
+app.delete('/admin/curated-collection-items/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'id inválido' });
+
+    const item = await prisma.curatedCollectionItem.findUnique({ where: { id } });
+    if (!item) return res.status(404).json({ error: 'No encontrado' });
+
+    await prisma.curatedCollectionItem.delete({ where: { id } });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN DELETE /admin/curated-collection-items/:id:', error);
+    res.status(500).json({ error: 'Error al eliminar el juego de la colección' });
+  }
+});
+
+// --- COLECCIONES CURADAS: guardar el nuevo orden tras arrastrar y soltar (solo admin) ---
+// Recibe la lista de ids de CuratedCollectionItem YA en el orden final (tal
+// como ha quedado en el frontend tras soltar) y pone orden = posición en esa
+// lista. Se usa una vez por cada pestaña (Juegos / Cancelados) por separado,
+// nunca mezclando ids de las dos — el frontend solo manda los de la pestaña
+// que se acaba de reordenar.
+app.patch('/admin/curated-collection-items/reorder', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Falta la lista de ids en el nuevo orden' });
+    }
+    const idsLimpios = ids.map((id) => parseInt(id, 10));
+    if (idsLimpios.some((id) => Number.isNaN(id))) {
+      return res.status(400).json({ error: 'Algún id de la lista no es válido' });
+    }
+
+    await prisma.$transaction(
+      idsLimpios.map((id, index) =>
+        prisma.curatedCollectionItem.update({
+          where: { id },
+          data: { orden: index },
+        })
+      )
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN PATCH /admin/curated-collection-items/reorder:', error);
+    res.status(500).json({ error: 'Error al reordenar la colección' });
+  }
+});
+
+// --- COLECCIONES CURADAS: añadir un juego nuevo (buscador, solo admin) ---
+// El frontend ya trae todo lo necesario del resultado de /igdb/search (name,
+// cover, first_release_date), así que aquí no hace falta volver a preguntarle
+// nada a IGDB — solo insertar la fila en el sitio correcto.
+//
+// "En el sitio correcto" = por año, dentro del grupo (games o cancelados) al
+// que se añade, PERO respetando el orden que el admin ya haya dejado a mano
+// con el arrastrar-y-soltar para el resto de juegos: se recorre la lista tal
+// como está ahora mismo y se inserta justo antes del primer juego con año
+// posterior (los que no tienen año van siempre al final, igual que en el
+// resto de la app), en vez de reordenar todo el grupo entero por fecha.
+app.post('/admin/curated-collection-items', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { collectionId, igdbId, titulo, anio, portada, cancelado } = req.body;
+
+    const collectionIdNum = parseInt(collectionId, 10);
+    const igdbIdNum = parseInt(igdbId, 10);
+    if (Number.isNaN(collectionIdNum) || Number.isNaN(igdbIdNum) || !titulo) {
+      return res.status(400).json({ error: 'Faltan datos: collectionId, igdbId y titulo son obligatorios' });
+    }
+
+    const coleccion = await prisma.curatedCollection.findUnique({ where: { id: collectionIdNum } });
+    if (!coleccion) return res.status(404).json({ error: 'Colección no encontrada' });
+
+    const esCancelado = !!cancelado;
+    const anioNum = anio === null || anio === undefined || anio === '' ? null : parseInt(anio, 10);
+
+    // Lista actual del mismo grupo (games o cancelados), en su orden vigente.
+    const itemsDelGrupo = await prisma.curatedCollectionItem.findMany({
+      where: { collectionId: collectionIdNum, cancelado: esCancelado },
+      orderBy: { orden: 'asc' },
+      select: { id: true, anio: true },
+    });
+
+    let indiceInsercion = itemsDelGrupo.length; // por defecto, al final
+    if (anioNum !== null) {
+      const idx = itemsDelGrupo.findIndex((it) => it.anio !== null && it.anio > anioNum);
+      if (idx !== -1) indiceInsercion = idx;
+    }
+
+    let nuevoItem;
+    try {
+      nuevoItem = await prisma.curatedCollectionItem.create({
+        data: {
+          collectionId: collectionIdNum,
+          igdbId: igdbIdNum,
+          titulo,
+          anio: anioNum,
+          portada: portada || null,
+          cancelado: esCancelado,
+          orden: itemsDelGrupo.length, // provisional, se recoloca justo debajo
+        },
+      });
+    } catch (err) {
+      if (err.code === 'P2002') {
+        return res.status(409).json({ error: 'Ese juego ya está en esta colección' });
+      }
+      throw err;
+    }
+
+    // Recolocamos: insertamos el id nuevo en su posición y renumeramos orden
+    // 0..n-1 para todo el grupo, igual que hace el endpoint de reordenar.
+    const idsFinal = itemsDelGrupo.map((it) => it.id);
+    idsFinal.splice(indiceInsercion, 0, nuevoItem.id);
+
+    await prisma.$transaction(
+      idsFinal.map((id, index) =>
+        prisma.curatedCollectionItem.update({ where: { id }, data: { orden: index } })
+      )
+    );
+
+    res.status(201).json(nuevoItem);
+  } catch (error) {
+    console.error('ERROR EN POST /admin/curated-collection-items:', error);
+    res.status(500).json({ error: 'Error al añadir el juego a la colección' });
+  }
+});
 
 // --- IDIOMA / REGIÓN: el frontend los manda en cada petición (?language=&region=) ---
 // leídos de las preferencias guardadas del usuario (o localStorage si no ha iniciado sesión).
