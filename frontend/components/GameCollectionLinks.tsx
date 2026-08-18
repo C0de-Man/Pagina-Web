@@ -501,7 +501,6 @@ export default function GameCollectionLinks({
                                     <div
                                         key={g.id}
                                         className={`group relative ${arrastrandoId === g.id ? 'opacity-40' : ''}`}
-                                        draggable={esAdmin}
                                         onDragStart={() => handleDragStart(g.id)}
                                         onDragOver={(e) => handleDragOver(e, g.id)}
                                         onDrop={handleDrop}
@@ -512,21 +511,25 @@ export default function GameCollectionLinks({
                                             onClick={() => irAlJuego(g)}
                                             disabled={esActual || navegandoA !== null}
                                             className={`block w-full rounded text-left disabled:cursor-default ${esActual ? '' : 'cursor-pointer'
-                                                } ${esAdmin ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                                }`}
                                         >
                                             {g.portada && (
                                                 // eslint-disable-next-line @next/next/no-img-element
                                                 <img
                                                     src={g.portada}
                                                     alt={g.titulo}
-                                                    draggable={false}
+                                                    // Solo la carátula es arrastrable (no toda la tarjeta): así el
+                                                    // título sigue siendo texto normal, seleccionable/copiable —
+                                                    // un elemento "draggable" bloquea la selección de texto dentro
+                                                    // de él, y antes eso incluía el nombre del juego sin querer.
+                                                    draggable={esAdmin}
                                                     className={`w-full aspect-[2/3] object-cover rounded transition ${esActual
                                                         ? 'ring-2 ring-blue-500'
                                                         : 'group-hover:opacity-80 group-hover:scale-[1.02]'
-                                                        }`}
+                                                        } ${esAdmin ? 'cursor-grab active:cursor-grabbing' : ''}`}
                                                 />
                                             )}
-                                            <p className="mt-2 text-sm font-semibold text-white">
+                                            <p className="mt-2 text-sm font-semibold text-white select-text">
                                                 {navegandoA === g.igdbId ? 'Cargando...' : g.titulo}
                                             </p>
                                             <p className="text-xs text-gray-400">
