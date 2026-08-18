@@ -35,6 +35,36 @@ async function getIgdbToken() {
   return igdbToken;
 }
 
+// --- COLA DE PETICIONES A IGDB ---
+// Su API gratuita limita a unas 4 peticiones por segundo. Como cada ficha de
+// juego ahora dispara varias llamadas casi a la vez (remake, DLC, updates,
+// colección, detalles...), sin esto IGDB responde 429 y esas secciones se
+// quedan vacías o con datos viejos. Centralizamos AQUÍ todas las llamadas para
+// espaciarlas, y reintentamos una vez si aun así nos limitan.
+const IGDB_INTERVALO_MS = 260; // ~3.8 peticiones/segundo, con margen bajo el límite real
+let igdbColaUltimaEjecucion = Promise.resolve();
+
+function fetchIgdb(url, options) {
+  const ejecutar = async () => {
+    const res = await fetch(url, options);
+    if (res.status === 429) {
+      await new Promise((r) => setTimeout(r, 1000));
+      return fetch(url, options);
+    }
+    return res;
+  };
+
+  const resultado = igdbColaUltimaEjecucion.then(
+    () => new Promise((resolve) => setTimeout(resolve, IGDB_INTERVALO_MS))
+  ).then(ejecutar);
+
+  // Encadenamos la cola al resultado, pero sin dejar que un fallo aquí bloquee
+  // las peticiones siguientes en espera.
+  igdbColaUltimaEjecucion = resultado.catch(() => {});
+
+  return resultado;
+}
+
 // --- DETALLES DE UN JUEGO: plataformas, desarrollador, distribuidora, géneros ---
 app.get('/igdb/details/:igdbId', async (req, res) => {
   try {
@@ -42,7 +72,7 @@ app.get('/igdb/details/:igdbId', async (req, res) => {
     const token = await getIgdbToken();
 
     const body = `fields platforms.name, genres.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher; where id = ${igdbId};`;
-    const response = await fetch('https://api.igdb.com/v4/games', {
+    const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
         'Client-ID': process.env.IGDB_CLIENT_ID,
@@ -87,7 +117,7 @@ app.get('/igdb/remake-of/:igdbId', async (req, res) => {
     };
 
     const body = `fields name, cover.url, first_release_date; where remakes = (${igdbId});`;
-    const response = await fetch('https://api.igdb.com/v4/games', {
+    const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers,
       body
@@ -132,22 +162,22 @@ app.get('/igdb/dlc-of/:igdbId', async (req, res) => {
     // que el juego sea un REMAKE de otro (esos también traen parent_game
     // relleno, para enlazar contenido incluido, pero no son un DLC).
     const bodyEsRemake = `fields id; where remakes = (${igdbId}); limit 1;`;
-    const respEsRemake = await fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: bodyEsRemake });
+    const respEsRemake = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: bodyEsRemake });
     const dataEsRemake = await respEsRemake.json();
     if (Array.isArray(dataEsRemake) && dataEsRemake.length > 0) {
       return res.json(null);
     }
 
     const body = `fields parent_game.name, parent_game.cover.url, parent_game.first_release_date; where id = ${igdbId};`;
-    const response = await fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body });
+    const response = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body });
     const data = await response.json();
     let base = data[0]?.parent_game;
 
     // Si el propio DLC no tiene relleno su parent_game, buscamos al revés: el
     // juego base que sí lo tenga listado en dlcs/expansions/standalone_expansions/bundles.
     if (!base) {
-      const bodyInverso = `fields name, cover.url, first_release_date; where dlcs = (${igdbId}) | expansions = (${igdbId}) | standalone_expansions = (${igdbId}) | bundles = (${igdbId});`;
-      const respInverso = await fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: bodyInverso });
+      const bodyInverso = `fields name, cover.url, first_release_date; where dlcs = (${igdbId}) | expansions = (${igdbId}) | bundles = (${igdbId});`;
+      const respInverso = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: bodyInverso });
       const dataInverso = await respInverso.json();
       base = dataInverso[0];
     }
@@ -180,7 +210,7 @@ app.get('/igdb/search', async (req, res) => {
 
     const body = `search "${searchQuery}"; fields name,cover.url,first_release_date,summary; limit 20;`;
 
-    const response = await fetch('https://api.igdb.com/v4/games', {
+    const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
         'Client-ID': process.env.IGDB_CLIENT_ID,
@@ -228,7 +258,7 @@ async function obtenerArtworksIgdb(igdbId) {
   try {
     const token = await getIgdbToken();
     const body = `fields artworks.image_id; where id = ${igdbId};`;
-    const response = await fetch('https://api.igdb.com/v4/games', {
+    const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
         'Client-ID': process.env.IGDB_CLIENT_ID,
@@ -252,7 +282,7 @@ app.get('/igdb/popular', async (req, res) => {
   try {
     const token = await getIgdbToken();
     const body = `fields name,cover.url,first_release_date,summary; where total_rating_count != null; sort total_rating_count desc; limit 20;`;
-    const response = await fetch('https://api.igdb.com/v4/games', {
+    const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
         'Client-ID': process.env.IGDB_CLIENT_ID,
@@ -279,7 +309,7 @@ app.get('/igdb/popular/page/:page', async (req, res) => {
 
     const token = await getIgdbToken();
     const body = `fields name,cover.url,first_release_date,summary; where total_rating_count != null; sort total_rating_count desc; limit ${itemsPerPage}; offset ${offset};`;
-    const response = await fetch('https://api.igdb.com/v4/games', {
+    const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
         'Client-ID': process.env.IGDB_CLIENT_ID,
@@ -306,7 +336,7 @@ app.get('/igdb/year/:year', async (req, res) => {
 
     const token = await getIgdbToken();
     const body = `fields name,cover.url,first_release_date,summary; where first_release_date >= ${desde} & first_release_date <= ${hasta}; sort hypes desc; limit 20;`;
-    const response = await fetch('https://api.igdb.com/v4/games', {
+    const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
         'Client-ID': process.env.IGDB_CLIENT_ID,
@@ -337,7 +367,7 @@ app.get('/igdb/year/:year/page/:page', async (req, res) => {
 
     const token = await getIgdbToken();
     const body = `fields name,cover.url,first_release_date,summary; where first_release_date >= ${desde} & first_release_date <= ${hasta}; sort hypes desc; limit ${itemsPerPage}; offset ${offset};`;
-    const response = await fetch('https://api.igdb.com/v4/games', {
+    const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
         'Client-ID': process.env.IGDB_CLIENT_ID,
@@ -376,8 +406,8 @@ app.get('/igdb/filtros', async (req, res) => {
     };
 
     const [resGeneros, resPlataformas] = await Promise.all([
-      fetch('https://api.igdb.com/v4/genres', { method: 'POST', headers, body: 'fields id,name; sort name asc; limit 50;' }),
-      fetch('https://api.igdb.com/v4/platforms', { method: 'POST', headers, body: 'fields id,name; sort name asc; limit 200;' }),
+      fetchIgdb('https://api.igdb.com/v4/genres', { method: 'POST', headers, body: 'fields id,name; sort name asc; limit 50;' }),
+      fetchIgdb('https://api.igdb.com/v4/platforms', { method: 'POST', headers, body: 'fields id,name; sort name asc; limit 200;' }),
     ]);
 
     igdbGenerosCache = await resGeneros.json();
@@ -448,8 +478,8 @@ app.get('/igdb/catalogo/page/:page', async (req, res) => {
     const body = `fields name,cover.url,first_release_date,summary; ${where} ${sort} limit ${itemsPerPage}; offset ${offset};`;
 
     const [response, countResponse] = await Promise.all([
-      fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body }),
-      fetch('https://api.igdb.com/v4/games/count', { method: 'POST', headers, body: where }),
+      fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body }),
+      fetchIgdb('https://api.igdb.com/v4/games/count', { method: 'POST', headers, body: where }),
     ]);
     const data = await response.json();
     const countData = await countResponse.json();
@@ -496,14 +526,21 @@ async function getIgdbGameCollection(igdbId) {
 
   // IGDB: un juego puede tener 0, 1 o varias "collections" (sagas).
   // Tomamos la primera que tenga más de 1 juego (evita sagas vacías/ruido).
+  // version_parent: cuando una entrada es un SKU/edición concreta ("Launch
+  // Edition", "Ultimate Edition"...) de OTRO juego ya existente en IGDB, este
+  // campo apunta a esa versión canónica. Lo pedimos para poder usar siempre
+  // el juego "de verdad" en vez de la edición de tienda.
   const query = `
     fields name, collections.name, collections.games.name, collections.games.slug,
            collections.games.cover.url, collections.games.first_release_date,
-           collections.games.id, collections.games.game_type, collections.games.status;
+           collections.games.id, collections.games.game_type, collections.games.status,
+           collections.games.version_parent.name, collections.games.version_parent.slug,
+           collections.games.version_parent.cover.url, collections.games.version_parent.first_release_date,
+           collections.games.version_parent.id;
     where id = ${igdbId};
   `;
 
-  const response = await fetch('https://api.igdb.com/v4/games', {
+  const response = await fetchIgdb('https://api.igdb.com/v4/games', {
     method: 'POST',
     headers: {
       'Client-ID': process.env.IGDB_CLIENT_ID,
@@ -538,20 +575,24 @@ async function getIgdbDlcsUpdates(igdbId) {
   };
 
   // DLCs y expansiones: se piden como relación DIRECTA del juego principal
-  // (campos dlcs / expansions / standalone_expansions), que suele ser fiable...
+  // (campos dlcs / expansions), que suele ser fiable...
+  // standalone_expansions (p. ej. "Miles Morales") NO se incluye aquí a propósito:
+  // son juegos jugables por sí mismos, no un añadido sobre el original, así que
+  // ya aparecen en el panel de la saga/secuela en vez de en esta lista.
   const queryPrincipal = `
-    fields dlcs.name, dlcs.cover.url, dlcs.first_release_date,
-           expansions.name, expansions.cover.url, expansions.first_release_date,
-           standalone_expansions.name, standalone_expansions.cover.url, standalone_expansions.first_release_date;
+    fields name, dlcs.name, dlcs.cover.url, dlcs.first_release_date,
+           expansions.name, expansions.cover.url, expansions.first_release_date;
     where id = ${igdbId};
   `;
 
   // ...pero no siempre: hay juegos base sin esos campos rellenos aunque el DLC
   // sí tenga bien puesto su propio parent_game. Por eso también buscamos al
-  // revés (excluyendo remakes/remasters/updates, que van por otro lado).
+  // revés (excluyendo remakes/remasters/updates/standalone_expansions, que van
+  // por otro lado: los tres primeros no son DLC, y las standalone_expansions
+  // van a la sección de saga/secuela en vez de a esta lista).
   const queryInverso = `
     fields name, cover.url, first_release_date, category;
-    where parent_game = ${igdbId} & category != (8,9,14);
+    where parent_game = ${igdbId} & category != (4,8,9,14);
     limit 50;
   `;
 
@@ -564,9 +605,9 @@ async function getIgdbDlcsUpdates(igdbId) {
   `;
 
   const [resPrincipal, resInverso, resUpdates] = await Promise.all([
-    fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryPrincipal }),
-    fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryInverso }),
-    fetch('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryUpdates }),
+    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryPrincipal }),
+    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryInverso }),
+    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryUpdates }),
   ]);
 
   if (!resPrincipal.ok || !resInverso.ok || !resUpdates.ok) {
@@ -578,6 +619,42 @@ async function getIgdbDlcsUpdates(igdbId) {
     resInverso.json(),
     resUpdates.json(),
   ]);
+
+  const juego = dataPrincipal[0] || {};
+
+  // Algunos "updates" (categoría 14) tampoco tienen relleno su propio parent_game
+  // en IGDB, así que la búsqueda por relación (arriba) no los encuentra. Como
+  // último recurso, para estos SÍ hacemos una búsqueda de texto por el nombre
+  // del juego base, filtrando a que el nombre del update lo contenga (evita
+  // falsos positivos de nombres parecidos, igual que hacemos con SteamGridDB).
+  let updatesEncontrados = dataUpdates || [];
+  if (updatesEncontrados.length === 0 && juego.name) {
+    const queryUpdatesPorTexto = `
+      search "${juego.name}";
+      fields name, cover.url, first_release_date, category;
+      limit 30;
+    `;
+    const respUpdatesTexto = await fetchIgdb('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers,
+      body: queryUpdatesPorTexto,
+    });
+    if (respUpdatesTexto.ok) {
+      const dataUpdatesTexto = await respUpdatesTexto.json();
+      const nombreBaseNormalizado = juego.name.toLowerCase();
+      updatesEncontrados = (dataUpdatesTexto || []).filter((g) => {
+        if (!g.name || g.id === igdbId) return false;
+        const nombreNormalizado = g.name.toLowerCase();
+        if (!nombreNormalizado.includes('update')) return false;
+        // "Marvel's Spider-Man" es subcadena de "Marvel's Spider-Man 2", así
+        // que un includes() simple confundiría el update de la secuela con el
+        // del juego base. Comparamos EXACTO lo que hay antes de los dos puntos
+        // (p. ej. "Marvel's Spider-Man: New Game Plus Update" -> "marvel's spider-man").
+        const prefijo = nombreNormalizado.split(':')[0].trim();
+        return prefijo === nombreBaseNormalizado;
+      });
+    }
+  }
 
   const arreglar = (g) => ({
     igdbId: g.id,
@@ -591,11 +668,9 @@ async function getIgdbDlcsUpdates(igdbId) {
   // De más antigua a más reciente. Las que no tienen fecha se van al final.
   const porAnioAsc = (a, b) => (a.anio || 9999) - (b.anio || 9999);
 
-  const juego = dataPrincipal[0] || {};
   const dlcsDirectos = [
     ...(juego.dlcs || []),
     ...(juego.expansions || []),
-    ...(juego.standalone_expansions || []),
   ];
 
   // Deduplicamos por id: un mismo DLC puede salir tanto por la vía directa
@@ -604,7 +679,7 @@ async function getIgdbDlcsUpdates(igdbId) {
   const dlcsInversos = (dataInverso || []).filter((g) => !idsYaVistos.has(g.id));
 
   const dlcs = [...dlcsDirectos, ...dlcsInversos].map(arreglar).sort(porAnioAsc);
-  const updates = (dataUpdates || []).map(arreglar).sort(porAnioAsc);
+  const updates = updatesEncontrados.map(arreglar).sort(porAnioAsc);
 
   return { dlcs, updates };
 }
@@ -646,7 +721,38 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
     // "remaster", así que hay que excluir ambos para conseguir el mismo resultado.
     // Se queda "remake" (8), que sí quieres ver (ej. "The Witcher Remake").
     const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14];
-    const gamesFiltrados = collection.games.filter((g) => !TIPOS_EXCLUIDOS.includes(g.game_type));
+    let gamesFiltrados = collection.games.filter((g) => !TIPOS_EXCLUIDOS.includes(g.game_type));
+
+    // Si esta entrada es un SKU/edición concreto de OTRO juego ya existente
+    // en IGDB (version_parent relleno), usamos ese juego canónico en su lugar
+    // — así "Miles Morales - Launch Edition" pasa a ser directamente
+    // "Miles Morales", con su propio id/carátula/fecha reales.
+    gamesFiltrados = gamesFiltrados.map((g) => (g.version_parent ? { ...g.version_parent, game_type: g.game_type } : g));
+
+    // Red de seguridad para cuando IGDB tampoco tiene puesto version_parent:
+    // si hay dos entradas con el mismo nombre base (uno con sufijo de edición
+    // y otro sin él), nos quedamos con la que NO lleve sufijo.
+    const sufijoEdicion = /\s*[-–:]\s*[^-–:]*\b(edici[oó]n|edition)\b[^-–:]*$/i;
+    const quitarSufijoEdicion = (nombre) => nombre.replace(sufijoEdicion, '').trim();
+    const nombreBase = (nombre) => quitarSufijoEdicion(nombre).toLowerCase();
+
+    const porNombreBase = new Map();
+    for (const g of gamesFiltrados) {
+      const clave = nombreBase(g.name);
+      const actual = porNombreBase.get(clave);
+      if (!actual) {
+        porNombreBase.set(clave, g);
+        continue;
+      }
+      const gEsEdicionEspecial = sufijoEdicion.test(g.name);
+      const actualEsEdicionEspecial = sufijoEdicion.test(actual.name);
+      // Si el que ya teníamos es una edición especial y el nuevo no lo es,
+      // el nuevo gana (preferimos siempre la versión sin sufijo).
+      if (actualEsEdicionEspecial && !gEsEdicionEspecial) {
+        porNombreBase.set(clave, g);
+      }
+    }
+    gamesFiltrados = Array.from(porNombreBase.values());
 
     // Si algún juego de la saga ya está en tu base de datos local y tiene una
     // carátula personalizada, la usamos en vez de la de IGDB por defecto.
@@ -661,8 +767,11 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
     const todos = gamesFiltrados
       .map((g) => ({
         igdbId: g.id,
-        titulo: g.name,
-        gameTypeDebug: g.game_type, // TEMPORAL: para ver qué número usa cada juego. Quitar luego.
+        // Aunque solo exista ESTA entrada (sin una "versión normal" con la que
+        // deduplicar, como pasaba con "Miles Morales - Launch Edition"),
+        // igualmente le quitamos el sufijo de edición para mostrar el título
+        // limpio — el SKU de tienda no aporta nada útil aquí.
+        titulo: quitarSufijoEdicion(g.name),
         slug: g.slug,
         anio: g.first_release_date
           ? new Date(g.first_release_date * 1000).getFullYear()
@@ -793,7 +902,7 @@ app.post('/media/igdb', async (req, res) => {
     const token = await getIgdbToken();
 
     const body = `fields name,cover.url,first_release_date,summary; where id = ${igdbId};`;
-    const response = await fetch('https://api.igdb.com/v4/games', {
+    const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
         'Client-ID': process.env.IGDB_CLIENT_ID,
@@ -1692,7 +1801,7 @@ app.get('/media/:id/rating', async (req, res) => {
       try {
         const token = await getIgdbToken();
         const body = `fields total_rating; where id = ${media.igdbId};`;
-        const igdbRes = await fetch('https://api.igdb.com/v4/games', {
+        const igdbRes = await fetchIgdb('https://api.igdb.com/v4/games', {
           method: 'POST',
           headers: {
             'Client-ID': process.env.IGDB_CLIENT_ID,
