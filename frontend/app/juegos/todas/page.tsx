@@ -1,19 +1,50 @@
 import GameCard from '@/components/GameCard';
+import FiltersSidebar from '@/components/FiltersSidebar';
 import Link from 'next/link';
 
-export default async function TodosLosJuegos({ searchParams }: { searchParams: Promise<{ page?: string; tipo?: string }> }) {
+export default async function TodosLosJuegos({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    page?: string;
+    tipo?: string;
+    categorias?: string;
+    estado?: string;
+    anio?: string;
+    genero?: string;
+    plataforma?: string;
+    ratingMin?: string;
+    ratingMax?: string;
+  }>;
+}) {
   const currentYear = new Date().getFullYear();
 
   const resolvedParams = await searchParams;
   const currentPage = parseInt(resolvedParams.page || '1');
   const esPopulares = resolvedParams.tipo === 'popular';
 
-  // Según de dónde vengamos, pedimos el catálogo del año o el histórico de populares
-  const url = esPopulares
-    ? `http://localhost:3001/igdb/popular/page/${currentPage}`
-    : `http://localhost:3001/igdb/year/${currentYear}/page/${currentPage}`;
+  // Querystring con TODOS los filtros activos: se reenvía al backend y también
+  // se usa para no perderlos al pasar de página con los botones laterales
+  const filtros = new URLSearchParams();
+  if (resolvedParams.tipo) filtros.set('tipo', resolvedParams.tipo);
+  if (resolvedParams.categorias) filtros.set('categorias', resolvedParams.categorias);
+  if (resolvedParams.estado) filtros.set('estado', resolvedParams.estado);
+  if (resolvedParams.anio) filtros.set('anio', resolvedParams.anio);
+  if (resolvedParams.genero) filtros.set('genero', resolvedParams.genero);
+  if (resolvedParams.plataforma) filtros.set('plataforma', resolvedParams.plataforma);
+  if (resolvedParams.ratingMin) filtros.set('ratingMin', resolvedParams.ratingMin);
+  if (resolvedParams.ratingMax) filtros.set('ratingMax', resolvedParams.ratingMax);
 
-  const res = await fetch(url, { cache: 'no-store' });
+  const modo = esPopulares ? 'popular' : 'year';
+  const paramsBackend = new URLSearchParams(filtros);
+  paramsBackend.set('modo', modo);
+  // Si no han elegido año/estado propios en el sidebar, seguimos usando el año
+  // actual por defecto tal y como hacía antes la pestaña "Juegos {currentYear}"
+  if (!resolvedParams.anio && !resolvedParams.estado && modo === 'year') {
+    paramsBackend.set('anio', String(currentYear));
+  }
+
+  const res = await fetch(`http://localhost:3001/igdb/catalogo/page/${currentPage}?${paramsBackend.toString()}`, { cache: 'no-store' });
   const data = await res.json();
   const juegos = data.results || [];
 
@@ -29,8 +60,11 @@ export default async function TodosLosJuegos({ searchParams }: { searchParams: P
     };
   };
 
-  // Mantenemos el filtro (?tipo=popular) al pasar de página
-  const sufijoTipo = esPopulares ? '&tipo=popular' : '';
+  // Listas para los desplegables del sidebar
+  const resFiltros = await fetch('http://localhost:3001/igdb/filtros', { cache: 'no-store' });
+  const { generos, plataformas } = await resFiltros.json();
+
+  const sufijoTipo = filtros.toString() ? `&${filtros.toString()}` : '';
 
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans py-10 relative">
@@ -60,23 +94,27 @@ export default async function TodosLosJuegos({ searchParams }: { searchParams: P
             {esPopulares ? 'Populares' : `Juegos ${currentYear}`}
             <span className="text-sm font-normal text-gray-500 ml-3 bg-gray-900 px-2 py-1 rounded">Pág. {currentPage}</span>
           </h1>
-          <span className="text-sm text-gray-500 font-semibold">Mostrando 42 títulos</span>
+          <span className="text-sm text-gray-500 font-semibold">Mostrando {juegos.length} títulos</span>
         </div>
 
-        {/* CUADRÍCULA DE 7 COLUMNAS */}
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-4 pt-2">
-          {juegos.map((juego: any) => {
-            const { dbId, customPoster } = getLocalData(juego.id);
-            return (
-              <div key={`all-${juego.id}`} className="w-full">
-                <GameCard
-                  juego={juego}
-                  dbId={dbId}
-                  customPoster={customPoster}
-                />
-              </div>
-            );
-          })}
+        <div className="flex flex-col lg:flex-row gap-6">
+          <FiltersSidebar generos={generos || []} plataformas={plataformas || []} />
+
+          {/* CUADRÍCULA */}
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4 pt-2 flex-grow">
+            {juegos.map((juego: any) => {
+              const { dbId, customPoster } = getLocalData(juego.id);
+              return (
+                <div key={`all-${juego.id}`} className="w-full">
+                  <GameCard
+                    juego={juego}
+                    dbId={dbId}
+                    customPoster={customPoster}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
 
       </div>

@@ -271,6 +271,110 @@ app.get('/igdb/year/:year/page/:page', async (req, res) => {
   }
 });
 
+// --- CACHÉ SIMPLE PARA GÉNEROS Y PLATAFORMAS (apenas cambian, cache 24h) ---
+let igdbGenerosCache = null;
+let igdbPlataformasCache = null;
+let igdbFiltrosCacheExpira = 0;
+
+// --- LISTAS PARA RELLENAR LOS DESPLEGABLES DEL SIDEBAR DE FILTROS ---
+app.get('/igdb/filtros', async (req, res) => {
+  try {
+    if (igdbGenerosCache && igdbPlataformasCache && Date.now() < igdbFiltrosCacheExpira) {
+      return res.json({ generos: igdbGenerosCache, plataformas: igdbPlataformasCache });
+    }
+
+    const token = await getIgdbToken();
+    const headers = {
+      'Client-ID': process.env.IGDB_CLIENT_ID,
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/json',
+      'Content-Type': 'text/plain'
+    };
+
+    const [resGeneros, resPlataformas] = await Promise.all([
+      fetch('https://api.igdb.com/v4/genres', { method: 'POST', headers, body: 'fields id,name; sort name asc; limit 50;' }),
+      fetch('https://api.igdb.com/v4/platforms', { method: 'POST', headers, body: 'fields id,name; sort name asc; limit 200;' }),
+    ]);
+
+    igdbGenerosCache = await resGeneros.json();
+    igdbPlataformasCache = await resPlataformas.json();
+    igdbFiltrosCacheExpira = Date.now() + 24 * 60 * 60 * 1000;
+
+    res.json({ generos: igdbGenerosCache, plataformas: igdbPlataformasCache });
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/filtros:', error);
+    res.status(500).json({ error: 'Error al obtener géneros y plataformas' });
+  }
+});
+
+// --- CATÁLOGO DE JUEGOS CON FILTROS, PAGINADO DE 42 EN 42 ---
+// Sustituye a /igdb/popular/page/:page y /igdb/year/:year/page/:page: hace lo mismo
+// que esas dos (según ?modo=popular|year) pero además acepta filtros opcionales:
+// ?categorias=0,10 (ids de categoría IGDB, separados por coma)
+// ?estado=upcoming|released  (si se manda, manda sobre ?anio)
+// ?anio=2019
+// ?genero=<id>  ?plataforma=<id>
+// ?ratingMin=0  ?ratingMax=5   (escala 0-5, se convierte a la escala 0-100 de IGDB)
+app.get('/igdb/catalogo/page/:page', async (req, res) => {
+  try {
+    const page = parseInt(req.params.page) || 1;
+    const itemsPerPage = 42;
+    const offset = (page - 1) * itemsPerPage;
+
+    const { modo, anio, estado, categorias, genero, plataforma, ratingMin, ratingMax } = req.query;
+
+    const condiciones = [];
+
+    const ahora = Math.floor(Date.now() / 1000);
+    if (estado === 'upcoming') {
+      condiciones.push(`first_release_date > ${ahora}`);
+    } else if (estado === 'released') {
+      condiciones.push(`first_release_date <= ${ahora}`);
+    } else if (anio) {
+      const y = parseInt(anio);
+      const desde = Math.floor(new Date(Date.UTC(y, 0, 1)).getTime() / 1000);
+      const hasta = Math.floor(new Date(Date.UTC(y, 11, 31, 23, 59, 59)).getTime() / 1000);
+      condiciones.push(`first_release_date >= ${desde} & first_release_date <= ${hasta}`);
+    }
+
+    if (categorias) {
+      const ids = String(categorias).split(',').map((c) => parseInt(c)).filter((n) => !Number.isNaN(n));
+      if (ids.length > 0) condiciones.push(`category = (${ids.join(',')})`);
+    }
+
+    if (genero) condiciones.push(`genres = (${parseInt(genero)})`);
+    if (plataforma) condiciones.push(`platforms = (${parseInt(plataforma)})`);
+
+    if (ratingMin || ratingMax) {
+      const min = ratingMin ? parseFloat(ratingMin) * 20 : 0;
+      const max = ratingMax ? parseFloat(ratingMax) * 20 : 100;
+      condiciones.push(`total_rating != null & total_rating >= ${min} & total_rating <= ${max}`);
+    }
+
+    const where = condiciones.length > 0 ? `where ${condiciones.join(' & ')};` : '';
+    const sort = modo === 'popular' ? 'sort total_rating_count desc;' : 'sort hypes desc;';
+
+    const token = await getIgdbToken();
+    const body = `fields name,cover.url,first_release_date,summary; ${where} ${sort} limit ${itemsPerPage}; offset ${offset};`;
+
+    const response = await fetch('https://api.igdb.com/v4/games', {
+      method: 'POST',
+      headers: {
+        'Client-ID': process.env.IGDB_CLIENT_ID,
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'Content-Type': 'text/plain'
+      },
+      body
+    });
+    const data = await response.json();
+    res.json({ page, results: (data || []).map(arreglarCoverIgdb) });
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/catalogo/page:', error);
+    res.status(500).json({ error: 'Error al obtener el catálogo de juegos' });
+  }
+});
+
 // --- TRADUCTOR AUTOMÁTICO (MyMemory, gratis, sin clave) ---
 // Solo se usa para juegos: es la única fuente de texto que no tenemos en varios idiomas de origen.
 async function traducirTexto(texto, idiomaDestino) {
