@@ -8,6 +8,7 @@ export default function Navbar() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [peliculasOpen, setPeliculasOpen] = useState(false);
+  const [juegosOpen, setJuegosOpen] = useState(false);
   const [user, setUser] = useState<{ username: string } | null>(null);
   const profileRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -105,7 +106,24 @@ const menuLinks = [
                 </div>
                 <Link href="/series" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Series</Link>
                 <Link href="/comics" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Comics</Link>
-                <Link href="/juegos" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Juegos</Link>
+                <div
+                  className="relative group"
+                  onMouseEnter={() => setJuegosOpen(true)}
+                  onMouseLeave={() => setJuegosOpen(false)}
+                >
+                  <Link href="/juegos" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">
+                    Juegos
+                  </Link>
+                  {juegosOpen && (
+                    <div className="absolute left-0 top-full pt-2 w-40 z-50">
+                      <div className="bg-[#2c3440] rounded-md shadow-2xl border border-gray-700 py-2">
+                        <Link href="/perfil/juegos" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Jugados</Link>
+                        <Link href="/perfil/watchlist" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Watchlist</Link>
+                        <Link href="/perfil/likes" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Likes</Link>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* LUPA */}
                 <button
