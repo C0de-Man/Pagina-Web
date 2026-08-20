@@ -6,6 +6,7 @@ import GameTabs from '@/components/GameTabs';
 import GameCollectionLinks from '@/components/GameCollectionLinks';
 import GameRemakeOfBadge from '@/components/GameRemakeOfBadge';
 import GameDlcOfBadge from '@/components/GameDlcOfBadge';
+import GameLogModal from '@/components/GameLogModal';
 import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -85,9 +86,7 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
               <div className="border-t border-dashed border-gray-700 my-4"></div>
 
               <div className="space-y-2 mb-4">
-                <button className="w-full bg-[#2c3440] hover:bg-gray-600 text-white font-bold py-2 rounded text-sm transition cursor-pointer">
-                  Review or log...
-                </button>
+                <GameLogModal mediaId={media.id} />
                 <AddToListModal mediaId={media.id} />
               </div>
 

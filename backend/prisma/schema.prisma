@@ -97,6 +97,8 @@ model GameLog {
   propiedad   String?
   fechaInicio DateTime?
   fechaFin    DateTime?
+  edicion     String?   // "Edition played" (Standard, Deluxe, GOTY... texto libre)
+  minutosJugados Int?   // "total played", guardado en minutos (horas/minutos se combinan en el frontend)
   rating      Int?
   review      String?
   spoilers    Boolean   @default(false)

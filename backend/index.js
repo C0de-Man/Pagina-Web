@@ -2003,6 +2003,90 @@ app.get('/media/watchlist', requireAuth, async (req, res) => {
   }
 });
 
+// --- LOGS DE UN VIDEOJUEGO (partidas/reviews, varios logs por juego) ---
+// Solo devuelve/edita los logs del propio usuario (nunca los de otros).
+app.get('/media/:id/logs', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id, 10);
+    const logs = await prisma.gameLog.findMany({
+      where: { userId: req.userId, mediaId },
+      orderBy: { orden: 'asc' },
+    });
+    res.json(logs);
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/logs:', error);
+    res.status(500).json({ error: 'Error al obtener los logs' });
+  }
+});
+
+app.post('/media/:id/logs', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id, 10);
+    const totalExistentes = await prisma.gameLog.count({ where: { userId: req.userId, mediaId } });
+
+    const nuevo = await prisma.gameLog.create({
+      data: {
+        userId: req.userId,
+        mediaId,
+        nombre: totalExistentes === 0 ? 'Log' : `Log ${totalExistentes + 1}`,
+        orden: totalExistentes,
+      },
+    });
+    res.status(201).json(nuevo);
+  } catch (error) {
+    console.error('ERROR EN POST /media/:id/logs:', error);
+    res.status(500).json({ error: 'Error al crear el log' });
+  }
+});
+
+// Un único PATCH para todo: renombrar (solo {nombre}) o guardar el formulario
+// completo (el resto de campos) — el frontend manda solo lo que ha cambiado.
+app.patch('/logs/:logId', requireAuth, async (req, res) => {
+  try {
+    const logId = parseInt(req.params.logId, 10);
+    const log = await prisma.gameLog.findUnique({ where: { id: logId } });
+    if (!log || log.userId !== req.userId) {
+      return res.status(404).json({ error: 'Log no encontrado' });
+    }
+
+    const { nombre, plataforma, jugadoEn, propiedad, fechaInicio, fechaFin, edicion, minutosJugados, rating, review, spoilers } = req.body;
+
+    const data = {};
+    if (nombre !== undefined) data.nombre = nombre;
+    if (plataforma !== undefined) data.plataforma = plataforma;
+    if (jugadoEn !== undefined) data.jugadoEn = jugadoEn;
+    if (propiedad !== undefined) data.propiedad = propiedad;
+    if (fechaInicio !== undefined) data.fechaInicio = fechaInicio ? new Date(fechaInicio) : null;
+    if (fechaFin !== undefined) data.fechaFin = fechaFin ? new Date(fechaFin) : null;
+    if (edicion !== undefined) data.edicion = edicion;
+    if (minutosJugados !== undefined) data.minutosJugados = minutosJugados;
+    if (rating !== undefined) data.rating = rating;
+    if (review !== undefined) data.review = review;
+    if (spoilers !== undefined) data.spoilers = spoilers;
+
+    const actualizado = await prisma.gameLog.update({ where: { id: logId }, data });
+    res.json(actualizado);
+  } catch (error) {
+    console.error('ERROR EN PATCH /logs/:logId:', error);
+    res.status(500).json({ error: 'Error al guardar el log' });
+  }
+});
+
+app.delete('/logs/:logId', requireAuth, async (req, res) => {
+  try {
+    const logId = parseInt(req.params.logId, 10);
+    const log = await prisma.gameLog.findUnique({ where: { id: logId } });
+    if (!log || log.userId !== req.userId) {
+      return res.status(404).json({ error: 'Log no encontrado' });
+    }
+    await prisma.gameLog.delete({ where: { id: logId } });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN DELETE /logs/:logId:', error);
+    res.status(500).json({ error: 'Error al borrar el log' });
+  }
+});
+
 // --- RUTA PARA OBTENER IMÁGENES DE TMDB ---
 app.get('/tmdb/images/:tmdbId', async (req, res) => {
   try {
