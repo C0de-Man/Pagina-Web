@@ -2,13 +2,34 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
+const ESTADOS_JUEGO = [
+  { valor: 'PLAYING', color: '#ec4899', label: 'Playing', desc: 'Nothing specific' },
+  { valor: 'COMPLETED', color: '#22c55e', label: 'Completed', desc: 'Beat your main objective' },
+  { valor: 'RETIRED', color: '#3b82f6', label: 'Retired', desc: 'Finished with a game that lacks an ending' },
+  { valor: 'SHELVED', color: '#f97316', label: 'Shelved', desc: 'Unfinished but may pick up again later' },
+  { valor: 'ABANDONED', color: '#ef4444', label: 'Abandoned', desc: 'Unfinished and staying that way' },
+];
+
+// Mismo icono de mando que el botón principal, en miniatura para el botón
+// "Mark as unplayed" del modal.
+function IconoMando({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 10.5h1.5m-1.5 1.5h1.5m3-3v3m3-1.5h1.5m-1.5-1.5v3M6.75 6.75h10.5a3.75 3.75 0 013.712 3.213l.674 4.5A3.375 3.375 0 0117.663 18a3.363 3.363 0 01-2.68-1.333l-.645-.86a1.875 1.875 0 00-1.5-.75H10.66a1.875 1.875 0 00-1.5.75l-.645.86A3.363 3.363 0 015.837 18a3.375 3.375 0 01-3.473-3.537l.674-4.5A3.75 3.75 0 016.75 6.75z" />
+    </svg>
+  );
+}
+
 export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo?: string }) {
   const [watched, setWatched] = useState(false);
   const [liked, setLiked] = useState(false);
   const [watchlist, setWatchlist] = useState(false);
+  const [playStatus, setPlayStatus] = useState<string | null>(null);
+  const [modalAbierto, setModalAbierto] = useState(false);
   const router = useRouter();
 
   const esJuego = tipo === 'VIDEOJUEGO';
+  const estadoActual = ESTADOS_JUEGO.find((e) => e.valor === playStatus) || null;
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -21,6 +42,7 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
         setWatched(!!data.watched);
         setLiked(!!data.liked);
         setWatchlist(!!data.watchlist);
+        setPlayStatus(data.playStatus || null);
       })
       .catch(() => {});
   }, [mediaId]);
@@ -62,20 +84,53 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
     }
   };
 
+  const guardarPlayStatus = async (nuevoEstado: string | null) => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      router.push('/login');
+      return;
+    }
+
+    const anterior = playStatus;
+    setPlayStatus(nuevoEstado); // optimista
+    setWatched(nuevoEstado !== null);
+    setModalAbierto(false);
+
+    try {
+      const res = await fetch(`http://localhost:3001/media/${mediaId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ playStatus: nuevoEstado }),
+      });
+      if (!res.ok) throw new Error('fallo al guardar');
+    } catch {
+      setPlayStatus(anterior); // si falla, revertimos
+      setWatched(anterior !== null);
+    }
+  };
+
   return (
     <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-4">
       <button
-        onClick={() => actualizarEstado('watched', watched, setWatched)}
+        onClick={() => (esJuego ? setModalAbierto(true) : actualizarEstado('watched', watched, setWatched))}
         className={`flex flex-col items-center transition cursor-pointer ${
-          watched ? 'text-green-400' : 'text-gray-400 hover:text-green-400'
+          esJuego
+            ? estadoActual
+              ? ''
+              : 'text-gray-400 hover:text-gray-200'
+            : watched
+            ? 'text-green-400'
+            : 'text-gray-400 hover:text-green-400'
         }`}
+        style={esJuego && estadoActual ? { color: estadoActual.color } : undefined}
       >
         <span className="mb-1">
           {esJuego ? (
             // MANDO DE VIDEOJUEGO (para VIDEOJUEGO, sustituye al ojo de "Watched")
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 10.5h1.5m-1.5 1.5h1.5m3-3v3m3-1.5h1.5m-1.5-1.5v3M6.75 6.75h10.5a3.75 3.75 0 013.712 3.213l.674 4.5A3.375 3.375 0 0117.663 18a3.363 3.363 0 01-2.68-1.333l-.645-.86a1.875 1.875 0 00-1.5-.75H10.66a1.875 1.875 0 00-1.5.75l-.645.86A3.363 3.363 0 015.837 18a3.375 3.375 0 01-3.473-3.537l.674-4.5A3.75 3.75 0 016.75 6.75z" />
-            </svg>
+            <IconoMando className="h-6 w-6" />
           ) : watched ? (
             // OJO ABIERTO
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -90,7 +145,7 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
           )}
         </span>
         <span className="text-[10px] font-bold uppercase tracking-wider">
-          {esJuego ? 'Played' : 'Watched'}
+          {esJuego ? estadoActual?.label || 'Played' : 'Watched'}
         </span>
       </button>
       <button
@@ -111,6 +166,54 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
         <span className="text-2xl mb-1">{watchlist ? '⏱️✅' : '⏱️'}</span>
         <span className="text-[10px] font-bold uppercase tracking-wider">Watchlist</span>
       </button>
+
+      {/* MODAL DE ESTADO DE JUEGO (solo VIDEOJUEGO) */}
+      {esJuego && modalAbierto && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          onClick={() => setModalAbierto(false)}
+        >
+          <div
+            className="bg-[#1c2228] rounded-lg border border-gray-700 w-full max-w-sm overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 pt-4 pb-3">
+              <h3 className="text-blue-300 font-bold text-lg">Set your played status</h3>
+            </div>
+
+            <div>
+              {ESTADOS_JUEGO.map((e) => (
+                <button
+                  key={e.valor}
+                  onClick={() => guardarPlayStatus(e.valor)}
+                  className={`w-full text-left px-4 py-3 border-t border-gray-800 flex items-start gap-3 transition cursor-pointer ${
+                    playStatus === e.valor ? 'bg-[#3d4a6b]' : 'hover:bg-gray-800'
+                  }`}
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full mt-2 flex-shrink-0"
+                    style={{ backgroundColor: e.color }}
+                  />
+                  <span>
+                    <div className="font-extrabold text-lg text-white leading-tight">{e.label}</div>
+                    <div className="text-gray-400 text-sm">{e.desc}</div>
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="p-3 border-t border-gray-800">
+              <button
+                onClick={() => guardarPlayStatus(null)}
+                className="w-full bg-[#3d4a6b] hover:bg-[#4a5980] text-white font-bold py-2.5 rounded flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                <IconoMando className="h-5 w-5" />
+                Mark as unplayed
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

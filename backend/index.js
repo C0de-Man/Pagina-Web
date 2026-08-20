@@ -2694,7 +2694,8 @@ app.get('/media/:id/status', requireAuth, async (req, res) => {
       liked: false,
       watchlist: false,
       rating: null,
-      customPoster: null
+      customPoster: null,
+      playStatus: null
     });
   } catch (error) {
     console.error('ERROR EN GET STATUS:', error);
@@ -2802,7 +2803,7 @@ app.put('/favorites', requireAuth, async (req, res) => {
 app.patch('/media/:id/status', requireAuth, async (req, res) => {
   try {
     const mediaId = parseInt(req.params.id);
-    const { watched, liked, watchlist, rating, customPoster } = req.body;
+    const { watched, liked, watchlist, rating, customPoster, playStatus } = req.body;
 
     const data = {};
     if (watched !== undefined) data.watched = watched;
@@ -2811,6 +2812,15 @@ app.patch('/media/:id/status', requireAuth, async (req, res) => {
     if (rating !== undefined) data.rating = rating;
     if (rating !== undefined && rating !== null) data.watched = true;
     if (customPoster !== undefined) data.customPoster = customPoster;
+    // playStatus es solo para videojuegos (Playing/Completed/Retired/
+    // Shelved/Abandoned). Al elegir un estado, marcamos watched = true
+    // automáticamente (igual que ya hace rating); al pulsar "Mark as
+    // unplayed" el frontend manda playStatus = null, y aquí lo traducimos
+    // también a watched = false.
+    if (playStatus !== undefined) {
+      data.playStatus = playStatus;
+      data.watched = playStatus !== null;
+    }
 
     const status = await prisma.userMedia.upsert({
       where: { userId_mediaId: { userId: req.userId, mediaId } },

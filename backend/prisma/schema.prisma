@@ -55,6 +55,7 @@ model UserMedia {
   watchlist     Boolean  @default(false)
   rating        Int?     // Nota personal, ej. de 1 a 10
   customPoster  String?  // Portada elegida por este usuario para este medio
+  playStatus    String?  // Solo videojuegos: "PLAYING" | "COMPLETED" | "RETIRED" | "SHELVED" | "ABANDONED" | null
   updatedAt     DateTime @updatedAt
 
   @@unique([userId, mediaId]) // Un usuario solo puede tener UN estado por película
