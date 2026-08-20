@@ -277,7 +277,10 @@ app.get('/igdb/search', async (req, res) => {
 
     const token = await getIgdbToken();
 
-    const body = `search "${searchQuery}"; fields name,cover.url,first_release_date,summary; limit 20;`;
+    // Antes limitaba a 20 resultados. Para que el buscador muestre TODO lo
+    // que coincida, subimos al máximo que admite IGDB en una sola petición
+    // (500) — de sobra para cualquier búsqueda real, sin necesidad de paginar.
+    const body = `search "${searchQuery}"; fields name,cover.url,first_release_date,summary; limit 500;`;
 
     const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
@@ -522,7 +525,22 @@ app.get('/igdb/catalogo/page/:page', async (req, res) => {
 
     if (categorias) {
       const ids = String(categorias).split(',').map((c) => parseInt(c)).filter((n) => !Number.isNaN(n));
-      if (ids.length > 0) condiciones.push(`category = (${ids.join(',')})`);
+      if (ids.length > 0) {
+        // Usamos game_type, NO category: el resto del proyecto (ver
+        // calcularColeccionDesdeIgdb y /igdb/dlc-of) ya descubrió que
+        // "category" es el campo VIEJO de IGDB, que se ha ido quedando cada
+        // vez más vacío — "game_type" es el que de verdad usan hoy la
+        // mayoría de los juegos. Filtrar por category dejaba prácticamente
+        // sin resultados cualquier categoría que no fuera Main Game.
+        // "Main Game" (id 0) sigue siendo un caso especial: muchos juegos
+        // normales tienen game_type vacío (null) en vez de puesto
+        // explícitamente a 0, así que si el 0 está entre las categorías
+        // elegidas, aceptamos también los que tienen game_type = null.
+        const condicionBase = ids.length === 1 ? `game_type = ${ids[0]}` : `game_type = (${ids.join(',')})`;
+        const partes = [condicionBase];
+        if (ids.includes(0)) partes.push('game_type = null');
+        condiciones.push(partes.length > 1 ? `(${partes.join(' | ')})` : partes[0]);
+      }
     }
 
     if (genero) condiciones.push(`genres = (${parseInt(genero)})`);
@@ -535,7 +553,16 @@ app.get('/igdb/catalogo/page/:page', async (req, res) => {
     }
 
     const where = condiciones.length > 0 ? `where ${condiciones.join(' & ')};` : '';
-    const sort = modo === 'popular' ? 'sort total_rating_count desc;' : 'sort hypes desc;';
+    // OJO: "sort hypes desc" se usaba antes aquí para el modo "año", pero
+    // IGDB EXCLUYE de los resultados cualquier juego donde el campo de
+    // ordenación esté vacío — y "hypes" (anticipación/wishlist) solo lo
+    // tienen rellenado un puñado de juegos muy esperados. En la práctica,
+    // esto hacía que el catálogo por año devolviera casi siempre 0 o muy
+    // pocos resultados en cuanto se combinaba con cualquier filtro, porque
+    // la inmensa mayoría de juegos no tienen hypes. Ordenamos por
+    // first_release_date en su lugar: todo juego que pasa el filtro de año
+    // tiene ese campo relleno por definición, así que no se pierde nadie.
+    const sort = modo === 'popular' ? 'sort total_rating_count desc;' : 'sort first_release_date desc;';
 
     const token = await getIgdbToken();
     const headers = {
@@ -899,6 +926,133 @@ app.get('/igdb/dlcs-updates/:igdbId', async (req, res) => {
   } catch (err) {
     console.error('ERROR EN GET /igdb/dlcs-updates/:igdbId:', err);
     res.status(500).json({ error: 'Error al obtener DLCs/updates' });
+  }
+});
+
+// --- PORTS Y REMASTERS DE UN JUEGO (pestaña "Version") ---
+// Mismo patrón en cascada que getIgdbDlcsUpdates: campo directo del juego
+// (ports/remasters) → búsqueda inversa por parent_game filtrando por category
+// (11 = Port, 9 = Remaster) → como último recurso, búsqueda de texto por
+// nombre exigiendo coincidencia estricta de prefijo (igual que con los
+// updates), para no colar secuelas ni juegos sin relación real.
+async function getIgdbVersiones(igdbId) {
+  const token = await getIgdbToken();
+
+  const headers = {
+    'Client-ID': process.env.IGDB_CLIENT_ID,
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'text/plain',
+  };
+
+  const queryPrincipal = `
+    fields name, ports.name, ports.cover.url, ports.first_release_date, ports.status,
+           remasters.name, remasters.cover.url, remasters.first_release_date, remasters.status;
+    where id = ${igdbId};
+  `;
+
+  // category 9 = Remaster, category 11 = Port.
+  const queryInverso = `
+    fields name, cover.url, first_release_date, category, status;
+    where parent_game = ${igdbId} & category = (9,11);
+    limit 50;
+  `;
+
+  const [resPrincipal, resInverso] = await Promise.all([
+    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryPrincipal }),
+    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryInverso }),
+  ]);
+
+  if (!resPrincipal.ok || !resInverso.ok) {
+    throw new Error(`IGDB respondió ${resPrincipal.status} / ${resInverso.status}`);
+  }
+
+  const [dataPrincipal, dataInverso] = await Promise.all([
+    resPrincipal.json(),
+    resInverso.json(),
+  ]);
+
+  const juego = dataPrincipal[0] || {};
+  const inversoPorts = (dataInverso || []).filter((g) => g.category === 11);
+  const inversoRemasters = (dataInverso || []).filter((g) => g.category === 9);
+
+  const yaHayPorts = (juego.ports || []).length > 0 || inversoPorts.length > 0;
+  const yaHayRemasters = (juego.remasters || []).length > 0 || inversoRemasters.length > 0;
+
+  let portsTexto = [];
+  let remastersTexto = [];
+  if ((!yaHayPorts || !yaHayRemasters) && juego.name) {
+    const queryTexto = `
+      search "${juego.name}";
+      fields name, cover.url, first_release_date, category;
+      limit 30;
+    `;
+    const respTexto = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryTexto });
+    if (respTexto.ok) {
+      const dataTexto = await respTexto.json();
+      const nombreBaseNormalizado = juego.name.toLowerCase();
+      const cumplePrefijo = (g) => {
+        if (!g.name || g.id === igdbId) return false;
+        const nombreNormalizado = g.name.toLowerCase();
+        if (!nombreNormalizado.startsWith(nombreBaseNormalizado)) return false;
+        const resto = nombreNormalizado.slice(nombreBaseNormalizado.length);
+        if (resto !== '' && /^[a-z0-9]/.test(resto)) return false; // pegado sin separador
+        if (/^\s*\d/.test(resto)) return false; // "... 2", "... 3"... (secuela)
+        return true;
+      };
+      if (!yaHayPorts) {
+        portsTexto = (dataTexto || []).filter(
+          (g) => cumplePrefijo(g) && (g.category === 11 || g.name.toLowerCase().includes('port'))
+        );
+      }
+      if (!yaHayRemasters) {
+        remastersTexto = (dataTexto || []).filter(
+          (g) => cumplePrefijo(g) && (g.category === 9 || g.name.toLowerCase().includes('remaster'))
+        );
+      }
+    }
+  }
+
+  const ESTA_CANCELADO = (g) => g.status === 6;
+  const arreglar = (g) => ({
+    igdbId: g.id,
+    titulo: g.name,
+    portada: g.cover?.url
+      ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}`
+      : null,
+    anio: g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null,
+    cancelado: ESTA_CANCELADO(g),
+  });
+
+  const porAnioAsc = (a, b) => (a.anio || 9999) - (b.anio || 9999);
+
+  const idsPortsDirectos = new Set((juego.ports || []).map((g) => g.id));
+  const portsInversosSinDup = inversoPorts.filter((g) => !idsPortsDirectos.has(g.id));
+  const portsTodos = [...(juego.ports || []), ...portsInversosSinDup, ...portsTexto]
+    .map(arreglar)
+    .sort(porAnioAsc);
+
+  const idsRemastersDirectos = new Set((juego.remasters || []).map((g) => g.id));
+  const remastersInversosSinDup = inversoRemasters.filter((g) => !idsRemastersDirectos.has(g.id));
+  const remastersTodos = [...(juego.remasters || []), ...remastersInversosSinDup, ...remastersTexto]
+    .map(arreglar)
+    .sort(porAnioAsc);
+
+  return {
+    ports: portsTodos.filter((g) => !g.cancelado),
+    remasters: remastersTodos.filter((g) => !g.cancelado),
+  };
+}
+
+app.get('/igdb/versiones/:igdbId', async (req, res) => {
+  try {
+    const igdbId = parseInt(req.params.igdbId, 10);
+    if (Number.isNaN(igdbId)) return res.status(400).json({ error: 'igdbId inválido' });
+
+    const resultado = await getIgdbVersiones(igdbId);
+    res.json(resultado);
+  } catch (err) {
+    console.error('ERROR EN GET /igdb/versiones/:igdbId:', err);
+    res.status(500).json({ error: 'Error al obtener versiones (ports/remasters)' });
   }
 });
 
@@ -1712,10 +1866,47 @@ app.get('/tmdb/buscar', async (req, res) => {
   try {
     const searchQuery = req.query.q;
     if (!searchQuery) return res.status(400).json({ error: 'Falta término' });
-    const url = `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(searchQuery)}&language=${getLang(req)}&api_key=${process.env.TMDB_API_KEY}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    res.json(data.results);
+    const apiKey = process.env.TMDB_API_KEY;
+    const lang = getLang(req);
+
+    // Antes solo se pedía la página 1 de TMDB (máx. 20 resultados). Para que
+    // el buscador muestre TODO lo que coincida, pedimos página a página hasta
+    // agotar total_pages. Tope de seguridad en 20 páginas (400 resultados):
+    // con términos de una sola letra o muy genéricos, TMDB puede decir tener
+    // cientos de páginas, y no tiene sentido esperar a traerlas todas para
+    // un buscador — 400 resultados ya es "todo" en la práctica para
+    // cualquier búsqueda con un mínimo de especificidad.
+    const TOPE_PAGINAS = 20;
+    const urlPagina = (p) => `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(searchQuery)}&language=${lang}&page=${p}&api_key=${apiKey}`;
+
+    const primeraRes = await fetch(urlPagina(1));
+    const primeraData = await primeraRes.json();
+    let resultados = primeraData.results || [];
+    const totalPaginas = Math.min(primeraData.total_pages || 1, TOPE_PAGINAS);
+
+    if (totalPaginas > 1) {
+      const restoPaginas = await Promise.all(
+        Array.from({ length: totalPaginas - 1 }, (_, i) =>
+          fetch(urlPagina(i + 2)).then((r) => r.json()).catch(() => ({ results: [] }))
+        )
+      );
+      for (const pagina of restoPaginas) resultados = resultados.concat(pagina.results || []);
+    }
+
+    // TMDB puede devolver el mismo título en más de una página (los
+    // resultados se reordenan ligeramente entre peticiones si algo cambia de
+    // popularidad de fondo), lo que generaba entradas duplicadas — y con
+    // ellas, keys de React repetidas en el frontend. Deduplicamos por
+    // media_type+id, que es justo la combinación que usa el frontend como key.
+    const vistos = new Set();
+    const sinDuplicados = resultados.filter((item) => {
+      const clave = `${item.media_type}-${item.id}`;
+      if (vistos.has(clave)) return false;
+      vistos.add(clave);
+      return true;
+    });
+
+    res.json(sinDuplicados);
   } catch (error) {
     res.status(500).json({ error: 'Hubo un error al buscar en TMDB' });
   }
@@ -1725,6 +1916,16 @@ app.get('/tmdb/buscar', async (req, res) => {
 app.post('/media/tmdb', async (req, res) => {
   try {
     const { tmdbId, tipo } = req.body;
+
+    // Igual que en /media/igdb: si ya existe, devolvemos la fila tal cual en
+    // vez de crear una duplicada. Antes esta ruta no comprobaba nada porque
+    // siempre se llamaba después de comprobar dbId en el frontend — pero
+    // ahora las carátulas son enlaces <a> de verdad (para que el clic
+    // central/Ctrl+clic abran en pestaña nueva de forma nativa) que pueden
+    // apuntar directamente aquí sin haber comprobado antes si ya existe.
+    const existente = await prisma.media.findFirst({ where: { tmdbId: parseInt(tmdbId, 10) } });
+    if (existente) return res.json(existente);
+
     const apiKey = process.env.TMDB_API_KEY;
     const lang = getLang(req);
     const response = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=${lang}`);
@@ -2201,6 +2402,200 @@ async function buscarRemakeEnWikidata(tmdbId) {
     return null;
   }
 }
+
+// Casos comprobados donde Wikidata NO tiene documentada la relación P144
+// (based on) entre película y videojuego — ni siquiera del lado del juego, así
+// que ni la consulta automática ni el respaldo por nombre lo encuentran (se
+// comprobó a mano en el Query Service que el ítem del juego no tiene ningún
+// P144). Mismo espíritu que VINCULACIONES_MANUALES: un objeto en el código
+// para forzar a mano lo que ninguna API expone. Clave: tmdbId de la PELÍCULA.
+const ADAPTACIONES_MANUALES = {
+  500: [{ igdbId: 6003 }], // Reservoir Dogs (película, 1992) -> Reservoir Dogs (videojuego, 2006)
+  338970: [{ igdbId: 1164 }], // Tomb Raider (película, 2018) -> Tomb Raider (videojuego, 2013)
+  588: [{ igdbId: 480 }], // Silent Hill (película, 2006) -> Silent Hill (videojuego, 1999)
+  557: [{ igdbId: 19114 }], // Spider-Man (película, 2002) -> Spider-Man: The Movie (videojuego, 2002)
+};
+
+// --- BUSCA EN WIKIDATA VIDEOJUEGOS RELACIONADOS CON ESTA PELÍCULA POR ADAPTACIÓN ---
+// Reutiliza el mismo P144 ("based on") que ya usa buscarRemakeEnWikidata, pero
+// mirando en AMBOS sentidos (?film wdt:P144 ?otro Y ?otro wdt:P144 ?film), ya
+// que una adaptación puede ir en cualquier dirección: hay películas basadas en
+// un videojuego, y videojuegos basados en una película. Filtramos que el otro
+// lado sea instancia de videojuego (Q7889).
+//
+// Bastantes juegos (sobre todo los más antiguos/desconocidos, como el propio
+// "Reservoir Dogs" de 2006) tienen la relación P144 puesta en Wikidata pero NO
+// tienen relleno el P5794 (IGDB game ID) — solo ~74% de los juegos en Wikidata
+// lo tienen. Para esos casos, en vez de descartarlos, caemos a una búsqueda de
+// texto en IGDB por el nombre exacto (no por prefijo, como con los DLCs: aquí
+// no hay "nombre base" del que partir), y si hay varias coincidencias con el
+// mismo nombre, nos quedamos con la más cercana en año a la fecha de
+// publicación que Wikidata tenga del ítem (P577), si la tiene.
+//
+// Y para el resto de casos, donde ni siquiera el propio P144 está puesto en
+// Wikidata (como pasa con Reservoir Dogs — comprobado a mano: el juego no
+// tiene esa relación en absoluto), se suma ADAPTACIONES_MANUALES de arriba.
+async function buscarAdaptacionesWikidata(tmdbId) {
+  try {
+    const apiKey = process.env.TMDB_API_KEY;
+
+    const [extRes, movieRes] = await Promise.all([
+      fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/external_ids?api_key=${apiKey}`),
+      fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}`),
+    ]);
+    const extData = await extRes.json();
+    const movieData = await movieRes.json();
+    const imdbId = extData.imdb_id || null;
+    const tituloPelicula = movieData.title || movieData.original_title || null;
+
+    const idsFinal = new Set();
+    const pendientesPorNombre = [];
+
+    if (imdbId) {
+      try {
+        const sparql = `
+          SELECT DISTINCT ?otroLabel ?igdbId ?fecha WHERE {
+            ?film wdt:P345 "${imdbId}" .
+            {
+              ?film wdt:P144 ?otro .
+            } UNION {
+              ?otro wdt:P144 ?film .
+            }
+            ?otro wdt:P31/wdt:P279* wd:Q7889 .
+            OPTIONAL { ?otro wdt:P5794 ?igdbId . }
+            OPTIONAL { ?otro wdt:P577 ?fecha . }
+            SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+          } LIMIT 20
+        `;
+        const url = `https://query.wikidata.org/sparql?query=${encodeURIComponent(sparql)}&format=json`;
+        const wdRes = await fetch(url, {
+          headers: {
+            'Accept': 'application/sparql-results+json',
+            'User-Agent': 'MediaTrackerApp/1.0 (proyecto personal)'
+          }
+        });
+        // Si Wikidata devuelve un error (429 por demasiadas consultas seguidas,
+        // 500, etc.), el cuerpo puede venir vacío o no ser JSON válido. Antes
+        // esto reventaba TODA la función (incluidas las vinculaciones manuales,
+        // que ni llegaban a ejecutarse) porque no estaba en su propio try/catch.
+        if (wdRes.ok) {
+          const wdData = await wdRes.json();
+          const bindings = wdData.results?.bindings || [];
+
+          for (const b of bindings) {
+            if (b.igdbId?.value) {
+              const n = parseInt(b.igdbId.value, 10);
+              if (!Number.isNaN(n)) idsFinal.add(n);
+            } else if (b.otroLabel?.value) {
+              pendientesPorNombre.push({
+                nombre: b.otroLabel.value,
+                anio: b.fecha?.value ? new Date(b.fecha.value).getFullYear() : null,
+              });
+            }
+          }
+        } else {
+          console.error('Wikidata respondió', wdRes.status, 'al consultar adaptaciones; se sigue con IGDB/manuales.');
+        }
+      } catch (wdError) {
+        console.error('Error consultando SPARQL de Wikidata (se sigue con IGDB/manuales):', wdError.message);
+      }
+    }
+
+    const token = await getIgdbToken();
+    const headers = {
+      'Client-ID': process.env.IGDB_CLIENT_ID,
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'text/plain',
+    };
+
+    for (const pendiente of pendientesPorNombre) {
+      const queryTexto = `search "${pendiente.nombre}"; fields name, cover.url, first_release_date; limit 15;`;
+      const respTexto = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryTexto });
+      if (!respTexto.ok) continue;
+      const dataTexto = await respTexto.json();
+      const nombreNormalizado = pendiente.nombre.toLowerCase();
+      const candidatos = (dataTexto || []).filter((g) => g.name && g.name.toLowerCase() === nombreNormalizado);
+      if (candidatos.length === 0) continue;
+
+      let elegido = candidatos[0];
+      if (candidatos.length > 1 && pendiente.anio) {
+        elegido = candidatos.reduce((mejor, actual) => {
+          const anioActual = actual.first_release_date ? new Date(actual.first_release_date * 1000).getFullYear() : null;
+          const anioMejor = mejor.first_release_date ? new Date(mejor.first_release_date * 1000).getFullYear() : null;
+          const difActual = anioActual !== null ? Math.abs(anioActual - pendiente.anio) : Infinity;
+          const difMejor = anioMejor !== null ? Math.abs(anioMejor - pendiente.anio) : Infinity;
+          return difActual < difMejor ? actual : mejor;
+        }, candidatos[0]);
+      }
+      idsFinal.add(elegido.id);
+    }
+
+    // TERCERA VÍA, sin depender de Wikidata en absoluto: si a estas alturas
+    // seguimos sin nada, buscamos en IGDB por el nombre EXACTO de la
+    // película y comprobamos si la sinopsis del juego confirma la relación.
+    // Muchos videojuegos "tie-in" de películas (sobre todo 90s/2000s) llevan
+    // literalmente en su sinopsis de IGDB algo como "is a video game based
+    // on the [Película] film of the same name" — así que si el nombre
+    // coincide Y la sinopsis lo confirma explícitamente, lo damos por bueno
+    // sin intervención manual. No cubre el caso inverso (película basada en
+    // juego, que rara vez lo dice la sinopsis del propio juego) ni juegos
+    // cuya sinopsis no lo mencione así.
+    if (idsFinal.size === 0 && tituloPelicula) {
+      const queryPorTitulo = `
+        search "${tituloPelicula}";
+        fields name, cover.url, first_release_date, summary, storyline;
+        limit 20;
+      `;
+      const respTitulo = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryPorTitulo });
+      if (respTitulo.ok) {
+        const dataTitulo = await respTitulo.json();
+        const nombreNormalizado = tituloPelicula.toLowerCase();
+        const candidatos = (dataTitulo || []).filter((g) => {
+          if (!g.name || g.name.toLowerCase() !== nombreNormalizado) return false;
+          const texto = `${g.summary || ''} ${g.storyline || ''}`.toLowerCase();
+          return texto.includes('based on') && (texto.includes('film') || texto.includes('movie'));
+        });
+        for (const c of candidatos) idsFinal.add(c.id);
+      }
+    }
+
+    const manuales = ADAPTACIONES_MANUALES[parseInt(tmdbId, 10)] || [];
+    for (const m of manuales) idsFinal.add(m.igdbId);
+
+    if (idsFinal.size === 0) return { videojuegos: [] };
+
+    const idsArray = [...idsFinal];
+    const body = `fields name, cover.url, first_release_date; where id = (${idsArray.join(',')}); limit ${idsArray.length};`;
+    const respJuegos = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body });
+    if (!respJuegos.ok) return { videojuegos: [] };
+    const dataJuegos = await respJuegos.json();
+
+    const videojuegos = (dataJuegos || []).map((g) => ({
+      igdbId: g.id,
+      titulo: g.name,
+      portada: g.cover?.url
+        ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}`
+        : null,
+      anio: g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null,
+    }));
+
+    return { videojuegos };
+  } catch (error) {
+    console.error('Error consultando Wikidata para adaptaciones:', error);
+    return { videojuegos: [] };
+  }
+}
+
+app.get('/wikidata/adaptaciones/:tmdbId', async (req, res) => {
+  try {
+    const { tmdbId } = req.params;
+    const resultado = await buscarAdaptacionesWikidata(tmdbId);
+    res.json(resultado);
+  } catch (err) {
+    console.error('ERROR EN GET /wikidata/adaptaciones/:tmdbId:', err);
+    res.status(500).json({ error: 'Error al obtener adaptaciones' });
+  }
+});
 
 // --- RUTA PARA OBTENER UNA SOLA PELÍCULA POR SU ID ---
 app.get('/media/:id', async (req, res) => {

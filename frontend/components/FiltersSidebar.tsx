@@ -6,12 +6,9 @@ const CATEGORIAS = [
   { id: 0, label: 'Main Game' },
   { id: 10, label: 'Expanded Game' },
   { id: 4, label: 'Standalone Expansion' },
-  { id: 3, label: 'Bundle' },
   { id: 8, label: 'Remake' },
   { id: 9, label: 'Remaster' },
   { id: 11, label: 'Port' },
-  { id: 12, label: 'Fork' },
-  { id: 5, label: 'Mod' },
 ];
 
 // Desplegable con buscador: escribes y la lista se filtra al vuelo.
