@@ -2,11 +2,13 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
-export default function ActionButtons({ mediaId }: { mediaId: number }) {
+export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo?: string }) {
   const [watched, setWatched] = useState(false);
   const [liked, setLiked] = useState(false);
   const [watchlist, setWatchlist] = useState(false);
   const router = useRouter();
+
+  const esJuego = tipo === 'VIDEOJUEGO';
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -69,7 +71,12 @@ export default function ActionButtons({ mediaId }: { mediaId: number }) {
         }`}
       >
         <span className="mb-1">
-          {watched ? (
+          {esJuego ? (
+            // MANDO DE VIDEOJUEGO (para VIDEOJUEGO, sustituye al ojo de "Watched")
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 10.5h1.5m-1.5 1.5h1.5m3-3v3m3-1.5h1.5m-1.5-1.5v3M6.75 6.75h10.5a3.75 3.75 0 013.712 3.213l.674 4.5A3.375 3.375 0 0117.663 18a3.363 3.363 0 01-2.68-1.333l-.645-.86a1.875 1.875 0 00-1.5-.75H10.66a1.875 1.875 0 00-1.5.75l-.645.86A3.363 3.363 0 015.837 18a3.375 3.375 0 01-3.473-3.537l.674-4.5A3.75 3.75 0 016.75 6.75z" />
+            </svg>
+          ) : watched ? (
             // OJO ABIERTO
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
@@ -82,7 +89,9 @@ export default function ActionButtons({ mediaId }: { mediaId: number }) {
             </svg>
           )}
         </span>
-        <span className="text-[10px] font-bold uppercase tracking-wider">Watched</span>
+        <span className="text-[10px] font-bold uppercase tracking-wider">
+          {esJuego ? 'Played' : 'Watched'}
+        </span>
       </button>
       <button
         onClick={() => actualizarEstado('liked', liked, setLiked)}

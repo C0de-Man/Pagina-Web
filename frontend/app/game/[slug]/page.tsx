@@ -80,7 +80,7 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
 
           <div className="flex-shrink-0 w-full md:w-72 pt-24 md:pt-32">
             <div className="bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl">
-              <ActionButtons mediaId={media.id} />
+              <ActionButtons mediaId={media.id} tipo={media.tipo} />
 
               <div className="border-t border-dashed border-gray-700 my-4"></div>
 
