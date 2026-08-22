@@ -8,9 +8,20 @@ import { useRef, useState, useCallback } from 'react';
 // controla con el slider; la proporción ancho/alto de la caja siempre es la
 // del banner final, así que lo que ves seleccionado es exactamente lo que
 // sale recortado.
-const RATIO = 1200 / 375; // ancho/alto de salida (~16:5, parecido al banner real)
-const ANCHO_SALIDA = 1200;
-const ALTO_SALIDA = 375;
+//
+// El banner en la ficha ocupa TODO el ancho de la pantalla con una altura
+// fija (h-64/h-80, 256-320px): en pantallas normales eso da un ratio real de
+// entre ~5:1 y ~8:1 — mucho más ancho que un banner "de manual" (16:5 ≈
+// 3.2:1, lo que usaba antes esta constante). Con el ratio antiguo, el editor
+// dejaba pasar como "seleccionado" mucho más alto de lo que luego cabía de
+// verdad en la ficha, y el object-cover final recortaba otra vez por encima
+// —de ahí que el resultado se viera distinto a lo elegido. No hay un ratio
+// que encaje perfectamente en CUALQUIER ancho de ventana (el hueco es
+// fluido), pero 5:1 se acerca mucho más a lo que se ve en pantallas de
+// escritorio normales que el 3.2:1 anterior.
+const RATIO = 1600 / 320; // ancho/alto de salida (~5:1, aproxima el hueco real del banner)
+const ANCHO_SALIDA = 1600;
+const ALTO_SALIDA = 320;
 const ANCHO_CONTENEDOR = 760; // ancho fijo del área de recorte dentro del modal
 
 export default function BannerCropModal({
