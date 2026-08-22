@@ -5,6 +5,7 @@ import CollectionLinks from '@/components/CollectionLinks';
 import MediaTabs from '@/components/MediaTabs';
 import RemakeOfBadge from '@/components/RemakeOfBadge';
 import AddToListModal from '@/components/AddToListModal';
+import ReviewLogButton from '@/components/ReviewLogButton';
 import WatchProviders from '@/components/WatchProviders';
 import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
 import { cookies } from 'next/headers';
@@ -97,9 +98,7 @@ if (!media || media.error) {
               <div className="border-t border-dashed border-gray-700 my-4"></div>
 
               <div className="space-y-2 mb-4">
-                <button className="w-full bg-[#2c3440] hover:bg-gray-600 text-white font-bold py-2 rounded text-sm transition cursor-pointer">
-                  Review or log...
-                </button>
+                <ReviewLogButton mediaId={media.id} />
                 <AddToListModal mediaId={media.id} />
               </div>
 

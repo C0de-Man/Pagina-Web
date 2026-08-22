@@ -31,6 +31,7 @@ model Media {
   sinopsisTraducciones Json? // caché: { "es-ES": "texto ya traducido", "fr-FR": "..." }
   createdAt DateTime  @default(now())
   gameLogs  GameLog[]
+  watchLogs WatchLog[]
 }
 
 model User {
@@ -44,6 +45,7 @@ model User {
   region    String   @default("ES")    // región preferida: usada para plataformas de streaming (JustWatch vía TMDB)
   createdAt DateTime @default(now())
   gameLogs  GameLog[]
+  watchLogs WatchLog[]
 }
 
 model UserMedia {
@@ -139,4 +141,22 @@ model CuratedCollectionItem {
   collection CuratedCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
 
   @@unique([collectionId, igdbId]) // un juego no puede estar repetido dentro de la misma saga
+}
+
+// --- REGISTROS DE VISIONADO (películas/series) ---
+// Igual que GameLog para juegos, pero simplificado: solo lo necesario para
+// el modal "Review or log..." (fecha de visionado, reseña libre, y si es un
+// rewatch). Permite varios registros por usuario+película, para poder marcar
+// varios visionados en fechas distintas.
+model WatchLog {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  mediaId     Int
+  fechaVisto  DateTime  @default(now()) // "Watched on"
+  review      String?                   // "Add a review..."
+  rewatch     Boolean   @default(false) // "I've watched this before"
+  createdAt   DateTime  @default(now())
+
+  user  User  @relation(fields: [userId], references: [id])
+  media Media @relation(fields: [mediaId], references: [id])
 }

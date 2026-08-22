@@ -2105,6 +2105,46 @@ app.delete('/logs/:logId', requireAuth, async (req, res) => {
   }
 });
 
+// --- REGISTROS DE VISIONADO (películas/series) ---
+// Versión simplificada de los logs de juegos: aquí el modal manda todo de
+// una vez (fecha, reseña, si es un rewatch), así que basta con un único
+// POST que crea el registro completo — no hace falta el patrón de "crear
+// vacío y luego PATCH" que usa GameLog para sus pestañas editables.
+app.get('/media/:id/watchlogs', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id, 10);
+    const watchLogs = await prisma.watchLog.findMany({
+      where: { userId: req.userId, mediaId },
+      orderBy: { fechaVisto: 'desc' },
+    });
+    res.json(watchLogs);
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/watchlogs:', error);
+    res.status(500).json({ error: 'Error al obtener los registros de visionado' });
+  }
+});
+
+app.post('/media/:id/watchlogs', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id, 10);
+    const { fechaVisto, review, rewatch } = req.body;
+
+    const nuevo = await prisma.watchLog.create({
+      data: {
+        userId: req.userId,
+        mediaId,
+        fechaVisto: fechaVisto ? new Date(fechaVisto) : new Date(),
+        review: review || null,
+        rewatch: !!rewatch,
+      },
+    });
+    res.status(201).json(nuevo);
+  } catch (error) {
+    console.error('ERROR EN POST /media/:id/watchlogs:', error);
+    res.status(500).json({ error: 'Error al guardar el registro de visionado' });
+  }
+});
+
 // --- RUTA PARA OBTENER IMÁGENES DE TMDB ---
 app.get('/tmdb/images/:tmdbId', async (req, res) => {
   try {
