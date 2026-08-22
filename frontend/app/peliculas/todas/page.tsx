@@ -37,24 +37,6 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
 
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans py-10 relative">
-      
-      {/* BOTÓN LATERAL IZQUIERDO */}
-      {currentPage > 1 && (
-        <Link 
-          href={`/peliculas/todas?page=${currentPage - 1}${sufijoTipo}`}
-          className="fixed left-4 top-1/2 -translate-y-1/2 bg-gray-900/80 hover:bg-gray-700 text-white w-14 h-14 rounded-full border border-gray-600 z-50 transition hidden lg:flex items-center justify-center shadow-2xl cursor-pointer"
-        >
-          <span className="text-4xl leading-none pb-1 pr-1">‹</span>
-        </Link>
-      )}
-
-      {/* BOTÓN LATERAL DERECHO */}
-      <Link 
-        href={`/peliculas/todas?page=${currentPage + 1}${sufijoTipo}`}
-        className="fixed right-4 top-1/2 -translate-y-1/2 bg-gray-900/80 hover:bg-gray-700 text-white w-14 h-14 rounded-full border border-gray-600 z-50 transition hidden lg:flex items-center justify-center shadow-2xl cursor-pointer"
-      >
-        <span className="text-4xl leading-none pb-1 pl-1">›</span>
-      </Link>
 
       <div className="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-16">
         
@@ -80,6 +62,45 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
               </div>
             );
           })}
+        </div>
+
+        {/* BARRA DE PAGINACIÓN NUMERADA (no conocemos el total real de
+            páginas que da TMDB, así que mostramos una ventana de 7 números
+            centrada en la página actual, igual que en juegos/cómics) */}
+        <div className="border-t border-gray-800 mt-8 pt-6 flex items-center justify-between">
+          {currentPage > 1 ? (
+            <Link
+              href={`/peliculas/todas?page=${currentPage - 1}${sufijoTipo}`}
+              className="text-sm text-gray-400 hover:text-white transition"
+            >
+              ‹ Prev
+            </Link>
+          ) : (
+            <span className="text-sm text-gray-700">‹ Prev</span>
+          )}
+
+          <div className="flex gap-2">
+            {Array.from({ length: 7 }, (_, i) => Math.max(1, currentPage - 3) + i).map((n) => (
+              <Link
+                key={n}
+                href={`/peliculas/todas?page=${n}${sufijoTipo}`}
+                className={`w-9 h-9 flex items-center justify-center rounded text-sm font-bold transition ${
+                  n === currentPage
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white'
+                }`}
+              >
+                {n}
+              </Link>
+            ))}
+          </div>
+
+          <Link
+            href={`/peliculas/todas?page=${currentPage + 1}${sufijoTipo}`}
+            className="text-sm text-gray-400 hover:text-white transition"
+          >
+            Next ›
+          </Link>
         </div>
 
       </div>
