@@ -14,6 +14,7 @@ export default function Watchlist() {
 
     fetch('http://localhost:3001/media/watchlist', {
       headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
     })
       .then((res) => res.json())
       .then(setItems) // ya viene ordenado: primero añadido → último añadido

@@ -18,7 +18,10 @@ export default function Settings() {
     const token = localStorage.getItem('token');
     if (!token) return;
 
-    fetch('http://localhost:3001/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('http://localhost:3001/auth/me', {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
       .then((res) => res.json())
       .then((data) => {
         setUsername(data.username);
@@ -26,7 +29,10 @@ export default function Settings() {
       })
       .catch(() => { });
 
-    fetch('http://localhost:3001/favorites', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('http://localhost:3001/favorites', {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
       .then((res) => res.json())
       .then((data) => {
         const slots = new Array(7).fill(null);

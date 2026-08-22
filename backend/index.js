@@ -1935,7 +1935,23 @@ app.get('/media/mine', requireAuth, async (req, res) => {
     ])];
 
     const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
-    res.json(mediaItems);
+
+    // Mezcla tu portada/banner personalizados (si los tienes) por encima de
+    // los compartidos — mismo criterio que GET /media/:id.
+    const misPersonalizaciones = await prisma.userMedia.findMany({
+      where: { userId: req.userId, mediaId: { in: mediaIds } },
+      select: { mediaId: true, customPoster: true, customBackdrop: true }
+    });
+    const mapaPersonalizaciones = new Map(misPersonalizaciones.map(p => [p.mediaId, p]));
+    const resultado = mediaItems.map(item => {
+      const mia = mapaPersonalizaciones.get(item.id);
+      return {
+        ...item,
+        portada: mia?.customPoster || item.portada,
+        backdrop: mia?.customBackdrop || item.backdrop
+      };
+    });
+    res.json(resultado);
   } catch (error) {
     console.error('ERROR EN GET /media/mine:', error);
     res.status(500).json({ error: 'Error al obtener tu catálogo' });
@@ -2071,7 +2087,15 @@ app.get('/media/watched', requireAuth, async (req, res) => {
     const resultado = entries
       .map(e => {
         const item = mediaItems.find(m => m.id === e.mediaId);
-        return item ? { ...item, fechaVisto: e.updatedAt, rating: e.rating, liked: e.liked } : null;
+        if (!item) return null;
+        return {
+          ...item,
+          portada: e.customPoster || item.portada,
+          backdrop: e.customBackdrop || item.backdrop,
+          fechaVisto: e.updatedAt,
+          rating: e.rating,
+          liked: e.liked
+        };
       })
       .filter(Boolean);
 
@@ -2096,7 +2120,13 @@ app.get('/media/watchlist', requireAuth, async (req, res) => {
     const resultado = entries
       .map(e => {
         const item = mediaItems.find(m => m.id === e.mediaId);
-        return item ? { ...item, fechaAgregado: e.updatedAt } : null;
+        if (!item) return null;
+        return {
+          ...item,
+          portada: e.customPoster || item.portada,
+          backdrop: e.customBackdrop || item.backdrop,
+          fechaAgregado: e.updatedAt
+        };
       })
       .filter(Boolean);
 
@@ -3103,7 +3133,26 @@ app.get('/favorites', requireAuth, async (req, res) => {
     });
     const mediaIds = favs.map(f => f.mediaId);
     const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
-    const resultado = favs.map(f => mediaItems.find(m => m.id === f.mediaId)).filter(Boolean);
+
+    // Favorite no toca UserMedia para nada, así que aquí sí hace falta una
+    // consulta aparte para saber si tienes portada/banner personalizados.
+    const misPersonalizaciones = await prisma.userMedia.findMany({
+      where: { userId: req.userId, mediaId: { in: mediaIds } },
+      select: { mediaId: true, customPoster: true, customBackdrop: true }
+    });
+    const mapaPersonalizaciones = new Map(misPersonalizaciones.map(p => [p.mediaId, p]));
+    const resultado = favs
+      .map(f => {
+        const item = mediaItems.find(m => m.id === f.mediaId);
+        if (!item) return null;
+        const mia = mapaPersonalizaciones.get(item.id);
+        return {
+          ...item,
+          portada: mia?.customPoster || item.portada,
+          backdrop: mia?.customBackdrop || item.backdrop
+        };
+      })
+      .filter(Boolean);
     res.json(resultado);
   } catch (error) {
     console.error('ERROR EN GET /favorites:', error);

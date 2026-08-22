@@ -23,6 +23,7 @@ export default function ListaDetalle() {
     }
     fetch(`http://localhost:3001/lists/${listId}`, {
       headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
     })
       .then((res) => res.json())
       .then((data) => {

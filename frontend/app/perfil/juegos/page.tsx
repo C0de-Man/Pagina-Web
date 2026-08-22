@@ -15,6 +15,7 @@ export default function MisJuegos() {
 
     fetch('http://localhost:3001/media/watched', {
       headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
     })
       .then((res) => res.json())
       .then((data) => {

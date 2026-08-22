@@ -19,6 +19,7 @@ export default function MisListas() {
     if (!token) return;
     fetch('http://localhost:3001/lists', {
       headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
     })
       .then((res) => res.json())
       .then(setLists)
