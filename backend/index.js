@@ -1316,6 +1316,22 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
 
 // --- BUSCAR CARÁTULAS Y BANNERS EN STEAMGRIDDB ---
 // SteamGridDB tiene muchas más opciones de carátula por juego que IGDB (que solo da una oficial).
+
+// --- EQUIVALENCIAS DE NUMERACIÓN ÁRABE/ROMANA ---
+// SteamGridDB no sigue un criterio fijo: muchas sagas numeradas están
+// catalogadas con números romanos ("Red Dead Redemption II") aunque el
+// nombre "oficial" del juego (el que tenemos guardado, vía IGDB) use
+// arábigos ("Red Dead Redemption 2"). Comparando el texto tal cual, "2" y
+// "ii" nunca coinciden — con esta tabla las tratamos como la misma palabra
+// en ambas búsquedas (exacta y flexible).
+const NUMEROS_ROMANOS = { '2': 'ii', '3': 'iii', '4': 'iv', '5': 'v', '6': 'vi', '7': 'vii', '8': 'viii', '9': 'ix', '10': 'x' };
+const NUMEROS_ROMANOS_INVERSO = Object.fromEntries(Object.entries(NUMEROS_ROMANOS).map(([arabigo, romano]) => [romano, arabigo]));
+// Si la palabra es un número romano conocido (de la tabla de arriba), la
+// convierte a su equivalente arábigo; si no, la deja tal cual.
+function canonicalizarNumero(palabra) {
+  return NUMEROS_ROMANOS_INVERSO[palabra] || palabra;
+}
+
 async function buscarJuegoEnSteamGridDB(nombre, anio) {
   const res = await fetch(`https://www.steamgriddb.com/api/v2/search/autocomplete/${encodeURIComponent(nombre)}`, {
     headers: { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` }
@@ -1328,7 +1344,9 @@ async function buscarJuegoEnSteamGridDB(nombre, anio) {
   // aceptábamos igualmente el primer resultado; ahora exigimos que el
   // nombre coincida EXACTAMENTE (normalizado) para no mezclar carátulas
   // de un juego distinto.
-  const normalizar = (s) => (s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, ' ').trim();
+  const normalizar = (s) =>
+    (s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, ' ').trim()
+      .split(' ').map(canonicalizarNumero).join(' ');
   const nombreNormalizado = normalizar(nombre);
   const candidatos = (data?.data || [])
     .filter((c) => normalizar(c.name) === nombreNormalizado)
@@ -1378,11 +1396,20 @@ async function buscarJuegoEnSteamGridDBFlexible(nombre) {
   });
   const data = await res.json();
 
-  const normalizar = (s) => (s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, ' ').trim();
+  const normalizar = (s) =>
+    (s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, ' ').trim()
+      .split(' ').map(canonicalizarNumero).join(' ');
   const palabrasNombre = normalizar(nombre).split(' ').filter(Boolean);
 
   const coincideEnLasPrimerasPalabras = (candidatoNombre) => {
     const palabrasCandidato = normalizar(candidatoNombre).split(' ').filter(Boolean);
+    // El candidato NUNCA puede tener MENOS palabras que el título que
+    // buscamos: si las tiene, es que le falta información respecto al
+    // título original (p. ej. "Red Dead Redemption" frente a "Red Dead
+    // Redemption 2") — eso es un juego distinto, no una edición/versión del
+    // mismo. Solo se permite que el candidato tenga IGUALES o MÁS palabras
+    // (sufijos de edición, como "... The Complete Edition").
+    if (palabrasCandidato.length < palabrasNombre.length) return false;
     const n = Math.min(4, palabrasNombre.length, palabrasCandidato.length);
     if (n < 2) return false; // títulos demasiado cortos, no arriesgamos
     for (let i = 0; i < n; i++) {
@@ -2949,6 +2976,7 @@ app.get('/media/:id/status', requireAuth, async (req, res) => {
       watchlist: false,
       rating: null,
       customPoster: null,
+      customBackdrop: null,
       playStatus: null
     });
   } catch (error) {
