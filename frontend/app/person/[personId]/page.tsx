@@ -26,18 +26,23 @@ export default async function PersonaDetail({ params }: { params: Promise<{ pers
   const db = await resDb.json();
   const localesPorClave: Record<string, { dbId: number; portada: string | null }> = {};
   for (const m of db) {
-    if (m.tmdbId && (m.tipo === 'PELICULA' || m.tipo === 'SERIE')) {
+    if (m.tmdbId && m.tipo === 'PELICULA') {
       localesPorClave[`${m.tipo}-${m.tmdbId}`] = { dbId: m.id, portada: m.portada };
     }
   }
 
   // Todos los tmdbId únicos de la persona (sin importar el rol), para la
-  // estadística de "cuántas has visto". Nota: si algún día coincidiera el
-  // mismo tmdbId numérico entre una película y una serie de esta persona (muy
-  // raro, TMDB usa espacios de ids separados pero el cruce con /media/watched
-  // solo compara por tmdbId, no por tipo), podría sobrecontar por ese caso
-  // extremo — asumible por ahora.
-  const tmdbIdsUnicos = [...new Set(Object.values(persona.porRol).flat().map((c: any) => c.tmdbId))] as number[];
+  // estadística de "cuántas has visto". Se excluyen los créditos de SERIE
+  // (no se muestran en ningún sitio de la app por ahora), para que no
+  // cuenten en el total.
+  const tmdbIdsUnicos = [
+    ...new Set(
+      Object.values(persona.porRol)
+        .flat()
+        .filter((c: any) => c.tipo !== 'SERIE')
+        .map((c: any) => c.tmdbId)
+    ),
+  ] as number[];
 
   return (
     <main className="min-h-screen bg-gray-950 text-white font-sans pb-16">

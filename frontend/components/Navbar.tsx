@@ -104,7 +104,6 @@ const menuLinks = [
                     </div>
                   )}
                 </div>
-                <Link href="/series" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Series</Link>
                 <Link href="/comics" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Comics</Link>
                 <div
                   className="relative group"

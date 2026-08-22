@@ -2552,6 +2552,38 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
 // --- FICHA DE UNA PERSONA (actor/director/guionista...): biografía + toda su
 // filmografía agrupada por rol, con contador por rol (Actor, Director,
 // Writer, Producer...) para las pestañas de filtro. ---
+// --- PERSONALIZACIONES EN LOTE ---
+// Para listas largas (como la filmografía de una persona, que puede tener
+// 60+ créditos) no tiene sentido preguntar por cada título uno a uno como
+// hace MovieCard con /media/:id/status — aquí se pide de una sola vez la
+// personalización de todos los mediaId ya guardados que aparecen en la lista.
+app.get('/media/personalizaciones', requireAuth, async (req, res) => {
+  try {
+    const idsParam = req.query.ids || '';
+    const mediaIds = idsParam
+      .split(',')
+      .map((s) => parseInt(s, 10))
+      .filter((n) => !isNaN(n));
+    if (mediaIds.length === 0) return res.json({});
+
+    const personalizaciones = await prisma.userMedia.findMany({
+      where: { userId: req.userId, mediaId: { in: mediaIds } },
+      select: { mediaId: true, customPoster: true, customBackdrop: true }
+    });
+
+    const mapa = {};
+    personalizaciones.forEach((p) => {
+      if (p.customPoster || p.customBackdrop) {
+        mapa[p.mediaId] = { customPoster: p.customPoster, customBackdrop: p.customBackdrop };
+      }
+    });
+    res.json(mapa);
+  } catch (error) {
+    console.error('ERROR EN GET /media/personalizaciones:', error);
+    res.status(500).json({ error: 'Error al obtener personalizaciones' });
+  }
+});
+
 app.get('/tmdb/person/:personId', async (req, res) => {
   try {
     const { personId } = req.params;

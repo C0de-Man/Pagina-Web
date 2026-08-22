@@ -26,9 +26,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const myDb = await resDb.json();
 
   // /tmdb/buscar usa TMDB search/multi: además de películas y series trae
-  // personas (actores, directores...) mezcladas, que aquí no queremos mostrar.
+  // personas (actores, directores...) mezcladas, y series (que por ahora no
+  // se muestran en ningún sitio de la app) — nos quedamos solo con películas.
   const resultsTmdbFiltrados = (Array.isArray(resultsTmdb) ? resultsTmdb : [])
-    .filter((item: any) => item.media_type === 'movie' || item.media_type === 'tv');
+    .filter((item: any) => item.media_type === 'movie');
 
   const resultsJuegos = (Array.isArray(resultsIgdb) ? resultsIgdb : []).map((j: any) => ({
     ...j,

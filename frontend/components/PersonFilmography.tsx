@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { urlFicha } from '@/lib/slug';
 
@@ -23,15 +23,53 @@ export default function PersonFilmography({
   porRol: Record<string, CreditoPersona[]>;
   localesPorClave: DatosLocales;
 }) {
+  // localesPorClave llega calculado en el servidor (sin token), así que su
+  // "portada" es siempre la compartida, nunca tu personalización. Aquí, ya
+  // en el navegador, pedimos DE UNA VEZ la personalización de todos los
+  // títulos que ya tienes guardados (en vez de uno a uno como MovieCard,
+  // que aquí serían decenas de peticiones para una filmografía larga).
+  const [personalizaciones, setPersonalizaciones] = useState<
+    Record<number, { customPoster: string | null; customBackdrop: string | null }>
+  >({});
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    const dbIds = Object.values(localesPorClave)
+      .map((l) => l.dbId)
+      .filter(Boolean);
+    if (dbIds.length === 0) return;
+
+    fetch(`http://localhost:3001/media/personalizaciones?ids=${dbIds.join(',')}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+      .then((res) => res.json())
+      .then(setPersonalizaciones)
+      .catch(() => {});
+  }, [localesPorClave]);
+
+  // Ocultamos series de raíz (por ahora no se muestran en ningún sitio de la
+  // app): se filtran ANTES de agrupar por rol, así ni cuentan en el número
+  // de créditos de cada pestaña ni aparecen en ninguna lista.
+  const porRolSinSeries = Object.fromEntries(
+    Object.entries(porRol).map(([rol, items]) => [rol, items.filter((i) => i.tipo !== 'SERIE')])
+  );
+
   // Pestañas ordenadas por número de créditos, de más a menos (igual que en
   // la captura de referencia: Director 13, Writer 10, Producer 9...).
-  const roles = Object.entries(porRol)
-    .filter(([, items]) => items.length > 0)
+  // Solo se muestran los roles de esta lista (a petición explícita) — con
+  // gente que tiene muchísimos roles distintos (guionista, storyboard,
+  // maquillaje FX...) es más simple decir qué SÍ se ve que ir excluyendo uno
+  // a uno.
+  const ROLES_PERMITIDOS = ['Actor', 'Director', 'Writer'];
+  const roles = Object.entries(porRolSinSeries)
+    .filter(([rol, items]) => items.length > 0 && ROLES_PERMITIDOS.includes(rol))
     .sort((a, b) => b[1].length - a[1].length);
 
   const [rolActivo, setRolActivo] = useState(roles[0]?.[0] || '');
 
-  const items = porRol[rolActivo] || [];
+  const items = porRolSinSeries[rolActivo] || [];
 
   return (
     <div>
@@ -53,8 +91,11 @@ export default function PersonFilmography({
         {items.map((item) => {
           const clave = `${item.tipo}-${item.tmdbId}`;
           const local = localesPorClave[clave];
+          const miPersonalizacion = local ? personalizaciones[local.dbId] : undefined;
           const posterUrl =
-            local?.portada || (item.posterPath ? `https://image.tmdb.org/t/p/w300${item.posterPath}` : null);
+            miPersonalizacion?.customPoster ||
+            local?.portada ||
+            (item.posterPath ? `https://image.tmdb.org/t/p/w300${item.posterPath}` : null);
           const href = local
             ? urlFicha({ id: local.dbId, titulo: item.titulo, tipo: item.tipo })
             : `/movie/tmdb/${item.tmdbId}${item.tipo === 'SERIE' ? '?tipo=SERIE' : ''}`;
