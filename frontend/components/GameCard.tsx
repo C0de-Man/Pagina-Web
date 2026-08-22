@@ -1,11 +1,29 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { urlFicha } from '@/lib/slug';
 
 export default function GameCard({ juego, dbId, customPoster }: { juego: any, dbId: number | null, customPoster: string | null }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  // Mismo motivo que en MovieCard: si el padre no nos pasó un customPoster
+  // explícito, y el juego ya está guardado (dbId), lo comprobamos nosotros
+  // mismos tras montarnos, en el navegador, donde sí hay acceso al token.
+  const [miCustomPoster, setMiCustomPoster] = useState<string | null>(customPoster);
+
+  useEffect(() => {
+    if (customPoster || !dbId) return;
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetch(`http://localhost:3001/media/${dbId}/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.customPoster) setMiCustomPoster(data.customPoster);
+      })
+      .catch(() => {});
+  }, [dbId, customPoster]);
 
   const handleClick = async () => {
     if (loading) return;
@@ -29,7 +47,9 @@ export default function GameCard({ juego, dbId, customPoster }: { juego: any, db
     }
   };
 
-  const posterUrl = customPoster || juego.cover?.url || null;
+  // Igual que en MovieCard: item.portada para items ya guardados en tu base de
+  // datos, juego.cover?.url para resultados de búsqueda en crudo de IGDB.
+  const posterUrl = miCustomPoster || juego.portada || juego.cover?.url || null;
   const titulo = juego.name || juego.titulo;
   const anio = juego.anio || (juego.first_release_date ? new Date(juego.first_release_date * 1000).getFullYear() : '');
 

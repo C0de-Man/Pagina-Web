@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import MovieCard from '@/components/MovieCard';
+import GameCard from '@/components/GameCard';
 
 export default function ListaDetalle() {
   const params = useParams();
@@ -115,27 +117,14 @@ export default function ListaDetalle() {
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
             {lista.items.map((item) => (
               <div key={item.id} className="group relative">
-                <Link href={`/media/${item.id}`} className="block">
-                  {item.portada ? (
-                    <img
-                      src={item.portada}
-                      alt={item.titulo}
-                      className="w-full aspect-[2/3] object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition shadow-lg"
-                    />
-                  ) : (
-                    <div className="w-full aspect-[2/3] bg-gray-800 rounded-md border border-gray-700 flex items-center justify-center text-xs text-center p-2">
-                      {item.titulo}
-                    </div>
-                  )}
-                  <div className="absolute inset-0 rounded-md bg-black/90 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-center p-2 pointer-events-none">
-                    <p className="text-sm font-bold text-white">
-                      {item.titulo} <span className="font-normal text-gray-300">({item.anio})</span>
-                    </p>
-                  </div>
-                </Link>
+                {item.tipo === 'VIDEOJUEGO' ? (
+                  <GameCard juego={item} dbId={item.id} customPoster={null} />
+                ) : (
+                  <MovieCard pelicula={item} dbId={item.id} customPoster={null} />
+                )}
                 <button
                   onClick={() => quitarDeLista(item.id)}
-                  className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-full bg-black/70 text-white text-xs opacity-0 group-hover:opacity-100 hover:bg-red-500 transition cursor-pointer"
+                  className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-full bg-black/70 text-white text-xs opacity-0 group-hover:opacity-100 hover:bg-red-500 transition cursor-pointer z-10"
                   title="Quitar de la lista"
                 >
                   ✕

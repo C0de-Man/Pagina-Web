@@ -1,11 +1,31 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { urlFicha } from '@/lib/slug';
 
 export default function MovieCard({ pelicula, dbId, customPoster }: { pelicula: any, dbId: number | null, customPoster: string | null }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  // Si el padre ya nos pasó un customPoster explícito, lo respetamos. Si no,
+  // y la película ya está guardada en la base de datos (dbId), lo comprobamos
+  // nosotros mismos tras montarnos — las páginas que listan tarjetas (perfil,
+  // listas, populares...) se renderizan en el servidor, sin token, así que
+  // nunca pueden saber si el usuario tiene una portada personalizada.
+  const [miCustomPoster, setMiCustomPoster] = useState<string | null>(customPoster);
+
+  useEffect(() => {
+    if (customPoster || !dbId) return;
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetch(`http://localhost:3001/media/${dbId}/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.customPoster) setMiCustomPoster(data.customPoster);
+      })
+      .catch(() => {});
+  }, [dbId, customPoster]);
 
   const handleClick = async () => {
     if (loading) return;
@@ -31,8 +51,10 @@ export default function MovieCard({ pelicula, dbId, customPoster }: { pelicula: 
     }
   };
 
-  // Magia 3: Si tienes un póster personalizado (customPoster), usa ese. Si no, usa el de TMDB.
-  const posterUrl = customPoster || (pelicula.poster_path ? `https://image.tmdb.org/t/p/w500${pelicula.poster_path}` : null);
+  // Magia 3: Si tienes un póster personalizado (customPoster), usa ese. Si no, usa el
+  // ya guardado (item.portada, para items que vienen de tu propia base de datos como
+  // listas/perfil) o el de TMDB (poster_path, para resultados de búsqueda en crudo).
+  const posterUrl = miCustomPoster || pelicula.portada || (pelicula.poster_path ? `https://image.tmdb.org/t/p/w500${pelicula.poster_path}` : null);
   const titulo = pelicula.title || pelicula.name || pelicula.titulo;
   const anio = pelicula.anio || (pelicula.release_date ? pelicula.release_date.split('-')[0] : (pelicula.first_air_date ? pelicula.first_air_date.split('-')[0] : ''));
 
