@@ -22,8 +22,8 @@ model Media {
   tituloOriginal String? // original_title de TMDB, no cambia con el idioma. Base del slug de la URL.
   tipo      MediaType
   anio      Int?
-  portada   String?
-  backdrop  String?   // Campo para la imagen horizontal de fondo
+  portada   String?   // Portada COMPARTIDA (valor por defecto de TMDB/IGDB para quien no ha personalizado nada)
+  backdrop  String?   // Banner COMPARTIDO, mismo criterio que portada
   sinopsis  String?
   remakeOfTmdbId Int?
   remakeChecked  Boolean @default(false)
@@ -56,7 +56,8 @@ model UserMedia {
   liked         Boolean  @default(false)
   watchlist     Boolean  @default(false)
   rating        Int?     // Nota personal, ej. de 1 a 10
-  customPoster  String?  // Portada elegida por este usuario para este medio
+  customPoster  String?  // Portada elegida por ESTE usuario para este medio (no afecta a los demás)
+  customBackdrop String? // Banner elegido por ESTE usuario para este medio (no afecta a los demás)
   playStatus    String?  // Solo videojuegos: "PLAYING" | "COMPLETED" | "RETIRED" | "SHELVED" | "ABANDONED" | null
   updatedAt     DateTime @updatedAt
 

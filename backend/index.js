@@ -1598,6 +1598,23 @@ function requireAuth(req, res, next) {
   }
 }
 
+// --- HELPER: como requireAuth pero sin bloquear la petición ---
+// Para rutas públicas (como GET /media/:id, que se puede ver sin login) que
+// además quieren saber, SI hay sesión, quién pregunta — para poder mezclar
+// personalizaciones (customPoster/customBackdrop) sin exigir estar logueado
+// para ver la ficha.
+function getUserIdOpcional(req) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.split(' ')[1];
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    return payload.userId;
+  } catch (error) {
+    return null;
+  }
+}
+
 // --- MIDDLEWARE: solo administradores ---
 // Se usa SIEMPRE encadenado después de requireAuth (que es quien rellena
 // req.userId), nunca solo: app.post('/ruta', requireAuth, requireAdmin, handler).
@@ -2160,30 +2177,38 @@ app.get('/tmdb/images/:tmdbId', async (req, res) => {
 });
 
 // --- RUTA PARA ACTUALIZAR LA PORTADA ---
-app.patch('/media/:id/poster', async (req, res) => {
+// Antes escribía directo en Media (compartida por todos los usuarios: si uno
+// la cambiaba, cambiaba para todo el mundo). Ahora se guarda en UserMedia,
+// por usuario+película, igual que ya se hacía con customPoster desde
+// PATCH /media/:id/status pero sin usarse nunca de verdad hasta ahora.
+app.patch('/media/:id/poster', requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const mediaId = parseInt(req.params.id);
     const { newPosterUrl } = req.body;
-    const updatedMedia = await prisma.media.update({
-      where: { id: parseInt(id) },
-      data: { portada: newPosterUrl }
+    const userMedia = await prisma.userMedia.upsert({
+      where: { userId_mediaId: { userId: req.userId, mediaId } },
+      update: { customPoster: newPosterUrl },
+      create: { userId: req.userId, mediaId, customPoster: newPosterUrl }
     });
-    res.json(updatedMedia);
+    res.json(userMedia);
   } catch (error) {
+    console.error('ERROR EN PATCH /media/:id/poster:', error);
     res.status(500).json({ error: "Error al actualizar la portada" });
   }
 });
 
-app.patch('/media/:id/backdrop', async (req, res) => {
+app.patch('/media/:id/backdrop', requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const mediaId = parseInt(req.params.id);
     const { newBackdropUrl } = req.body;
-    const updatedMedia = await prisma.media.update({
-      where: { id: parseInt(id) },
-      data: { backdrop: newBackdropUrl }
+    const userMedia = await prisma.userMedia.upsert({
+      where: { userId_mediaId: { userId: req.userId, mediaId } },
+      update: { customBackdrop: newBackdropUrl },
+      create: { userId: req.userId, mediaId, customBackdrop: newBackdropUrl }
     });
-    res.json(updatedMedia);
+    res.json(userMedia);
   } catch (error) {
+    console.error('ERROR EN PATCH /media/:id/backdrop:', error);
     res.status(500).json({ error: 'Error al actualizar el banner' });
   }
 });
@@ -2889,7 +2914,21 @@ app.get('/media/:id', async (req, res) => {
       }
     }
 
-    res.json({ ...mediaItem, titulo: tituloMostrado, sinopsis: sinopsisMostrada, remakeOf });
+    // Si quien pregunta tiene sesión, su portada/banner personalizados (si
+    // los tiene) pisan a los compartidos de Media — que siguen sirviendo de
+    // valor por defecto para cualquiera que no haya personalizado nada.
+    let portadaMostrada = mediaItem.portada;
+    let backdropMostrado = mediaItem.backdrop;
+    const userIdOpcional = getUserIdOpcional(req);
+    if (userIdOpcional) {
+      const miUserMedia = await prisma.userMedia.findUnique({
+        where: { userId_mediaId: { userId: userIdOpcional, mediaId: idParam } }
+      });
+      if (miUserMedia?.customPoster) portadaMostrada = miUserMedia.customPoster;
+      if (miUserMedia?.customBackdrop) backdropMostrado = miUserMedia.customBackdrop;
+    }
+
+    res.json({ ...mediaItem, titulo: tituloMostrado, sinopsis: sinopsisMostrada, portada: portadaMostrada, backdrop: backdropMostrado, remakeOf });
   } catch (error) {
     console.error('ERROR EN GET /media/:id:', error);
     res.status(500).json({ error: 'Error del servidor' });

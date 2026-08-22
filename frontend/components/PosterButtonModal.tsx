@@ -64,19 +64,35 @@ export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number;
             return;
         }
         const url = `https://image.tmdb.org/t/p/w500${path}`;
+        const token = localStorage.getItem('token');
+        if (!token) {
+            alert('Tienes que iniciar sesión para guardar tu carátula.');
+            return;
+        }
         await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+            },
             body: JSON.stringify({ newPosterUrl: url }),
         });
         window.location.reload();
     };
 
     const guardarBannerRecortado = async (dataUrl: string) => {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            alert('Tienes que iniciar sesión para guardar tu banner.');
+            return;
+        }
         try {
             const res = await fetch(`http://localhost:3001/media/${mediaId}/backdrop`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
                 body: JSON.stringify({ newBackdropUrl: dataUrl }),
             });
             if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
