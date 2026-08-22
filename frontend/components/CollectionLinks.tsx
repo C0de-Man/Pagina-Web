@@ -7,6 +7,12 @@ import { withLangRegion } from '@/lib/preferences';
 export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
   const [collection, setCollection] = useState<{ prequel: any, sequel: any, nombreColeccion: string | null, parts: any[] } | null>(null);
   const [myDb, setMyDb] = useState<any[]>([]);
+  // /media no lleva token y su "portada" es la compartida, no tu
+  // personalización — aquí solo la usamos para saber si el título ya está
+  // guardado (dbId). Tu portada real se pide aparte, en lote (ver abajo).
+  const [personalizaciones, setPersonalizaciones] = useState<
+    Record<number, { customPoster: string | null; customBackdrop: string | null }>
+  >({});
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const router = useRouter();
@@ -18,12 +24,39 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
       const colData = await resCol.json();
       setCollection(colData);
 
-      const resDb = await fetch('http://localhost:3001/media');
+      const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
       const dbData = await resDb.json();
       setMyDb(dbData);
     };
     fetchData();
   }, [tmdbId]);
+
+  // Una vez sabemos qué títulos de la colección ya están guardados (myDb),
+  // pedimos DE UNA VEZ la personalización de todos ellos — igual que en
+  // PersonFilmography, para no hacer una petición por carátula.
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token || myDb.length === 0 || !collection) return;
+
+    const idsTmdb = [
+      collection.prequel?.id,
+      collection.sequel?.id,
+      ...(collection.parts || []).map((p) => p.id),
+    ].filter(Boolean);
+
+    const dbIds = idsTmdb
+      .map((id) => myDb.find((m: any) => m.tmdbId === id)?.id)
+      .filter(Boolean);
+    if (dbIds.length === 0) return;
+
+    fetch(`http://localhost:3001/media/personalizaciones?ids=${dbIds.join(',')}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+      .then((res) => res.json())
+      .then(setPersonalizaciones)
+      .catch(() => {});
+  }, [myDb, collection]);
 
   useEffect(() => {
     if (!isModalOpen) return;
@@ -38,7 +71,12 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
 
   const getLocalData = (id: number) => {
     const local = myDb.find((m: any) => m.tmdbId === id);
-    return { dbId: local?.id || null, customPoster: local?.portada || null };
+    const dbId = local?.id || null;
+    const miPersonalizacion = dbId ? personalizaciones[dbId] : undefined;
+    return {
+      dbId,
+      customPoster: miPersonalizacion?.customPoster || local?.portada || null,
+    };
   };
 
   const handleClick = async (item: any, dbId: number | null) => {

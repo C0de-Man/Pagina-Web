@@ -3259,6 +3259,7 @@ app.get('/media/:id/rating', async (req, res) => {
     const count = ratings.length;
 
     let externaAvg = null;
+    let externaPeso = 0; // número real de votos que respaldan esa media externa
     const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true, igdbId: true } });
 
     if (media?.tmdbId) {
@@ -3266,12 +3267,19 @@ app.get('/media/:id/rating', async (req, res) => {
         const apiKey = process.env.TMDB_API_KEY;
         const tmdbRes = await fetch(`https://api.themoviedb.org/3/movie/${media.tmdbId}?api_key=${apiKey}`);
         const tmdbData = await tmdbRes.json();
-        if (tmdbData.vote_average) externaAvg = tmdbData.vote_average;
+        if (tmdbData.vote_average) {
+          externaAvg = tmdbData.vote_average;
+          // vote_count es el número REAL de votos detrás de esa media en
+          // TMDB — antes se trataba como "1 voto más", así que una sola
+          // valoración tuya podía hundir una media respaldada por miles de
+          // votos. Si por lo que sea no viene, 1 como último recurso.
+          externaPeso = tmdbData.vote_count || 1;
+        }
       } catch (e) { }
     } else if (media?.igdbId) {
       try {
         const token = await getIgdbToken();
-        const body = `fields total_rating; where id = ${media.igdbId};`;
+        const body = `fields total_rating, total_rating_count; where id = ${media.igdbId};`;
         const igdbRes = await fetchIgdb('https://api.igdb.com/v4/games', {
           method: 'POST',
           headers: {
@@ -3284,7 +3292,10 @@ app.get('/media/:id/rating', async (req, res) => {
         });
         const igdbData = await igdbRes.json();
         // IGDB va de 0 a 100; lo pasamos a la misma escala 0-10 que usa TMDB.
-        if (igdbData[0]?.total_rating) externaAvg = igdbData[0].total_rating / 10;
+        if (igdbData[0]?.total_rating) {
+          externaAvg = igdbData[0].total_rating / 10;
+          externaPeso = igdbData[0].total_rating_count || 1;
+        }
       } catch (e) { }
     }
 
@@ -3292,9 +3303,8 @@ app.get('/media/:id/rating', async (req, res) => {
       return res.json({ average: null, count: 0 });
     }
 
-    const pesoBase = externaAvg !== null ? 1 : 0;
-    const sumaTotal = suma + (externaAvg !== null ? externaAvg : 0);
-    const totalVotos = count + pesoBase;
+    const sumaTotal = suma + (externaAvg !== null ? externaAvg * externaPeso : 0);
+    const totalVotos = count + externaPeso;
 
     const average = sumaTotal / totalVotos;
 
