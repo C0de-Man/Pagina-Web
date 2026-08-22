@@ -2541,8 +2541,18 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
         personaje: a.character,
         foto: a.profile_path ? `https://image.tmdb.org/t/p/w185${a.profile_path}` : null
       })) || [],
-      director: director ? { nombre: director.name, id: director.id } : null,
-      guionistas: guionistas.map(g => ({ nombre: g.name, id: g.id }))
+      director: director
+        ? {
+            nombre: director.name,
+            id: director.id,
+            foto: director.profile_path ? `https://image.tmdb.org/t/p/w185${director.profile_path}` : null
+          }
+        : null,
+      guionistas: guionistas.map(g => ({
+        nombre: g.name,
+        id: g.id,
+        foto: g.profile_path ? `https://image.tmdb.org/t/p/w185${g.profile_path}` : null
+      }))
     });
   } catch (error) {
     res.status(500).json({ error: "Error al obtener detalles" });

@@ -111,17 +111,31 @@ export default function MediaTabs({
 
       {/* CREW */}
       {tab === 'crew' && (
-        <div className="flex flex-wrap gap-x-10 gap-y-4">
+        <div className="flex flex-wrap gap-x-6 gap-y-5">
           {detalles?.director && (
-            <Link href={`/person/${detalles.director.id}`} className="group">
-              <div className="font-semibold text-white group-hover:underline">{detalles.director.nombre}</div>
-              <div className="text-xs text-gray-500 uppercase tracking-wide">Director</div>
+            <Link href={`/person/${detalles.director.id}`} className="w-20 text-center group">
+              <div className="w-16 h-16 mx-auto rounded-full overflow-hidden bg-gray-800 mb-2 border border-gray-700 group-hover:border-gray-400 transition">
+                {detalles.director.foto ? (
+                  <img src={detalles.director.foto} alt={detalles.director.nombre} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">Sin foto</div>
+                )}
+              </div>
+              <div className="text-xs font-semibold text-white leading-tight group-hover:underline">{detalles.director.nombre}</div>
+              <div className="text-xs text-gray-500 leading-tight mt-0.5">Director</div>
             </Link>
           )}
           {detalles?.guionistas?.map((g: any, i: number) => (
-            <Link key={i} href={`/person/${g.id}`} className="group">
-              <div className="font-semibold text-white group-hover:underline">{g.nombre}</div>
-              <div className="text-xs text-gray-500 uppercase tracking-wide">Guion</div>
+            <Link key={i} href={`/person/${g.id}`} className="w-20 text-center group">
+              <div className="w-16 h-16 mx-auto rounded-full overflow-hidden bg-gray-800 mb-2 border border-gray-700 group-hover:border-gray-400 transition">
+                {g.foto ? (
+                  <img src={g.foto} alt={g.nombre} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">Sin foto</div>
+                )}
+              </div>
+              <div className="text-xs font-semibold text-white leading-tight group-hover:underline">{g.nombre}</div>
+              <div className="text-xs text-gray-500 leading-tight mt-0.5">Guion</div>
             </Link>
           ))}
           {!detalles?.director && (!detalles?.guionistas || detalles.guionistas.length === 0) && (
