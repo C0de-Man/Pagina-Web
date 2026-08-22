@@ -1,12 +1,30 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { urlFicha } from '@/lib/slug';
 
 export default function SearchResultItem({ item, dbId, customPoster }: { item: any, dbId: number | null, customPoster: string | null }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const esJuego = item.media_type === 'juego';
+  // Mismo patrón que MovieCard/GameCard: si no nos pasan un customPoster
+  // explícito y el título ya está guardado (dbId), lo comprobamos nosotros
+  // mismos tras montarnos, en el navegador, donde sí hay acceso al token.
+  const [miCustomPoster, setMiCustomPoster] = useState<string | null>(customPoster);
+
+  useEffect(() => {
+    if (customPoster || !dbId) return;
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetch(`http://localhost:3001/media/${dbId}/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.customPoster) setMiCustomPoster(data.customPoster);
+      })
+      .catch(() => {});
+  }, [dbId, customPoster]);
 
   const handleClick = async () => {
     if (loading) return;
@@ -42,7 +60,7 @@ export default function SearchResultItem({ item, dbId, customPoster }: { item: a
     }
   };
 
-  const posterUrl = customPoster || (esJuego ? item.cover?.url : (item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : null));
+  const posterUrl = miCustomPoster || (esJuego ? item.cover?.url : (item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : null));
   const title = esJuego ? item.name : (item.title || item.name);
   const year = esJuego
     ? (item.first_release_date ? new Date(item.first_release_date * 1000).getFullYear() : '')

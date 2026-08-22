@@ -21,11 +21,14 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
   const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
   const myDb = await resDb.json();
 
+  // Igual que en peliculas/page.tsx: aquí solo miramos si ya está guardada
+  // (dbId). El portada de /media es el compartido, no tu personalización —
+  // MovieCard comprueba tu portada real por su cuenta, en el navegador.
   const getLocalData = (tmdbId: number) => {
     const local = myDb.find((m: any) => m.tmdbId === tmdbId);
     return {
       dbId: local ? local.id : null,
-      customPoster: local ? local.portada : null
+      customPoster: null
     };
   };
 

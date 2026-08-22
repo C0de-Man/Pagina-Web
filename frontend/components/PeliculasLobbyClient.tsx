@@ -50,11 +50,15 @@ export default function PeliculasLobbyClient({
     setBuscadoYa(false);
   };
 
+  // /media no lleva token (esta búsqueda va sin auth) y su "portada" es la
+  // compartida, no tu personalización — solo usamos esto para saber si el
+  // título ya está guardado (dbId). MovieCard comprueba tu portada real por
+  // su cuenta, en el navegador, con tu token.
   const getLocalData = (tmdbId: number) => {
     const local = myDb.find((m: any) => m.tmdbId === tmdbId);
     return {
       dbId: local ? local.id : null,
-      customPoster: local ? local.portada : null,
+      customPoster: null,
     };
   };
 

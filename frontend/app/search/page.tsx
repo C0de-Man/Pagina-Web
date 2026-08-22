@@ -37,6 +37,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
   const results = [...resultsTmdbFiltrados, ...resultsJuegos];
 
+  // /media no lleva token (página de servidor, sin acceso a localStorage) y
+  // su "portada" es la compartida, no tu personalización — aquí solo
+  // comprobamos si el título ya está guardado (dbId). SearchResultItem
+  // comprueba tu portada real por su cuenta, en el navegador.
   const getLocalData = (item: any) => {
     const esJuego = item.media_type === 'juego';
     const local = esJuego
@@ -44,7 +48,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       : myDb.find((m: any) => m.tmdbId === item.id);
     return {
       dbId: local ? local.id : null,
-      customPoster: local ? local.portada : null
+      customPoster: null
     };
   };
 

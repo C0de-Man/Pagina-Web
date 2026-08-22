@@ -20,11 +20,16 @@ export default async function PeliculasLobby() {
   const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
   const myDb = await resDb.json();
 
+  // Esta petición a /media no lleva token (es una página de servidor, no
+  // tiene acceso a localStorage) y ADEMÁS /media devuelve el portada
+  // COMPARTIDO, no tu personalización — así que aquí solo comprobamos si el
+  // título ya está guardado (dbId), nunca inventamos un customPoster falso.
+  // MovieCard, en el navegador y con tu token, comprueba tu portada real.
   const getLocalData = (tmdbId: number) => {
     const local = myDb.find((m: any) => m.tmdbId === tmdbId);
     return {
       dbId: local ? local.id : null,
-      customPoster: local ? local.portada : null
+      customPoster: null
     };
   };
 

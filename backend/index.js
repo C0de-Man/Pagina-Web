@@ -1642,6 +1642,47 @@ function getUserIdOpcional(req) {
   }
 }
 
+// --- HELPER: mezclar customPoster/customBackdrop en resultados EN CRUDO de TMDB ---
+// A diferencia de GET /media/:id (que ya trabaja sobre TU base de datos),
+// estas rutas (/tmdb/popular, /tmdb/buscar, etc.) devuelven objetos tal cual
+// los da TMDB — no saben si ese título ya está guardado en tu base de datos
+// ni si lo has personalizado. Aquí se cruza por tmdbId y, si hay sesión y
+// personalización, se inyecta en el mismo campo "portada"/"backdrop" que ya
+// usa MovieCard como fallback (pelicula.portada), sin tocar poster_path.
+async function mezclarCustomPosters(items, userId) {
+  if (!userId || !items || items.length === 0) return items;
+
+  const tmdbIds = items.map((i) => i.id).filter(Boolean);
+  if (tmdbIds.length === 0) return items;
+
+  const mediaLocal = await prisma.media.findMany({
+    where: { tmdbId: { in: tmdbIds } },
+    select: { id: true, tmdbId: true }
+  });
+  if (mediaLocal.length === 0) return items;
+
+  const mediaIds = mediaLocal.map((m) => m.id);
+  const personalizaciones = await prisma.userMedia.findMany({
+    where: { userId, mediaId: { in: mediaIds } },
+    select: { mediaId: true, customPoster: true, customBackdrop: true }
+  });
+  if (personalizaciones.length === 0) return items;
+
+  const mediaIdPorTmdbId = new Map(mediaLocal.map((m) => [m.tmdbId, m.id]));
+  const personalizacionPorMediaId = new Map(personalizaciones.map((p) => [p.mediaId, p]));
+
+  return items.map((item) => {
+    const mediaId = mediaIdPorTmdbId.get(item.id);
+    const mia = mediaId ? personalizacionPorMediaId.get(mediaId) : null;
+    if (!mia || (!mia.customPoster && !mia.customBackdrop)) return item;
+    return {
+      ...item,
+      ...(mia.customPoster ? { portada: mia.customPoster } : {}),
+      ...(mia.customBackdrop ? { backdrop: mia.customBackdrop } : {})
+    };
+  });
+}
+
 // --- MIDDLEWARE: solo administradores ---
 // Se usa SIEMPRE encadenado después de requireAuth (que es quien rellena
 // req.userId), nunca solo: app.post('/ruta', requireAuth, requireAdmin, handler).
@@ -1961,7 +2002,8 @@ app.get('/tmdb/buscar', async (req, res) => {
       return true;
     });
 
-    res.json(sinDuplicados);
+    const resultadoFinal = await mezclarCustomPosters(sinDuplicados, getUserIdOpcional(req));
+    res.json(resultadoFinal);
   } catch (error) {
     res.status(500).json({ error: 'Hubo un error al buscar en TMDB' });
   }
@@ -2257,7 +2299,8 @@ app.get('/tmdb/popular', async (req, res) => {
     const apiKey = process.env.TMDB_API_KEY;
     const response = await fetch(`https://api.themoviedb.org/3/movie/popular?api_key=${apiKey}&language=${getLang(req)}&page=1`);
     const data = await response.json();
-    res.json(data.results);
+    const resultado = await mezclarCustomPosters(data.results, getUserIdOpcional(req));
+    res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: "Error" });
   }
@@ -2269,7 +2312,8 @@ app.get('/tmdb/popular-historico', async (req, res) => {
     const apiKey = process.env.TMDB_API_KEY;
     const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&sort_by=vote_count.desc&page=1`);
     const data = await response.json();
-    res.json(data.results || []);
+    const resultado = await mezclarCustomPosters(data.results || [], getUserIdOpcional(req));
+    res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: "Error al obtener las populares históricas" });
   }
@@ -2298,8 +2342,9 @@ app.get('/tmdb/popular-historico/page/:page', async (req, res) => {
 
     const offsetDentroDeCombined = startIndex - (startTmdbPage - 1) * 20;
     const resultado = combined.slice(offsetDentroDeCombined, offsetDentroDeCombined + itemsPerPage);
+    const resultadoFinal = await mezclarCustomPosters(resultado, getUserIdOpcional(req));
 
-    res.json({ results: resultado });
+    res.json({ results: resultadoFinal });
   } catch (error) {
     res.status(500).json({ error: "Error al obtener populares históricas" });
   }
@@ -2312,7 +2357,8 @@ app.get('/tmdb/year/:year', async (req, res) => {
     const apiKey = process.env.TMDB_API_KEY;
     const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&primary_release_year=${year}&sort_by=popularity.desc&page=1`);
     const data = await response.json();
-    res.json(data.results || []);
+    const resultado = await mezclarCustomPosters(data.results || [], getUserIdOpcional(req));
+    res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: "Error al obtener películas" });
   }
@@ -2344,8 +2390,9 @@ app.get('/tmdb/year/:year/page/:page', async (req, res) => {
 
     const offset = startIndex % 20;
     const finalResults = uniqueCombined.slice(offset, offset + itemsPerPage);
+    const finalResultsPersonalizados = await mezclarCustomPosters(finalResults, getUserIdOpcional(req));
 
-    res.json({ page, results: finalResults });
+    res.json({ page, results: finalResultsPersonalizados });
   } catch (error) {
     console.error("Error obteniendo pelis paginadas:", error);
     res.status(500).json({ error: "Error al obtener películas" });

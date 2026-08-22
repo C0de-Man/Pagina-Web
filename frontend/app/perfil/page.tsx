@@ -49,6 +49,7 @@ export default function Perfil() {
 
       fetch('http://localhost:3001/favorites', {
         headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
       })
         .then((res) => res.json())
         .then(setFavoritos)
@@ -56,6 +57,7 @@ export default function Perfil() {
 
       fetch('http://localhost:3001/media/watched', {
         headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
       })
         .then((res) => res.json())
         .then(setVistas)
