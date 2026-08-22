@@ -407,7 +407,10 @@ app.get('/igdb/year/:year', async (req, res) => {
     const hasta = Math.floor(new Date(Date.UTC(year, 11, 31, 23, 59, 59)).getTime() / 1000);
 
     const token = await getIgdbToken();
-    const body = `fields name,cover.url,first_release_date,summary; where first_release_date >= ${desde} & first_release_date <= ${hasta}; sort hypes desc; limit 20;`;
+    // Mismo bug que ya arreglamos en /igdb/catalogo: "sort hypes desc"
+    // excluye los juegos sin ese campo relleno (la inmensa mayoría),
+    // dejando esta vista previa casi vacía. Ordenamos por fecha en su lugar.
+    const body = `fields name,cover.url,first_release_date,summary; where first_release_date >= ${desde} & first_release_date <= ${hasta}; sort first_release_date desc; limit 20;`;
     const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
@@ -438,7 +441,8 @@ app.get('/igdb/year/:year/page/:page', async (req, res) => {
     const hasta = Math.floor(new Date(Date.UTC(year, 11, 31, 23, 59, 59)).getTime() / 1000);
 
     const token = await getIgdbToken();
-    const body = `fields name,cover.url,first_release_date,summary; where first_release_date >= ${desde} & first_release_date <= ${hasta}; sort hypes desc; limit ${itemsPerPage}; offset ${offset};`;
+    // Mismo motivo que arriba: sort por hypes excluye a casi todos los juegos.
+    const body = `fields name,cover.url,first_release_date,summary; where first_release_date >= ${desde} & first_release_date <= ${hasta}; sort first_release_date desc; limit ${itemsPerPage}; offset ${offset};`;
     const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
@@ -1386,20 +1390,22 @@ async function buscarJuegoEnSteamGridDBFlexible(nombre) {
   return candidato ? candidato.id : null;
 }
 
-// --- Trae TODAS las carátulas de SteamGridDB para un juego, no solo las
-// primeras 50 --- La API de SteamGridDB pagina de 50 en 50 (no admite pedir
-// más por página), así que hay que ir pidiendo página a página. Ponemos un
-// tope de páginas para no disparar peticiones sin fin en juegos muy
-// populares con cientos de carátulas subidas (con MAX_PAGINAS = 4 llegamos
-// hasta 200, de sobra para elegir sin sobrecargar el desplegable).
-// Nota: el campo "total" que devuelve la propia API de SteamGridDB es poco
-// fiable (a veces cuenta duplicado), así que en vez de fiarnos de ese número
-// paramos en cuanto una página devuelve menos de 50 resultados — eso es lo
-// que de verdad indica que ya no queda nada más.
-const SGDB_MAX_PAGINAS = 4;
+// --- Trae TODAS las carátulas de SteamGridDB para un juego --- La API de
+// SteamGridDB pagina de 50 en 50 (no admite pedir más por página), así que
+// hay que ir pidiendo página a página hasta que una página devuelva menos de
+// 50 resultados — eso es lo que de verdad indica que ya no queda nada más (el
+// campo "total" que devuelve la propia API es poco fiable, a veces cuenta
+// duplicado, así que no nos fiamos de él para decidir cuándo parar).
+// Sin tope artificial de páginas (antes había uno en 4 = 200 carátulas, que
+// se quedaba corto en juegos muy populares como Disco Elysium). Se deja un
+// tope de seguridad muy alto (60 páginas = 3000 carátulas) solo para evitar
+// un bucle infinito de verdad si la API de SteamGridDB tuviera algún fallo
+// devolviendo siempre 50 resultados sin parar nunca — en la práctica, para
+// cualquier juego real, esto siempre se para solo mucho antes de llegar ahí.
+const SGDB_MAX_PAGINAS_SEGURIDAD = 60;
 async function obtenerTodasLasGridsSteamGridDB(sgdbId, headers) {
   let todas = [];
-  for (let pagina = 0; pagina < SGDB_MAX_PAGINAS; pagina++) {
+  for (let pagina = 0; pagina < SGDB_MAX_PAGINAS_SEGURIDAD; pagina++) {
     const resp = await fetch(
       `https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?dimensions=600x900,342x482,660x930&page=${pagina}`,
       { headers }
@@ -1928,11 +1934,18 @@ app.post('/media/tmdb', async (req, res) => {
 
     const apiKey = process.env.TMDB_API_KEY;
     const lang = getLang(req);
-    const response = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=${lang}`);
+    // Antes esto SIEMPRE pedía a /movie/, aunque tipo fuera 'SERIE' — con
+    // un id de serie eso da 404 en TMDB. Ahora usamos /tv/ o /movie/ según
+    // el tipo real que se está guardando.
+    const esSerie = tipo === 'SERIE';
+    const endpointTmdb = esSerie ? 'tv' : 'movie';
+    const response = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${tmdbId}?api_key=${apiKey}&language=${lang}`);
     const data = await response.json();
 
     const backdropUrl = data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null;
     const posterUrl = data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null;
+    // Las series usan name/first_air_date en vez de title/release_date.
+    const fechaLanzamiento = data.release_date || data.first_air_date || null;
 
     const newMedia = await prisma.media.create({
       data: {
@@ -1940,7 +1953,7 @@ app.post('/media/tmdb', async (req, res) => {
         titulo: data.title || data.name,
         tituloOriginal: data.original_title || data.original_name || data.title || data.name,
         tipo: tipo || "PELICULA",
-        anio: data.release_date ? parseInt(data.release_date.split('-')[0]) : null,
+        anio: fechaLanzamiento ? parseInt(fechaLanzamiento.split('-')[0]) : null,
         portada: posterUrl,
         backdrop: backdropUrl,
         sinopsis: data.overview
@@ -2359,6 +2372,79 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: "Error al obtener detalles" });
+  }
+});
+
+// --- FICHA DE UNA PERSONA (actor/director/guionista...): biografía + toda su
+// filmografía agrupada por rol, con contador por rol (Actor, Director,
+// Writer, Producer...) para las pestañas de filtro. ---
+app.get('/tmdb/person/:personId', async (req, res) => {
+  try {
+    const { personId } = req.params;
+    const apiKey = process.env.TMDB_API_KEY;
+    const lang = getLang(req);
+
+    const response = await fetch(
+      `https://api.themoviedb.org/3/person/${personId}?api_key=${apiKey}&language=${lang}&append_to_response=combined_credits`
+    );
+    const data = await response.json();
+
+    if (!data || data.success === false) {
+      return res.status(404).json({ error: 'Persona no encontrada' });
+    }
+
+    const foto = data.profile_path ? `https://image.tmdb.org/t/p/w300${data.profile_path}` : null;
+
+    const aFicha = (c, rol) => ({
+      tmdbId: c.id,
+      tipo: c.media_type === 'tv' ? 'SERIE' : 'PELICULA',
+      titulo: c.title || c.name,
+      posterPath: c.poster_path || null,
+      fecha: c.release_date || c.first_air_date || null,
+      rol,
+    });
+
+    // "cast" = papeles como actor; "crew" = todo lo demás, agrupado por su
+    // "job" real (Director, Writer, Producer, Editor...) para poder mostrar
+    // el desglose de pestañas con contador, como en Letterboxd.
+    const cast = (data.combined_credits?.cast || []).filter((c) => c.media_type === 'movie' || c.media_type === 'tv');
+    const crew = (data.combined_credits?.crew || []).filter((c) => c.media_type === 'movie' || c.media_type === 'tv');
+
+    const porRol = {};
+    for (const c of cast) {
+      (porRol['Actor'] = porRol['Actor'] || []).push(aFicha(c, c.character || 'Actor'));
+    }
+    for (const c of crew) {
+      const departamento = c.job || c.department || 'Crew';
+      (porRol[departamento] = porRol[departamento] || []).push(aFicha(c, departamento));
+    }
+
+    // Dentro de cada rol, quitamos duplicados (un mismo título puede
+    // aparecer más de una vez en "crew" si la persona tuvo varios "job"
+    // distintos dentro del mismo departamento, p. ej. Writer y Screenplay)
+    // y ordenamos por fecha, más reciente primero.
+    for (const rol of Object.keys(porRol)) {
+      const vistos = new Set();
+      porRol[rol] = porRol[rol]
+        .filter((p) => {
+          const clave = `${p.tipo}-${p.tmdbId}`;
+          if (vistos.has(clave)) return false;
+          vistos.add(clave);
+          return true;
+        })
+        .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+    }
+
+    res.json({
+      id: data.id,
+      nombre: data.name,
+      biografia: data.biography || null,
+      foto,
+      porRol,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /tmdb/person/:personId:', error);
+    res.status(500).json({ error: 'Error al obtener la persona' });
   }
 });
 
