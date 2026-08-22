@@ -8,7 +8,12 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Por defecto Express limita el cuerpo de las peticiones a 100kb, que se
+// queda corto para las imágenes de banner recortadas que se guardan como
+// base64 (BannerCropModal/AvatarCropModal) — sin subir esto, esas peticiones
+// fallaban con "PayloadTooLargeError" sin que el frontend llegara a
+// enterarse de por qué.
+app.use(express.json({ limit: '10mb' }));
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -3202,6 +3207,56 @@ app.delete('/lists/:id/items/:mediaId', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('ERROR EN DELETE LIST ITEM:', error);
     res.status(500).json({ error: 'Error al quitar de la lista' });
+  }
+});
+
+// --- PROXY DE IMÁGENES (solo para recortar banners) ---
+// BannerCropModal necesita "tocar" la imagen con <canvas> para poder
+// recortarla y exportarla como base64, y eso el navegador solo lo permite si
+// la imagen se cargó con CORS habilitado por el servidor de origen. TMDB
+// suele permitirlo, pero SteamGridDB/IGDB no siempre — el resultado era que
+// la imagen ni cargaba en el editor. Pidiéndola aquí, desde el backend (donde
+// no aplican las restricciones de CORS del navegador), y devolviéndola ya en
+// base64, el problema desaparece sin importar de qué servidor venga.
+// Solo se permite proxyear los dominios de imágenes que ya usa la app, para
+// no acabar montando sin querer un proxy abierto a cualquier URL.
+const DOMINIOS_IMAGEN_PERMITIDOS = [
+  'image.tmdb.org',
+  'steamgriddb.com',
+  'images.igdb.com',
+];
+app.get('/proxy-imagen', async (req, res) => {
+  try {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: 'Falta el parámetro url' });
+
+    let urlObj;
+    try {
+      urlObj = new URL(url);
+    } catch {
+      return res.status(400).json({ error: 'URL inválida' });
+    }
+
+    const permitido = DOMINIOS_IMAGEN_PERMITIDOS.some(
+      (d) => urlObj.hostname === d || urlObj.hostname.endsWith(`.${d}`)
+    );
+    if (!permitido) {
+      return res.status(403).json({ error: 'Dominio de imagen no permitido' });
+    }
+
+    const respuesta = await fetch(url);
+    if (!respuesta.ok) {
+      return res.status(respuesta.status).json({ error: 'No se pudo descargar la imagen' });
+    }
+
+    const buffer = await respuesta.arrayBuffer();
+    const contentType = respuesta.headers.get('content-type') || 'image/jpeg';
+    const base64 = Buffer.from(buffer).toString('base64');
+
+    res.json({ dataUrl: `data:${contentType};base64,${base64}` });
+  } catch (error) {
+    console.error('ERROR EN GET /proxy-imagen:', error);
+    res.status(500).json({ error: 'Error al descargar la imagen' });
   }
 });
 

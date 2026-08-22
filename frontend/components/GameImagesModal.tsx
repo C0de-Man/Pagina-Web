@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import BannerCropModal from './BannerCropModal';
 
 export default function GameImagesModal({ mediaId }: { mediaId: number }) {
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -8,6 +9,10 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
     const [heroes, setHeroes] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
+    // Imagen (banner) pendiente de recortar antes de guardar — null = no hay
+    // ningún recorte en marcha.
+    const [imagenParaRecortar, setImagenParaRecortar] = useState<string | null>(null);
+    const [cargandoParaRecortar, setCargandoParaRecortar] = useState(false);
 
     const cargarImagenes = async () => {
         setLoading(true);
@@ -33,14 +38,45 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
     };
 
     const seleccionar = async (url: string) => {
-        const campo = tab === 'caratula' ? 'newPosterUrl' : 'newBackdropUrl';
-        const ruta = tab === 'caratula' ? 'poster' : 'backdrop';
-        await fetch(`http://localhost:3001/media/${mediaId}/${ruta}`, {
+        if (tab === 'banner') {
+            // Las imágenes de SteamGridDB/IGDB no siempre permiten CORS, así
+            // que el navegador no puede "tocarlas" directamente con canvas
+            // para recortarlas — pasan primero por el backend, que las
+            // descarga y las devuelve en base64 sin ese problema.
+            setCargandoParaRecortar(true);
+            try {
+                const res = await fetch(`http://localhost:3001/proxy-imagen?url=${encodeURIComponent(url)}`);
+                const data = await res.json();
+                if (!res.ok || !data.dataUrl) throw new Error(data.error || 'Error al descargar la imagen');
+                setImagenParaRecortar(data.dataUrl);
+            } catch (error) {
+                console.error('Error preparando la imagen para recortar', error);
+                alert('No se pudo cargar esta imagen para recortarla. Prueba con otra.');
+            }
+            setCargandoParaRecortar(false);
+            return;
+        }
+        await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ [campo]: url }),
+            body: JSON.stringify({ newPosterUrl: url }),
         });
         window.location.reload();
+    };
+
+    const guardarBannerRecortado = async (dataUrl: string) => {
+        try {
+            const res = await fetch(`http://localhost:3001/media/${mediaId}/backdrop`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ newBackdropUrl: dataUrl }),
+            });
+            if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
+            window.location.reload();
+        } catch (error) {
+            console.error('Error al guardar el banner recortado', error);
+            alert('No se pudo guardar el banner. Revisa la consola del backend para más detalles.');
+        }
     };
 
     useEffect(() => {
@@ -125,6 +161,20 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {cargandoParaRecortar && (
+                <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center">
+                    <p className="text-gray-300 text-sm">Preparando imagen...</p>
+                </div>
+            )}
+
+            {imagenParaRecortar && (
+                <BannerCropModal
+                    imagenSrc={imagenParaRecortar}
+                    onClose={() => setImagenParaRecortar(null)}
+                    onSave={guardarBannerRecortado}
+                />
             )}
         </>
     );

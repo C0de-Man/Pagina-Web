@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import BannerCropModal from './BannerCropModal';
 
 export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number; mediaId: number }) {
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -8,6 +9,10 @@ export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number;
     const [backdrops, setBackdrops] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
+    // Imagen (banner) pendiente de recortar antes de guardar — null = no hay
+    // ningún recorte en marcha.
+    const [imagenParaRecortar, setImagenParaRecortar] = useState<string | null>(null);
+    const [cargandoParaRecortar, setCargandoParaRecortar] = useState(false);
 
     const loadImages = async () => {
         setLoading(true);
@@ -15,8 +20,14 @@ export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number;
         try {
             const res = await fetch(`http://localhost:3001/tmdb/images/${tmdbId}`);
             const data = await res.json();
-            setPosters(data.posters || []);
-            setBackdrops(data.backdrops || []);
+            // TMDB puede devolver el mismo file_path repetido (p. ej. entre
+            // distintos idiomas/regiones de la respuesta). Deduplicamos aquí,
+            // en el único punto donde entran los datos, para no repetir esta
+            // lógica en cada .map() y evitar keys duplicadas en React.
+            const dedup = (arr: any[]) =>
+                Array.from(new Map(arr.map((img) => [img.file_path, img])).values());
+            setPosters(dedup(data.posters || []));
+            setBackdrops(dedup(data.backdrops || []));
             if ((data.posters || []).length === 0 && (data.backdrops || []).length === 0) {
                 setErrorMsg('No se encontraron imágenes en TMDB para este título.');
             }
@@ -33,16 +44,47 @@ export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number;
     };
 
     const seleccionar = async (path: string) => {
-        const campo = tab === 'caratula' ? 'newPosterUrl' : 'newBackdropUrl';
-        const ruta = tab === 'caratula' ? 'poster' : 'backdrop';
-        const size = tab === 'caratula' ? 'w500' : 'w1280';
-        const url = `https://image.tmdb.org/t/p/${size}${path}`;
-        await fetch(`http://localhost:3001/media/${mediaId}/${ruta}`, {
+        if (tab === 'banner') {
+            // Pasa por el backend (proxy de imágenes) antes de abrir el editor
+            // de recorte: aunque TMDB suele permitir CORS, así se evita el
+            // mismo problema que se dio con SteamGridDB/IGDB si alguna vez no
+            // lo permitiera.
+            setCargandoParaRecortar(true);
+            const urlOriginal = `https://image.tmdb.org/t/p/original${path}`;
+            try {
+                const res = await fetch(`http://localhost:3001/proxy-imagen?url=${encodeURIComponent(urlOriginal)}`);
+                const data = await res.json();
+                if (!res.ok || !data.dataUrl) throw new Error(data.error || 'Error al descargar la imagen');
+                setImagenParaRecortar(data.dataUrl);
+            } catch (error) {
+                console.error('Error preparando la imagen para recortar', error);
+                alert('No se pudo cargar esta imagen para recortarla. Prueba con otra.');
+            }
+            setCargandoParaRecortar(false);
+            return;
+        }
+        const url = `https://image.tmdb.org/t/p/w500${path}`;
+        await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ [campo]: url }),
+            body: JSON.stringify({ newPosterUrl: url }),
         });
         window.location.reload();
+    };
+
+    const guardarBannerRecortado = async (dataUrl: string) => {
+        try {
+            const res = await fetch(`http://localhost:3001/media/${mediaId}/backdrop`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ newBackdropUrl: dataUrl }),
+            });
+            if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
+            window.location.reload();
+        } catch (error) {
+            console.error('Error al guardar el banner recortado', error);
+            alert('No se pudo guardar el banner. Revisa la consola del backend para más detalles.');
+        }
     };
 
     // Cerrar con la tecla ESC mientras el modal está abierto
@@ -136,6 +178,20 @@ export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number;
                         </div>
                     </div>
                 </div>
+            )}
+
+            {cargandoParaRecortar && (
+                <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center">
+                    <p className="text-gray-300 text-sm">Preparando imagen...</p>
+                </div>
+            )}
+
+            {imagenParaRecortar && (
+                <BannerCropModal
+                    imagenSrc={imagenParaRecortar}
+                    onClose={() => setImagenParaRecortar(null)}
+                    onSave={guardarBannerRecortado}
+                />
             )}
         </>
     );
