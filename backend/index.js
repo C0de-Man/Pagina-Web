@@ -1332,6 +1332,16 @@ function canonicalizarNumero(palabra) {
   return NUMEROS_ROMANOS_INVERSO[palabra] || palabra;
 }
 
+// --- VINCULACIONES MANUALES DE STEAMGRIDDB ---
+// Para juegos que la búsqueda por nombre no localiza (apóstrofes raros,
+// nombre distinto al oficial en SteamGridDB, título muy nuevo o poco
+// indexado...), se salta la búsqueda automática y se usa directamente este
+// ID. Se saca de la URL de la ficha del juego en steamgriddb.com/game/XXXXXX
+// — la clave es el igdbId del juego (el que ya tenemos guardado en Media).
+const SGDB_MANUAL = {
+  327999: 5467461, // Kota's New Journey — la búsqueda por nombre no la encontraba
+};
+
 async function buscarJuegoEnSteamGridDB(nombre, anio) {
   const res = await fetch(`https://www.steamgriddb.com/api/v2/search/autocomplete/${encodeURIComponent(nombre)}`, {
     headers: { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` }
@@ -1439,10 +1449,16 @@ async function obtenerTodasLasGridsSteamGridDB(sgdbId, headers) {
   let todas = [];
   for (let pagina = 0; pagina < SGDB_MAX_PAGINAS_SEGURIDAD; pagina++) {
     const resp = await fetch(
-      // types=static: excluye las animadas (a petición explícita).
+      // Sin restricción de dimensiones ni de tipo (se piden también todas
+      // las animadas), y nsfw/humor/epilepsy en "any" para no filtrar nada.
       // nsfw=any&humor=any&epilepsy=any: por defecto SteamGridDB filtra estas
       // etiquetas; aquí se piden todas, sin descartar ninguna por su tag.
-      `https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?dimensions=600x900,342x482,660x930&types=static&nsfw=any&humor=any&epilepsy=any&page=${pagina}`,
+      // Sin filtro de dimensiones (antes solo 600x900/342x482/660x930,
+      // descartando carátulas en otros tamaños válidos como 920x430 o
+      // 1024x1024) ni de tipo (incluye animadas) — nsfw/humor/epilepsy en
+      // "any" para no descartar tampoco por etiqueta. Se pide literalmente
+      // todo lo que haya, a petición explícita.
+      `https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?nsfw=any&humor=any&epilepsy=any&page=${pagina}`,
       { headers }
     );
     const data = await resp.json();
@@ -1459,7 +1475,9 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
     const media = await prisma.media.findUnique({ where: { id: mediaId } });
     if (!media) return res.status(404).json({ error: 'No encontrado' });
 
-    const sgdbId = await buscarJuegoEnSteamGridDB(media.tituloOriginal || media.titulo, media.anio);
+    // Si hay una vinculación manual para este juego, nos la saltamos y
+    // usamos ese ID directamente — si no, buscamos por nombre como siempre.
+    const sgdbId = SGDB_MANUAL[media.igdbId] || (await buscarJuegoEnSteamGridDB(media.tituloOriginal || media.titulo, media.anio));
 
     const headers = { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` };
     let covers = [];
@@ -1474,7 +1492,7 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
       covers = await obtenerTodasLasGridsSteamGridDB(sgdbId, headers);
 
       // "heroes" = imagen ancha tipo banner (mismos filtros que las carátulas)
-      const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}?types=static&nsfw=any&humor=any&epilepsy=any`, { headers });
+      const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}?nsfw=any&humor=any&epilepsy=any`, { headers });
       const dataHeroes = await resHeroes.json();
       heroes = (dataHeroes?.data || []).map(h => h.url);
     }
