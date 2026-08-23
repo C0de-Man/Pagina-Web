@@ -1439,7 +1439,10 @@ async function obtenerTodasLasGridsSteamGridDB(sgdbId, headers) {
   let todas = [];
   for (let pagina = 0; pagina < SGDB_MAX_PAGINAS_SEGURIDAD; pagina++) {
     const resp = await fetch(
-      `https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?dimensions=600x900,342x482,660x930&page=${pagina}`,
+      // types=static: excluye las animadas (a petición explícita).
+      // nsfw=any&humor=any&epilepsy=any: por defecto SteamGridDB filtra estas
+      // etiquetas; aquí se piden todas, sin descartar ninguna por su tag.
+      `https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?dimensions=600x900,342x482,660x930&types=static&nsfw=any&humor=any&epilepsy=any&page=${pagina}`,
       { headers }
     );
     const data = await resp.json();
@@ -1470,8 +1473,8 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
       // pestaña "Carátula" vacía aunque SÍ hubiera opciones disponibles.
       covers = await obtenerTodasLasGridsSteamGridDB(sgdbId, headers);
 
-      // "heroes" = imagen ancha tipo banner
-      const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}`, { headers });
+      // "heroes" = imagen ancha tipo banner (mismos filtros que las carátulas)
+      const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}?types=static&nsfw=any&humor=any&epilepsy=any`, { headers });
       const dataHeroes = await resHeroes.json();
       heroes = (dataHeroes?.data || []).map(h => h.url);
     }
