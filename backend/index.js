@@ -1458,11 +1458,18 @@ async function obtenerTodasLasGridsSteamGridDB(sgdbId, headers) {
       // 1024x1024) ni de tipo (incluye animadas) — nsfw/humor/epilepsy en
       // "any" para no descartar tampoco por etiqueta. Se pide literalmente
       // todo lo que haya, a petición explícita.
-      `https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?nsfw=any&humor=any&epilepsy=any&page=${pagina}`,
+      `https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?types=static,animated&nsfw=any&humor=any&epilepsy=any&page=${pagina}`,
       { headers }
     );
     const data = await resp.json();
     const pagina_data = data?.data || [];
+    // LOG TEMPORAL DE DIAGNÓSTICO — quitar cuando encontremos la causa.
+    if (pagina === 0) {
+      console.log(`[SGDB MIME DEBUG] ${pagina_data.length} resultados. Primeras 5:`);
+      pagina_data.slice(0, 5).forEach((g, i) => {
+        console.log(`  [${i}] style=${g.style} mime=${g.mime} url=${g.url} thumb=${g.thumb}`);
+      });
+    }
     todas = todas.concat(pagina_data.map((g) => g.url));
     if (pagina_data.length < 50) break; // última página, no hace falta seguir
   }
@@ -1492,9 +1499,15 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
       covers = await obtenerTodasLasGridsSteamGridDB(sgdbId, headers);
 
       // "heroes" = imagen ancha tipo banner (mismos filtros que las carátulas)
-      const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}?nsfw=any&humor=any&epilepsy=any`, { headers });
+      const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}?types=static,animated&nsfw=any&humor=any&epilepsy=any`, { headers });
       const dataHeroes = await resHeroes.json();
-      heroes = (dataHeroes?.data || []).map(h => h.url);
+      // LOG TEMPORAL DE DIAGNÓSTICO — quitar cuando encontremos la causa.
+      const heroesData = dataHeroes?.data || [];
+      console.log(`[SGDB MIME DEBUG - HEROES] ${heroesData.length} resultados. Primeras 5:`);
+      heroesData.slice(0, 5).forEach((h, i) => {
+        console.log(`  [${i}] style=${h.style} mime=${h.mime} url=${h.url} thumb=${h.thumb}`);
+      });
+      heroes = heroesData.map(h => h.url);
     }
 
     // Si la búsqueda exacta no encontró ninguna carátula (aunque el juego

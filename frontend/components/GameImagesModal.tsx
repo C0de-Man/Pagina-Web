@@ -37,8 +37,42 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
         cargarImagenes();
     };
 
+    // .gif y .webp pueden ser animados — el editor de recorte usa un canvas
+    // para exportar el resultado, y un canvas siempre aplana a un único
+    // fotograma fijo (pierde la animación pase lo que pase). Para estas
+    // extensiones nos saltamos el recorte del todo y guardamos la URL tal
+    // cual, para conservar el movimiento.
+    const esPosibleAnimacion = (url: string) => /\.(gif|webp)(\?|$)/i.test(url);
+
+    const guardarBannerDirecto = async (url: string) => {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            alert('Tienes que iniciar sesión para guardar tu banner.');
+            return;
+        }
+        try {
+            const res = await fetch(`http://localhost:3001/media/${mediaId}/backdrop`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ newBackdropUrl: url }),
+            });
+            if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
+            window.location.reload();
+        } catch (error) {
+            console.error('Error al guardar el banner animado', error);
+            alert('No se pudo guardar el banner. Revisa la consola del backend para más detalles.');
+        }
+    };
+
     const seleccionar = async (url: string) => {
         if (tab === 'banner') {
+            if (esPosibleAnimacion(url)) {
+                await guardarBannerDirecto(url);
+                return;
+            }
             // Las imágenes de SteamGridDB/IGDB no siempre permiten CORS, así
             // que el navegador no puede "tocarlas" directamente con canvas
             // para recortarlas — pasan primero por el backend, que las
