@@ -76,7 +76,7 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
               <div className="border-t border-dashed border-gray-700 my-4"></div>
 
               <div className="space-y-2 mb-4">
-                <GameLogModal mediaId={media.id} />
+                <GameLogModal mediaId={media.id} igdbId={media.igdbId} />
                 <AddToListModal mediaId={media.id} />
               </div>
 

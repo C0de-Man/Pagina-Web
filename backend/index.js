@@ -788,7 +788,7 @@ async function getIgdbDlcsUpdates(igdbId) {
   // JS, tratando game_type ausente/null como "no es mod/remake/remaster/
   // bundle" (o sea, se admite como DLC salvo que se demuestre lo contrario).
   const queryInverso = `
-    fields name, cover.url, first_release_date, game_type, status;
+    fields name, cover.url, first_release_date, game_type, status, version_parent;
     where parent_game = ${igdbId};
     limit 50;
   `;
@@ -819,9 +819,23 @@ async function getIgdbDlcsUpdates(igdbId) {
   // game_type: 3 bundle, 5 mod, 8 remake, 9 remaster — esos NO van aquí (los
   // mods ya se piden aparte arriba; remakes/remasters van a la sección de
   // saga; bundles son packs/compilaciones). game_type ausente/null se trata
-  // como "sí es DLC" en vez de excluirlo.
-  const TIPOS_EXCLUIDOS = [3, 5, 8, 9];
-  const dataInversoUtil = (dataInverso || []).filter((g) => !TIPOS_EXCLUIDOS.includes(g.game_type));
+  // como "sí es DLC" en vez de excluirlo — SALVO que tenga version_parent
+  // relleno: eso significa que esta entrada no es contenido nuevo, sino una
+  // EDICIÓN/SKU concreta de otro juego ya existente (misma idea que
+  // version_parent en GameCollectionLinks) — p. ej. la versión de PS2/Xbox
+  // de un juego con varias versiones por plataforma, que sin este filtro se
+  // colaba como "DLC" al no tener game_type puesto.
+  // game_type: 3 bundle, 5 mod, 8 remake, 9 remaster, 10 expanded_game,
+  // 11 port — ninguno de esos va aquí (los mods ya se piden aparte arriba;
+  // remakes/remasters van a la sección de saga; bundles son packs; expanded
+  // game/port son versiones alternativas del MISMO juego —p. ej. la versión
+  // de otra plataforma—, no contenido nuevo). game_type ausente/null se
+  // sigue tratando como "sí es DLC" — SALVO que tenga version_parent
+  // relleno (edición/SKU concreta de otro juego ya existente).
+  const TIPOS_EXCLUIDOS = [3, 5, 8, 9, 10, 11];
+  const dataInversoUtil = (dataInverso || []).filter(
+    (g) => !TIPOS_EXCLUIDOS.includes(g.game_type) && !g.version_parent
+  );
 
   // De lo que queda, lo que tenga game_type = 14 (update) va a "updates"; el
   // resto (dlc_addon, expansion, episode, season, pack, o sin game_type) se
@@ -1083,6 +1097,59 @@ app.get('/igdb/versiones/:igdbId', async (req, res) => {
   } catch (err) {
     console.error('ERROR EN GET /igdb/versiones/:igdbId:', err);
     res.status(500).json({ error: 'Error al obtener versiones (ports/remasters)' });
+  }
+});
+
+// --- LISTA PLANA DE EDICIONES/VERSIONES PARA EL DESPLEGABLE "Version played"
+// DEL MODAL DE LOG ---
+// Incluye el juego original + cualquier game_type 9 (remaster), 10
+// (expanded_game) u 11 (port) que cuelgue de él por parent_game — el mismo
+// concepto de "es una versión del mismo juego, no contenido nuevo" que ya
+// se usa para excluirlas de "More content".
+app.get('/igdb/ediciones/:igdbId', async (req, res) => {
+  try {
+    const igdbId = parseInt(req.params.igdbId, 10);
+    if (Number.isNaN(igdbId)) return res.status(400).json({ error: 'igdbId inválido' });
+
+    const token = await getIgdbToken();
+    const headers = {
+      'Client-ID': process.env.IGDB_CLIENT_ID,
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/json',
+      'Content-Type': 'text/plain'
+    };
+
+    const queryBase = `fields name, platforms.id, platforms.name; where id = ${igdbId};`;
+    const queryVersiones = `fields name, game_type, platforms.id, platforms.name; where parent_game = ${igdbId}; limit 50;`;
+
+    const [resBase, resVersiones] = await Promise.all([
+      fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryBase }),
+      fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryVersiones }),
+    ]);
+    const dataBase = await resBase.json();
+    const dataVersiones = await resVersiones.json();
+
+    const base = dataBase[0];
+    const TIPOS_VERSION = [9, 10, 11];
+    const versiones = (dataVersiones || []).filter((g) => TIPOS_VERSION.includes(g.game_type));
+
+    // Si el título tiene plataformas, las añadimos entre paréntesis: varias
+    // versiones suelen compartir el mismo nombre (una por plataforma), y sin
+    // esto son indistinguibles en el desplegable.
+    const conPlataformas = (nombre, g) => {
+      const plataformas = (g.platforms || []).map((p) => p.name).join(', ');
+      return plataformas ? `${nombre} (${plataformas})` : nombre;
+    };
+
+    const opciones = [
+      { igdbId, titulo: conPlataformas(base?.name || 'Original', base || {}), plataformas: base?.platforms || [] },
+      ...versiones.map((v) => ({ igdbId: v.id, titulo: conPlataformas(v.name, v), plataformas: v.platforms || [] })),
+    ];
+
+    res.json(opciones);
+  } catch (err) {
+    console.error('ERROR EN GET /igdb/ediciones/:igdbId:', err);
+    res.status(500).json({ error: 'Error al obtener las ediciones del juego' });
   }
 });
 

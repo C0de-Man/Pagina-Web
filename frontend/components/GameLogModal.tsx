@@ -38,7 +38,7 @@ function fechaAInput(iso: string | null) {
   return iso ? iso.slice(0, 10) : '';
 }
 
-export default function GameLogModal({ mediaId }: { mediaId: number }) {
+export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igdbId?: number }) {
   const [modalAbierto, setModalAbierto] = useState(false);
   const [logs, setLogs] = useState<LogForm[]>([]);
   const [activo, setActivo] = useState(0);
@@ -48,6 +48,7 @@ export default function GameLogModal({ mediaId }: { mediaId: number }) {
   const [renombrando, setRenombrando] = useState(false);
   const [nombreTemp, setNombreTemp] = useState('');
   const [plataformas, setPlataformas] = useState<{ id: number; name: string }[]>([]);
+  const [ediciones, setEdiciones] = useState<{ igdbId: number; titulo: string; plataformas: { id: number; name: string }[] }[]>([]);
   const router = useRouter();
 
   const logActual = logs[activo];
@@ -58,6 +59,23 @@ export default function GameLogModal({ mediaId }: { mediaId: number }) {
       .then((d) => setPlataformas(d.plataformas || []))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!igdbId) return;
+    fetch(`${API_URL}/igdb/ediciones/${igdbId}`)
+      .then((r) => r.json())
+      .then((d) => setEdiciones(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [igdbId]);
+
+  // Si hay una versión elegida y esa versión trae sus propias plataformas,
+  // el desplegable de Platform se reduce a esas — no tiene sentido dejar
+  // elegir "Nintendo DS" si la versión seleccionada es la de PlayStation 3.
+  // Sin versión elegida (o sin plataformas para esa versión), se ve la
+  // lista completa de siempre.
+  const edicionElegida = ediciones.find((e) => e.titulo === logActual?.edicion);
+  const plataformasFiltradas =
+    edicionElegida && edicionElegida.plataformas.length > 0 ? edicionElegida.plataformas : plataformas;
 
   const abrirModal = async () => {
     const token = localStorage.getItem('token');
@@ -101,7 +119,19 @@ export default function GameLogModal({ mediaId }: { mediaId: number }) {
   };
 
   const actualizarCampo = (campo: keyof LogForm, valor: string) => {
-    setLogs((prev) => prev.map((l, i) => (i === activo ? { ...l, [campo]: valor } : l)));
+    setLogs((prev) =>
+      prev.map((l, i) => {
+        if (i !== activo) return l;
+        const actualizado = { ...l, [campo]: valor };
+        if (campo === 'edicion') {
+          const edicion = ediciones.find((e) => e.titulo === valor);
+          const plataformasValidas = edicion && edicion.plataformas.length > 0 ? edicion.plataformas : plataformas;
+          const sigueSiendoValida = plataformasValidas.some((p) => p.name === l.plataforma);
+          if (!sigueSiendoValida) actualizado.plataforma = '';
+        }
+        return actualizado;
+      })
+    );
   };
 
   const anadirLog = () => {
@@ -298,7 +328,7 @@ export default function GameLogModal({ mediaId }: { mediaId: number }) {
                       className="w-full bg-[#2c3440] border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none"
                     >
                       <option value="">Select release platfo...</option>
-                      {plataformas.map((p) => (
+                      {plataformasFiltradas.map((p) => (
                         <option key={p.id} value={p.name}>{p.name}</option>
                       ))}
                     </select>
@@ -353,14 +383,17 @@ export default function GameLogModal({ mediaId }: { mediaId: number }) {
                   </div>
 
                   <div>
-                    <p className="text-white font-bold text-sm mb-1.5">Edition played</p>
-                    <input
-                      type="text"
+                    <p className="text-white font-bold text-sm mb-1.5">Version played</p>
+                    <select
                       value={logActual.edicion}
                       onChange={(e) => actualizarCampo('edicion', e.target.value)}
-                      placeholder="Specify an edition.."
-                      className="w-full bg-[#2c3440] border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none"
-                    />
+                      className="w-full bg-[#2c3440] border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none"
+                    >
+                      <option value="">Select a version...</option>
+                      {ediciones.map((e) => (
+                        <option key={e.igdbId} value={e.titulo}>{e.titulo}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
