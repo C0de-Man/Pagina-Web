@@ -28,6 +28,7 @@ export default async function TodosLosJuegos({
     anio?: string;
     genero?: string;
     plataforma?: string;
+    orden?: string;
     ratingMin?: string;
     ratingMax?: string;
   }>;
@@ -47,6 +48,7 @@ export default async function TodosLosJuegos({
   if (resolvedParams.anio) filtros.set('anio', resolvedParams.anio);
   if (resolvedParams.genero) filtros.set('genero', resolvedParams.genero);
   if (resolvedParams.plataforma) filtros.set('plataforma', resolvedParams.plataforma);
+  if (resolvedParams.orden) filtros.set('orden', resolvedParams.orden);
   if (resolvedParams.ratingMin) filtros.set('ratingMin', resolvedParams.ratingMin);
   if (resolvedParams.ratingMax) filtros.set('ratingMax', resolvedParams.ratingMax);
 
@@ -66,11 +68,15 @@ export default async function TodosLosJuegos({
   const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
   const myDb = await resDb.json();
 
+  // /media es una petición de servidor, sin token, así que su "portada" es
+  // siempre la COMPARTIDA — nunca tu personalización. Aquí solo comprobamos
+  // si el título ya está guardado (dbId); GameCard comprueba tu portada real
+  // por su cuenta, ya en el navegador, con tu token.
   const getLocalData = (igdbId: number) => {
     const local = myDb.find((m: any) => m.igdbId === igdbId);
     return {
       dbId: local ? local.id : null,
-      customPoster: local ? local.portada : null
+      customPoster: null
     };
   };
 

@@ -218,6 +218,7 @@ export default function FiltersSidebar({
   const [anio, setAnio] = useState(searchParams.get('anio') || '');
   const [genero, setGenero] = useState(searchParams.get('genero') || '');
   const [plataforma, setPlataforma] = useState(searchParams.get('plataforma') || '');
+  const [orden, setOrden] = useState(searchParams.get('orden') || 'desc');
   const [ratingMin, setRatingMin] = useState(Number(searchParams.get('ratingMin') || 0));
   const [ratingMax, setRatingMax] = useState(Number(searchParams.get('ratingMax') || 5));
 
@@ -234,6 +235,7 @@ export default function FiltersSidebar({
     if (anio) params.set('anio', anio); else params.delete('anio');
     if (genero) params.set('genero', genero); else params.delete('genero');
     if (plataforma) params.set('plataforma', plataforma); else params.delete('plataforma');
+    if (orden === 'asc') params.set('orden', 'asc'); else params.delete('orden');
     if (ratingMin > 0) params.set('ratingMin', String(ratingMin)); else params.delete('ratingMin');
     if (ratingMax < 5) params.set('ratingMax', String(ratingMax)); else params.delete('ratingMax');
 
@@ -246,11 +248,12 @@ export default function FiltersSidebar({
     setAnio('');
     setGenero('');
     setPlataforma('');
+    setOrden('desc');
     setRatingMin(0);
     setRatingMax(5);
 
     const params = new URLSearchParams(searchParams.toString());
-    ['categorias', 'estado', 'anio', 'genero', 'plataforma', 'ratingMin', 'ratingMax'].forEach((k) => params.delete(k));
+    ['categorias', 'estado', 'anio', 'genero', 'plataforma', 'orden', 'ratingMin', 'ratingMax'].forEach((k) => params.delete(k));
     params.set('page', '1');
     router.push(`${pathname}?${params.toString()}`);
   };
@@ -300,6 +303,34 @@ export default function FiltersSidebar({
           </button>
         </div>
         <YearPicker valor={anio} onChange={setAnio} />
+      </div>
+
+      <div>
+        <p className="text-sm font-bold text-gray-300 uppercase tracking-wide mb-3">Popularity</p>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => setOrden('desc')}
+            className={`text-xs px-3 py-2 rounded border text-left transition cursor-pointer ${
+              orden === 'desc'
+                ? 'bg-blue-600 border-blue-500 text-white'
+                : 'bg-[#2c3440] border-gray-700 text-gray-300 hover:border-gray-500'
+            }`}
+          >
+            Most popular first
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrden('asc')}
+            className={`text-xs px-3 py-2 rounded border text-left transition cursor-pointer ${
+              orden === 'asc'
+                ? 'bg-blue-600 border-blue-500 text-white'
+                : 'bg-[#2c3440] border-gray-700 text-gray-300 hover:border-gray-500'
+            }`}
+          >
+            Least popular first
+          </button>
+        </div>
       </div>
 
       <ComboboxFiltro

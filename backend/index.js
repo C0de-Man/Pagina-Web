@@ -412,10 +412,10 @@ app.get('/igdb/year/:year', async (req, res) => {
     const hasta = Math.floor(new Date(Date.UTC(year, 11, 31, 23, 59, 59)).getTime() / 1000);
 
     const token = await getIgdbToken();
-    // Mismo bug que ya arreglamos en /igdb/catalogo: "sort hypes desc"
-    // excluye los juegos sin ese campo relleno (la inmensa mayoría),
-    // dejando esta vista previa casi vacía. Ordenamos por fecha en su lugar.
-    const body = `fields name,cover.url,first_release_date,summary; where first_release_date >= ${desde} & first_release_date <= ${hasta}; sort first_release_date desc; limit 20;`;
+    // Igual que en /igdb/catalogo: ordenamos por popularidad (total_rating_count),
+    // no por fecha de lanzamiento, para que el carrusel muestre primero los
+    // más populares de ese año.
+    const body = `fields name,cover.url,first_release_date,summary; where first_release_date >= ${desde} & first_release_date <= ${hasta}; sort total_rating_count desc; limit 20;`;
     const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
@@ -562,16 +562,16 @@ app.get('/igdb/catalogo/page/:page', async (req, res) => {
     }
 
     const where = condiciones.length > 0 ? `where ${condiciones.join(' & ')};` : '';
-    // OJO: "sort hypes desc" se usaba antes aquí para el modo "año", pero
-    // IGDB EXCLUYE de los resultados cualquier juego donde el campo de
-    // ordenación esté vacío — y "hypes" (anticipación/wishlist) solo lo
-    // tienen rellenado un puñado de juegos muy esperados. En la práctica,
-    // esto hacía que el catálogo por año devolviera casi siempre 0 o muy
-    // pocos resultados en cuanto se combinaba con cualquier filtro, porque
-    // la inmensa mayoría de juegos no tienen hypes. Ordenamos por
-    // first_release_date en su lugar: todo juego que pasa el filtro de año
-    // tiene ese campo relleno por definición, así que no se pierde nadie.
-    const sort = modo === 'popular' ? 'sort total_rating_count desc;' : 'sort first_release_date desc;';
+    // Antes: "sort hypes desc" (casi todos los juegos no tienen ese campo
+    // relleno, así que IGDB los excluía y el catálogo por año quedaba casi
+    // vacío) y luego "sort first_release_date desc" (evitaba el problema
+    // pero no ordenaba por popularidad, que es lo que de verdad se quería
+    // ver primero). total_rating_count SÍ está lo bastante extendido — es
+    // el mismo campo que ya usa /igdb/popular con éxito — así que ahora se
+    // usa también en modo "año" para mostrar los más populares de ESE año
+    // primero, no solo los históricos de siempre.
+    const orden = req.query.orden === 'asc' ? 'asc' : 'desc';
+    const sort = `sort total_rating_count ${orden};`;
 
     const token = await getIgdbToken();
     const headers = {
@@ -581,6 +581,10 @@ app.get('/igdb/catalogo/page/:page', async (req, res) => {
       'Content-Type': 'text/plain'
     };
     const body = `fields name,cover.url,first_release_date,summary; ${where} ${sort} limit ${itemsPerPage}; offset ${offset};`;
+
+    // LOG TEMPORAL DE DIAGNÓSTICO — bórralo en cuanto encontremos el bug de "Platform"
+    console.log('[DEBUG catálogo juegos] query recibida:', req.query);
+    console.log('[DEBUG catálogo juegos] where construido:', where);
 
     const [response, countResponse] = await Promise.all([
       fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body }),

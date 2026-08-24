@@ -46,11 +46,15 @@ export default function JuegosLobbyClient({
     setBuscadoYa(false);
   };
 
+  // /media no lleva token (esta búsqueda va sin auth) y su "portada" es la
+  // compartida, no tu personalización — solo usamos esto para saber si el
+  // título ya está guardado (dbId). GameCard comprueba tu portada real por
+  // su cuenta, en el navegador, con tu token.
   const getLocalData = (igdbId: number) => {
     const local = myDb.find((m: any) => m.igdbId === igdbId);
     return {
       dbId: local ? local.id : null,
-      customPoster: local ? local.portada : null,
+      customPoster: null,
     };
   };
 
