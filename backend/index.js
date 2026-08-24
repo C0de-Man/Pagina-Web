@@ -776,25 +776,27 @@ async function getIgdbDlcsUpdates(igdbId) {
 
   // ...pero no siempre: hay juegos base sin esos campos rellenos aunque el DLC
   // sí tenga bien puesto su propio parent_game. Por eso también buscamos al
-  // revés TODO lo que cuelgue de este juego (parent_game = X), salvo lo que
-  // sabemos que no es DLC/update (mods, que tienen su propia consulta abajo;
-  // remakes/remasters, que van a la sección de saga; y bundles, que son
-  // packs/compilaciones). Ya NO excluimos category 4 (standalone_expansion) por
-  // el mismo motivo de arriba. No filtramos por category = 14 de forma estricta
-  // para "updates": la propia web de IGDB etiqueta algunas entradas como
-  // "Update" sin que su category interno sea literalmente 14 (p. ej. "MindsEye:
-  // Blacklisted"), así que clasificamos DESPUÉS según la category que traiga
-  // cada una, en vez de descartar la que no encaje.
+  // revés TODO lo que cuelgue de este juego (parent_game = X). Usamos
+  // game_type, NO category: como ya se descubrió en /igdb/catalogo,
+  // "category" es el campo VIEJO de IGDB y se deja cada vez más vacío en
+  // entradas nuevas — de hecho ESE era el bug real de "More content" vacío
+  // en juegos recién salidos (Resident Evil Requiem y sus DLCs/updates
+  // tenían category = null, así que "category != (3,5,8,9)" los excluía a
+  // TODOS sin querer, null incluido). Para no arriesgarnos a que pase lo
+  // mismo con game_type en el futuro, aquí NO filtramos dentro de la query
+  // — traemos todo lo que cuelgue de este juego y clasificamos después, en
+  // JS, tratando game_type ausente/null como "no es mod/remake/remaster/
+  // bundle" (o sea, se admite como DLC salvo que se demuestre lo contrario).
   const queryInverso = `
-    fields name, cover.url, first_release_date, category, status;
-    where parent_game = ${igdbId} & category != (3,5,8,9);
+    fields name, cover.url, first_release_date, game_type, status;
+    where parent_game = ${igdbId};
     limit 50;
   `;
 
-  // Mods: se buscan al revés por parent_game + category 5.
+  // Mods: se buscan al revés por parent_game + game_type 5.
   const queryMods = `
     fields name, cover.url, first_release_date, status;
-    where parent_game = ${igdbId} & category = 5;
+    where parent_game = ${igdbId} & game_type = 5;
     limit 50;
   `;
 
@@ -814,24 +816,32 @@ async function getIgdbDlcsUpdates(igdbId) {
     resMods.json(),
   ]);
 
-  // De lo encontrado por la vía inversa, lo que tenga category = 14 (update)
-  // va a "updates"; el resto (dlc_addon, expansion, episode, season, pack...)
-  // se suma a los DLCs directos.
-  const dataUpdates = (dataInverso || []).filter((g) => g.category === 14);
-  const dataInversoSinUpdates = (dataInverso || []).filter((g) => g.category !== 14);
+  // game_type: 3 bundle, 5 mod, 8 remake, 9 remaster — esos NO van aquí (los
+  // mods ya se piden aparte arriba; remakes/remasters van a la sección de
+  // saga; bundles son packs/compilaciones). game_type ausente/null se trata
+  // como "sí es DLC" en vez de excluirlo.
+  const TIPOS_EXCLUIDOS = [3, 5, 8, 9];
+  const dataInversoUtil = (dataInverso || []).filter((g) => !TIPOS_EXCLUIDOS.includes(g.game_type));
+
+  // De lo que queda, lo que tenga game_type = 14 (update) va a "updates"; el
+  // resto (dlc_addon, expansion, episode, season, pack, o sin game_type) se
+  // suma a los DLCs directos.
+  const dataUpdates = dataInversoUtil.filter((g) => g.game_type === 14);
+  const dataInversoSinUpdates = dataInversoUtil.filter((g) => g.game_type !== 14);
 
   const juego = dataPrincipal[0] || {};
 
-  // Algunos "updates" (categoría 14) tampoco tienen relleno su propio parent_game
-  // en IGDB, así que la búsqueda por relación (arriba) no los encuentra. Como
-  // último recurso, para estos SÍ hacemos una búsqueda de texto por el nombre
-  // del juego base, filtrando a que el nombre del update lo contenga (evita
-  // falsos positivos de nombres parecidos, igual que hacemos con SteamGridDB).
+  // Algunos "updates" (game_type 14) tampoco tienen relleno su propio
+  // parent_game en IGDB, así que la búsqueda por relación (arriba) no los
+  // encuentra. Como último recurso, para estos SÍ hacemos una búsqueda de
+  // texto por el nombre del juego base, filtrando a que el nombre del
+  // update lo contenga (evita falsos positivos de nombres parecidos, igual
+  // que hacemos con SteamGridDB).
   let updatesEncontrados = dataUpdates || [];
   if (updatesEncontrados.length === 0 && juego.name) {
     const queryUpdatesPorTexto = `
       search "${juego.name}";
-      fields name, cover.url, first_release_date, category;
+      fields name, cover.url, first_release_date, game_type;
       limit 30;
     `;
     const respUpdatesTexto = await fetchIgdb('https://api.igdb.com/v4/games', {
@@ -859,7 +869,7 @@ async function getIgdbDlcsUpdates(igdbId) {
         // "MindsEye: Blacklisted"), así que también vale si IGDB ya lo tiene
         // categorizado como update (14) — con la comprobación de arriba ya
         // descartamos falsos positivos de secuelas/otros juegos.
-        return g.category === 14 || nombreNormalizado.includes('update');
+        return g.game_type === 14 || nombreNormalizado.includes('update');
       });
     }
   }
@@ -925,6 +935,9 @@ async function getIgdbDlcsUpdates(igdbId) {
     mods = mods.sort(porAnioAsc);
   }
 
+  // LOG TEMPORAL DE DIAGNÓSTICO — bórralo en cuanto encontremos el bug de "More content"
+  console.log('[DEBUG dlcs-updates] resultado final:', JSON.stringify({ dlcs, updates, mods }, null, 2));
+
   return { dlcs, updates, mods };
 }
 
@@ -963,10 +976,14 @@ async function getIgdbVersiones(igdbId) {
     where id = ${igdbId};
   `;
 
-  // category 9 = Remaster, category 11 = Port.
+  // game_type 9 = Remaster, game_type 11 = Port. Usamos game_type, NO
+  // category, por el mismo motivo que en getIgdbDlcsUpdates: category se
+  // deja vacío (null) en entradas nuevas, y "category = (9,11)" excluye
+  // también los null. No filtramos dentro de la query — clasificamos
+  // después, en JS.
   const queryInverso = `
-    fields name, cover.url, first_release_date, category, status;
-    where parent_game = ${igdbId} & category = (9,11);
+    fields name, cover.url, first_release_date, game_type, status;
+    where parent_game = ${igdbId};
     limit 50;
   `;
 
@@ -985,8 +1002,8 @@ async function getIgdbVersiones(igdbId) {
   ]);
 
   const juego = dataPrincipal[0] || {};
-  const inversoPorts = (dataInverso || []).filter((g) => g.category === 11);
-  const inversoRemasters = (dataInverso || []).filter((g) => g.category === 9);
+  const inversoPorts = (dataInverso || []).filter((g) => g.game_type === 11);
+  const inversoRemasters = (dataInverso || []).filter((g) => g.game_type === 9);
 
   const yaHayPorts = (juego.ports || []).length > 0 || inversoPorts.length > 0;
   const yaHayRemasters = (juego.remasters || []).length > 0 || inversoRemasters.length > 0;
@@ -996,7 +1013,7 @@ async function getIgdbVersiones(igdbId) {
   if ((!yaHayPorts || !yaHayRemasters) && juego.name) {
     const queryTexto = `
       search "${juego.name}";
-      fields name, cover.url, first_release_date, category;
+      fields name, cover.url, first_release_date, game_type;
       limit 30;
     `;
     const respTexto = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryTexto });
@@ -1014,12 +1031,12 @@ async function getIgdbVersiones(igdbId) {
       };
       if (!yaHayPorts) {
         portsTexto = (dataTexto || []).filter(
-          (g) => cumplePrefijo(g) && (g.category === 11 || g.name.toLowerCase().includes('port'))
+          (g) => cumplePrefijo(g) && (g.game_type === 11 || g.name.toLowerCase().includes('port'))
         );
       }
       if (!yaHayRemasters) {
         remastersTexto = (dataTexto || []).filter(
-          (g) => cumplePrefijo(g) && (g.category === 9 || g.name.toLowerCase().includes('remaster'))
+          (g) => cumplePrefijo(g) && (g.game_type === 9 || g.name.toLowerCase().includes('remaster'))
         );
       }
     }
