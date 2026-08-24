@@ -2346,6 +2346,34 @@ app.patch('/media/:id/backdrop', requireAuth, async (req, res) => {
   }
 });
 
+// --- Traduce los filtros del sidebar de películas (rating y duración) a
+// query params de TMDB discover/movie. Devuelve un string listo para
+// concatenar directamente a la URL (con "&" delante de cada parámetro, o
+// "" si no hay filtros activos).
+function construirFiltrosDiscoverMovie(query) {
+  let params = '';
+
+  const anio = parseInt(query.anio);
+  if (!isNaN(anio) && anio > 1800) params += `&primary_release_year=${anio}`;
+
+  const ratingMin = parseFloat(query.ratingMin);
+  const ratingMax = parseFloat(query.ratingMax);
+  if (!isNaN(ratingMin) && ratingMin > 0) params += `&vote_average.gte=${ratingMin}`;
+  if (!isNaN(ratingMax) && ratingMax < 10) params += `&vote_average.lte=${ratingMax}`;
+
+  // Duración en categorías fijas, no rango libre: Corta <90min / Media
+  // 90-150min / Larga >150min.
+  if (query.duracion === 'corta') {
+    params += `&with_runtime.lte=89`;
+  } else if (query.duracion === 'media') {
+    params += `&with_runtime.gte=90&with_runtime.lte=150`;
+  } else if (query.duracion === 'larga') {
+    params += `&with_runtime.gte=151`;
+  }
+
+  return params;
+}
+
 // --- RUTAS PARA EL LOBBY ---
 app.get('/tmdb/now_playing', async (req, res) => {
   try {
@@ -2396,10 +2424,13 @@ app.get('/tmdb/popular-historico/page/:page', async (req, res) => {
     const startTmdbPage = Math.floor(startIndex / 20) + 1;
     const endTmdbPage = Math.ceil(endIndex / 20);
 
+    const paramsFiltro = construirFiltrosDiscoverMovie(req.query);
+    const orden = req.query.orden === 'asc' ? 'asc' : 'desc';
+
     let combined = [];
 
     for (let i = startTmdbPage; i <= endTmdbPage; i++) {
-      const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&sort_by=vote_count.desc&page=${i}`);
+      const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&sort_by=vote_count.${orden}&page=${i}${paramsFiltro}`);
       const data = await response.json();
       if (data.results) combined.push(...data.results);
     }
@@ -2442,10 +2473,13 @@ app.get('/tmdb/year/:year/page/:page', async (req, res) => {
     const startTmdbPage = Math.floor(startIndex / 20) + 1;
     const endTmdbPage = Math.ceil(endIndex / 20);
 
+    const paramsFiltro = construirFiltrosDiscoverMovie(req.query);
+    const orden = req.query.orden === 'asc' ? 'asc' : 'desc';
+
     let combined = [];
 
     for (let i = startTmdbPage; i <= endTmdbPage; i++) {
-      const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&primary_release_year=${year}&sort_by=popularity.desc&page=${i}`);
+      const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&primary_release_year=${year}&sort_by=popularity.${orden}&page=${i}${paramsFiltro}`);
       const data = await response.json();
       if (data.results) combined.push(...data.results);
     }
