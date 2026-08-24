@@ -147,7 +147,7 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
         </div>
         <div className="text-center">
           <p className="font-semibold text-white text-sm leading-tight">{item.title}</p>
-          <p className="text-xs text-gray-400">{anio}{esActual ? ' · Estás viendo esta' : ''}</p>
+          <p className="text-xs text-gray-400">{anio}{esActual ? ' · You\'re viewing this' : ''}</p>
         </div>
       </div>
     );
@@ -157,8 +157,8 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
     <>
       <div className="mt-4 bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl">
         <div className="flex justify-around items-center">
-          {renderItem(collection.prequel, 'Precuela')}
-          {renderItem(collection.sequel, 'Secuela')}
+          {renderItem(collection.prequel, 'Prequel')}
+          {renderItem(collection.sequel, 'Sequel')}
         </div>
 
         {collection.parts && collection.parts.length > 2 && (
@@ -166,7 +166,7 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
             onClick={() => setIsModalOpen(true)}
             className="w-full mt-4 text-xs text-gray-400 hover:text-white text-center underline cursor-pointer bg-gray-900/80 py-2 rounded border border-gray-800 transition"
           >
-            Ver más de la saga
+            See full saga
           </button>
         )}
       </div>
@@ -182,7 +182,7 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
           >
             <div className="flex justify-between items-center px-6 py-4 border-b border-gray-700 flex-shrink-0">
               <h2 className="text-xl font-bold">
-                {collection.nombreColeccion || 'Saga completa'}
+                {collection.nombreColeccion || 'Full saga'}
               </h2>
               <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white text-2xl font-bold cursor-pointer">✕</button>
             </div>

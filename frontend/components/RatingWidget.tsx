@@ -61,7 +61,7 @@ export default function RatingWidget({ mediaId }: { mediaId: number }) {
       {/* MI NOTA (interactiva) */}
       <div className="flex flex-col items-center gap-1 bg-gray-900 rounded p-3 mb-4">
         <span className="text-xs text-gray-400 uppercase tracking-wide">
-          {miNota > 0 ? `Tu nota: ${miNota}/10` : 'Puntuar'}
+          {miNota > 0 ? `Your rating: ${miNota}/10` : 'Rate'}
         </span>
         <StarRating value={miNota} onRate={puntuar} size="md" />
       </div>
@@ -73,7 +73,7 @@ export default function RatingWidget({ mediaId }: { mediaId: number }) {
           {media.average !== null ? media.average.toFixed(2) : '—'}
         </div>
         <div className="text-xs text-gray-500 mt-1">
-          {media.count > 0 ? `${media.count} ${media.count === 1 ? 'valoración' : 'valoraciones'}` : 'Sin valoraciones'}
+          {media.count > 0 ? `${media.count} ${media.count === 1 ? 'rating' : 'ratings'}` : 'No ratings yet'}
         </div>
       </div>
     </>

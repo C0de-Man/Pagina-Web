@@ -42,10 +42,10 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
         
         <div className="border-b border-gray-800 pb-4 mb-6 flex justify-between items-center">
           <h1 className="text-2xl font-bold tracking-wide">
-            {esPopulares ? 'Populares' : `Películas ${currentYear}`}
-            <span className="text-sm font-normal text-gray-500 ml-3 bg-gray-900 px-2 py-1 rounded">Pág. {currentPage}</span>
+            {esPopulares ? 'Popular' : `Movies ${currentYear}`}
+            <span className="text-sm font-normal text-gray-500 ml-3 bg-gray-900 px-2 py-1 rounded">Page {currentPage}</span>
           </h1>
-          <span className="text-sm text-gray-500 font-semibold">Mostrando 42 títulos</span>
+          <span className="text-sm text-gray-500 font-semibold">Showing 42 titles</span>
         </div>
 
         {/* CUADRÍCULA DE 7 COLUMNAS */}
@@ -70,7 +70,7 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
         <div className="border-t border-gray-800 mt-8 pt-6 flex items-center justify-between">
           {currentPage > 1 ? (
             <Link
-              href={`/peliculas/todas?page=${currentPage - 1}${sufijoTipo}`}
+              href={`/movie/all?page=${currentPage - 1}${sufijoTipo}`}
               className="text-sm text-gray-400 hover:text-white transition"
             >
               ‹ Prev
@@ -83,7 +83,7 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
             {Array.from({ length: 7 }, (_, i) => Math.max(1, currentPage - 3) + i).map((n) => (
               <Link
                 key={n}
-                href={`/peliculas/todas?page=${n}${sufijoTipo}`}
+                href={`/movie/all?page=${n}${sufijoTipo}`}
                 className={`w-9 h-9 flex items-center justify-center rounded text-sm font-bold transition ${
                   n === currentPage
                     ? 'bg-blue-600 text-white'
@@ -96,7 +96,7 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
           </div>
 
           <Link
-            href={`/peliculas/todas?page=${currentPage + 1}${sufijoTipo}`}
+            href={`/movie/all?page=${currentPage + 1}${sufijoTipo}`}
             className="text-sm text-gray-400 hover:text-white transition"
           >
             Next ›

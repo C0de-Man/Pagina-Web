@@ -55,10 +55,10 @@ export default function MediaTabs({
   const hayAdaptaciones = (adaptaciones?.videojuegos?.length || 0) > 0;
 
   const tabs: { key: typeof tab; label: string }[] = [
-    { key: 'descripcion', label: 'Descripcion' },
+    { key: 'descripcion', label: 'Description' },
     { key: 'cast', label: 'Cast' },
     { key: 'crew', label: 'Crew' },
-    { key: 'mas', label: 'Mas' },
+    { key: 'mas', label: 'More' },
     ...(hayAdaptaciones ? [{ key: 'adaptation' as const, label: 'Adaptation' }] : []),
   ];
 
@@ -96,7 +96,7 @@ export default function MediaTabs({
                   {actor.foto ? (
                     <img src={actor.foto} alt={actor.nombre} className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">Sin foto</div>
+                    <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">No photo</div>
                   )}
                 </div>
                 <div className="text-xs font-semibold text-white leading-tight group-hover:underline">{actor.nombre}</div>
@@ -104,7 +104,7 @@ export default function MediaTabs({
               </Link>
             ))
           ) : (
-            <p className="text-gray-500 text-sm">No hay información de reparto.</p>
+            <p className="text-gray-500 text-sm">No cast information available.</p>
           )}
         </div>
       )}
@@ -118,7 +118,7 @@ export default function MediaTabs({
                 {detalles.director.foto ? (
                   <img src={detalles.director.foto} alt={detalles.director.nombre} className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">Sin foto</div>
+                  <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">No photo</div>
                 )}
               </div>
               <div className="text-xs font-semibold text-white leading-tight group-hover:underline">{detalles.director.nombre}</div>
@@ -131,15 +131,15 @@ export default function MediaTabs({
                 {g.foto ? (
                   <img src={g.foto} alt={g.nombre} className="w-full h-full object-cover" />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">Sin foto</div>
+                  <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">No photo</div>
                 )}
               </div>
               <div className="text-xs font-semibold text-white leading-tight group-hover:underline">{g.nombre}</div>
-              <div className="text-xs text-gray-500 leading-tight mt-0.5">Guion</div>
+              <div className="text-xs text-gray-500 leading-tight mt-0.5">Writer</div>
             </Link>
           ))}
           {!detalles?.director && (!detalles?.guionistas || detalles.guionistas.length === 0) && (
-            <p className="text-gray-500 text-sm">No hay información de equipo técnico.</p>
+            <p className="text-gray-500 text-sm">No crew information available.</p>
           )}
         </div>
       )}
@@ -148,28 +148,28 @@ export default function MediaTabs({
       {tab === 'mas' && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 text-sm">
           <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Estudio</div>
-            <div className="text-gray-200">{detalles?.estudios?.length > 0 ? detalles.estudios.join(', ') : 'No disponible'}</div>
+            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Studio</div>
+            <div className="text-gray-200">{detalles?.estudios?.length > 0 ? detalles.estudios.join(', ') : 'Not available'}</div>
           </div>
           <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">País</div>
-            <div className="text-gray-200">{detalles?.paises?.length > 0 ? detalles.paises.join(', ') : 'No disponible'}</div>
+            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Country</div>
+            <div className="text-gray-200">{detalles?.paises?.length > 0 ? detalles.paises.join(', ') : 'Not available'}</div>
           </div>
           <div className="flex flex-col gap-4">
             <div>
-              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Presupuesto</div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Budget</div>
               <div className="text-gray-200">
                 {detalles?.presupuesto
-                  ? new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(detalles.presupuesto)
-                  : 'No disponible'}
+                  ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(detalles.presupuesto)
+                  : 'Not available'}
               </div>
             </div>
             <div>
-              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Ganancias</div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Revenue</div>
               <div className="text-gray-200">
                 {detalles?.ganancias
-                  ? new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(detalles.ganancias)
-                  : 'No disponible'}
+                  ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(detalles.ganancias)
+                  : 'Not available'}
               </div>
             </div>
           </div>
@@ -200,7 +200,7 @@ export default function MediaTabs({
 
                     {navegandoA === j.igdbId ? (
                       <div className="absolute inset-0 flex items-center justify-center rounded pointer-events-none">
-                        <span className="text-white text-xs font-bold bg-black/60 px-2 py-1 rounded">Cargando...</span>
+                        <span className="text-white text-xs font-bold bg-black/60 px-2 py-1 rounded">Loading...</span>
                       </div>
                     ) : (
                       <div className="absolute inset-0 rounded bg-black/90 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-center p-2 pointer-events-none">

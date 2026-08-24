@@ -91,8 +91,8 @@ const menuLinks = [
                   onMouseEnter={() => setPeliculasOpen(true)}
                   onMouseLeave={() => setPeliculasOpen(false)}
                 >
-                  <Link href="/peliculas" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">
-                    Peliculas
+                  <Link href="/movie" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">
+                    Movies
                   </Link>
                   {peliculasOpen && (
                     <div className="absolute left-0 top-full pt-2 w-40 z-50">
@@ -104,14 +104,15 @@ const menuLinks = [
                     </div>
                   )}
                 </div>
-                <Link href="/comics" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Comics</Link>
+                <Link href="/series" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Series</Link>
+                <Link href="/comics" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Books</Link>
                 <div
                   className="relative group"
                   onMouseEnter={() => setJuegosOpen(true)}
                   onMouseLeave={() => setJuegosOpen(false)}
                 >
                   <Link href="/juegos" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">
-                    Juegos
+                    Games
                   </Link>
                   {juegosOpen && (
                     <div className="absolute left-0 top-full pt-2 w-40 z-50">
