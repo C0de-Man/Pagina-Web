@@ -69,16 +69,16 @@ export default function Perfil() {
   // debajo de la carátula — solo tiene sentido para "Actividad reciente"
   // (favoritos no tiene nota ni fecha de visto).
   const renderCard = (item: any, mostrarFooter = false) => (
-    <div key={item.id} className="flex-shrink-0 w-32 md:w-36">
+    <div key={item.id} className="flex-shrink-0 w-28 md:w-32">
       <Link href={urlFicha(item)} className="group relative block">
         {item.portada ? (
           <img
             src={item.portada}
             alt={item.titulo}
-            className="w-32 h-48 md:w-36 md:h-52 object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition duration-300 shadow-lg"
+            className="w-28 h-40 md:w-32 md:h-48 object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition duration-300 shadow-lg"
           />
         ) : (
-          <div className="w-32 h-48 md:w-36 md:h-52 bg-gray-800 rounded-md border border-gray-700 flex items-center justify-center text-xs text-center p-2 group-hover:border-gray-400 transition shadow-lg">
+          <div className="w-28 h-40 md:w-32 md:h-48 bg-gray-800 rounded-md border border-gray-700 flex items-center justify-center text-xs text-center p-2 group-hover:border-gray-400 transition shadow-lg">
             {item.titulo}
           </div>
         )}
@@ -144,7 +144,7 @@ export default function Perfil() {
             <Link href="/perfil/settings" className="text-xs text-gray-400 hover:text-white transition">Edit</Link>
           </div>
           {favoritos.length > 0 ? (
-            <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+            <div className="flex flex-wrap gap-4 pb-2">
               {favoritos.map((item) => renderCard(item, false))}
             </div>
           ) : (
@@ -171,8 +171,8 @@ export default function Perfil() {
             </Link>
           </div>
           {vistas.length > 0 ? (
-            <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-              {vistas.map((item) => renderCard(item, true))}
+            <div className="flex flex-wrap gap-4 pb-2">
+              {vistas.slice(0, 7).map((item) => renderCard(item, true))}
             </div>
           ) : (
             <p className="text-gray-500 text-sm">
