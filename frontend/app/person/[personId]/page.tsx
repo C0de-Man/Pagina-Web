@@ -1,5 +1,4 @@
 import PersonFilmography from '@/components/PersonFilmography';
-import PersonWatchedStat from '@/components/PersonWatchedStat';
 import { cookies } from 'next/headers';
 
 export default async function PersonaDetail({ params }: { params: Promise<{ personId: string }> }) {
@@ -31,19 +30,6 @@ export default async function PersonaDetail({ params }: { params: Promise<{ pers
     }
   }
 
-  // Todos los tmdbId únicos de la persona (sin importar el rol), para la
-  // estadística de "cuántas has visto". Se excluyen los créditos de SERIE
-  // (no se muestran en ningún sitio de la app por ahora), para que no
-  // cuenten en el total.
-  const tmdbIdsUnicos = [
-    ...new Set(
-      Object.values(persona.porRol)
-        .flat()
-        .filter((c: any) => c.tipo !== 'SERIE')
-        .map((c: any) => c.tmdbId)
-    ),
-  ] as number[];
-
   return (
     <main className="min-h-screen bg-gray-950 text-white font-sans pb-16">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -65,8 +51,6 @@ export default async function PersonaDetail({ params }: { params: Promise<{ pers
             {persona.biografia && (
               <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-line">{persona.biografia}</p>
             )}
-
-            <PersonWatchedStat tmdbIdsUnicos={tmdbIdsUnicos} />
           </div>
         </div>
       </div>
