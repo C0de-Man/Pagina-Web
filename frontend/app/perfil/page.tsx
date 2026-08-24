@@ -19,7 +19,7 @@ function Estrellas({ rating }: { rating: number }) {
 }
 
 function formatFecha(fecha: string) {
-  return new Date(fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+  return new Date(fecha).toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
 }
 
 export default function Perfil() {
@@ -115,16 +115,17 @@ export default function Perfil() {
                 className="w-full h-full object-cover"
               />
             </div>
-            <h1 className="text-2xl md:text-3xl font-extrabold">{username || 'Invitado'}</h1>
+            <h1 className="text-2xl md:text-3xl font-extrabold">{username || 'Guest'}</h1>
           </div>
 
           <div className="flex gap-8 mt-6 border-b border-gray-800 -mb-8 pb-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-            <span className="pb-3 text-sm font-semibold text-white border-b-2 border-blue-500 whitespace-nowrap">Perfil</span>
-            <Link href="/perfil/peliculas" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Peliculas</Link>
-            <Link href="/perfil/juegos" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Juegos</Link>
-            <Link href="/comics" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Comics</Link>
-            <Link href="/perfil/lists" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Listas</Link>
-            <span className="pb-3 text-sm font-semibold text-gray-400 whitespace-nowrap">Reseñas</span>
+            <span className="pb-3 text-sm font-semibold text-white border-b-2 border-blue-500 whitespace-nowrap">Profile</span>
+            <Link href="/perfil/peliculas" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Films</Link>
+            <Link href="/perfil/series" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Series</Link>
+            <Link href="/perfil/juegos" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Played</Link>
+            <Link href="/comics" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Books</Link>
+            <Link href="/perfil/lists" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Lists</Link>
+            <span className="pb-3 text-sm font-semibold text-gray-400 whitespace-nowrap">Reviews</span>
           </div>
         </div>
       </div>
@@ -133,14 +134,14 @@ export default function Perfil() {
 
         {!logueado && (
           <div className="bg-blue-900/30 border border-blue-800 text-blue-200 text-sm rounded px-4 py-3">
-            <Link href="/login" className="underline font-semibold">Inicia sesión</Link> para ver tu actividad real.
+            <Link href="/login" className="underline font-semibold">Sign in</Link> to see your real activity.
           </div>
         )}
 
         <section>
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">Favoritos</h2>
-            <Link href="/perfil/settings" className="text-xs text-gray-400 hover:text-white transition">Editar</Link>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">Favorites</h2>
+            <Link href="/perfil/settings" className="text-xs text-gray-400 hover:text-white transition">Edit</Link>
           </div>
           {favoritos.length > 0 ? (
             <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
@@ -149,24 +150,24 @@ export default function Perfil() {
           ) : (
             <p className="text-gray-500 text-sm">
               {logueado ? (
-                <>Aún no tienes favoritos. <Link href="/perfil/settings" className="underline">Elígelos aquí</Link>.</>
+                <>You don't have any favorites yet. <Link href="/perfil/settings" className="underline">Choose them here</Link>.</>
               ) : (
-                'Inicia sesión para ver tus favoritos.'
+                'Sign in to see your favorites.'
               )}
             </p>
           )}
         </section>
 
         <section>
-          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Siguiendo</h2>
-          <p className="text-gray-500 text-sm">Aún no sigues a nadie.</p>
+          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Following</h2>
+          <p className="text-gray-500 text-sm">You're not following anyone yet.</p>
         </section>
 
         <section>
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">Actividad reciente</h2>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">Recent activity</h2>
             <Link href="/perfil/actividad" className="text-xs text-gray-400 hover:text-white transition flex items-center gap-1">
-              Ver todo <span className="text-sm leading-none">›</span>
+              See all <span className="text-sm leading-none">›</span>
             </Link>
           </div>
           {vistas.length > 0 ? (
@@ -175,7 +176,7 @@ export default function Perfil() {
             </div>
           ) : (
             <p className="text-gray-500 text-sm">
-              {logueado ? 'Aún no has marcado nada como visto.' : 'Inicia sesión para ver tu actividad.'}
+              {logueado ? "You haven't marked anything as watched yet." : 'Sign in to see your activity.'}
             </p>
           )}
         </section>

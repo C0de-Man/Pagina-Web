@@ -81,18 +81,18 @@ export default function ListaDetalle() {
     } catch {
       setBorrando(false);
       setConfirmandoBorrado(false);
-      alert('No se ha podido eliminar la lista. Inténtalo de nuevo.');
+      alert('Could not delete the list. Please try again.');
     }
   };
 
   if (loading) {
-    return <main className="min-h-screen bg-[#14181c] text-white flex items-center justify-center">Cargando...</main>;
+    return <main className="min-h-screen bg-[#14181c] text-white flex items-center justify-center">Loading...</main>;
   }
 
   if (!lista) {
     return (
       <main className="min-h-screen bg-[#14181c] text-white flex items-center justify-center">
-        Lista no encontrada
+        List not found
       </main>
     );
   }
@@ -100,7 +100,7 @@ export default function ListaDetalle() {
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <Link href="/perfil/lists" className="text-sm text-gray-400 hover:text-white transition">← Mis listas</Link>
+        <Link href="/perfil/lists" className="text-sm text-gray-400 hover:text-white transition">← My Lists</Link>
 
         <div className="flex items-center justify-between mt-2 mb-6">
           <h1 className="text-2xl font-extrabold">{lista.nombre}</h1>
@@ -108,12 +108,12 @@ export default function ListaDetalle() {
             onClick={() => setConfirmandoBorrado(true)}
             className="text-xs text-gray-500 hover:text-red-400 underline cursor-pointer"
           >
-            Eliminar lista
+            Delete list
           </button>
         </div>
 
         {lista.items.length === 0 ? (
-          <p className="text-gray-500 text-sm">Esta lista está vacía. Añade títulos desde su ficha con "Add to lists...".</p>
+          <p className="text-gray-500 text-sm">This list is empty. Add titles from their page using "Add to lists...".</p>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
             {lista.items.map((item) => (
@@ -126,7 +126,7 @@ export default function ListaDetalle() {
                 <button
                   onClick={() => quitarDeLista(item.id)}
                   className="absolute top-1.5 right-1.5 w-6 h-6 flex items-center justify-center rounded-full bg-black/70 text-white text-xs opacity-0 group-hover:opacity-100 hover:bg-red-500 transition cursor-pointer z-10"
-                  title="Quitar de la lista"
+                  title="Remove from list"
                 >
                   ✕
                 </button>
@@ -145,9 +145,9 @@ export default function ListaDetalle() {
             onClick={(e) => e.stopPropagation()}
             className="bg-gray-900 border border-gray-700 rounded-lg max-w-sm w-full text-white shadow-2xl p-6"
           >
-            <h2 className="text-lg font-bold mb-2">¿Seguro que quieres eliminar esta lista?</h2>
+            <h2 className="text-lg font-bold mb-2">Are you sure you want to delete this list?</h2>
             <p className="text-sm text-gray-400 mb-6">
-              Se eliminará "{lista.nombre}" junto con todas las películas que contiene. Esta acción no se puede deshacer.
+              "{lista.nombre}" will be deleted along with everything in it. This action cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -155,14 +155,14 @@ export default function ListaDetalle() {
                 disabled={borrando}
                 className="px-4 py-2 rounded text-sm font-bold bg-[#2c3440] hover:bg-gray-600 transition cursor-pointer disabled:opacity-50"
               >
-                Cancelar
+                Cancel
               </button>
               <button
                 onClick={eliminarLista}
                 disabled={borrando}
                 className="px-4 py-2 rounded text-sm font-bold bg-red-600 hover:bg-red-500 transition cursor-pointer disabled:opacity-50"
               >
-                {borrando ? 'Eliminando...' : 'Eliminar'}
+                {borrando ? 'Deleting...' : 'Delete'}
               </button>
             </div>
           </div>

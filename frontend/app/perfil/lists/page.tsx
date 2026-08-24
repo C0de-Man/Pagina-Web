@@ -84,7 +84,7 @@ export default function MisListas() {
       setLists((prev) => prev.filter((l) => l.id !== id));
       setListaABorrar(null);
     } catch {
-      alert('No se ha podido eliminar la lista. Inténtalo de nuevo.');
+      alert('Could not delete the list. Please try again.');
     }
     setBorrando(false);
   };
@@ -96,11 +96,11 @@ export default function MisListas() {
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <h1 className="text-2xl font-extrabold mb-6">Mis listas</h1>
+        <h1 className="text-2xl font-extrabold mb-6">My Lists</h1>
 
         {!logueado ? (
           <p className="text-gray-400 text-sm">
-            <Link href="/login" className="underline text-blue-400">Inicia sesión</Link> para ver tus listas.
+            <Link href="/login" className="underline text-blue-400">Sign in</Link> to see your lists.
           </p>
         ) : (
           <>
@@ -109,21 +109,21 @@ export default function MisListas() {
                 type="text"
                 value={busqueda}
                 onChange={(e) => setBusqueda(e.target.value)}
-                placeholder="Buscar lista..."
+                placeholder="Search lists..."
                 className="flex-grow max-w-md bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
               />
               <button
                 onClick={() => setIsModalOpen(true)}
                 className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold px-4 py-2 rounded transition cursor-pointer"
               >
-                Crear lista
+                Create list
               </button>
             </div>
 
             {lists.length === 0 ? (
-              <p className="text-gray-500 text-sm">Aún no tienes ninguna lista. Crea la primera arriba.</p>
+              <p className="text-gray-500 text-sm">You don't have any lists yet. Create the first one above.</p>
             ) : listasFiltradas.length === 0 ? (
-              <p className="text-gray-500 text-sm">Ninguna lista coincide con "{busqueda}".</p>
+              <p className="text-gray-500 text-sm">No lists match "{busqueda}".</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {listasFiltradas.map((list) => (
@@ -149,7 +149,7 @@ export default function MisListas() {
                       <div className="flex flex-col justify-between h-full flex-grow min-w-0 items-end text-right p-4">
                         <h2 className="font-bold text-white truncate max-w-full">{list.nombre}</h2>
                         <p className="text-xs text-gray-400">
-                          {list.totalItems} {list.totalItems === 1 ? 'título' : 'títulos'}
+                          {list.totalItems} {list.totalItems === 1 ? 'title' : 'titles'}
                         </p>
                       </div>
                     </Link>
@@ -157,7 +157,7 @@ export default function MisListas() {
                     <button
                       onClick={() => setListaABorrar({ id: list.id, nombre: list.nombre })}
                       className="absolute top-2 right-2 text-gray-500 hover:text-red-400 transition cursor-pointer opacity-0 group-hover:opacity-100 bg-black/40 rounded-full w-6 h-6 flex items-center justify-center"
-                      title="Borrar lista"
+                      title="Delete list"
                     >
                       ✕
                     </button>
@@ -179,7 +179,7 @@ export default function MisListas() {
             className="bg-gray-900 border border-gray-700 rounded-lg max-w-sm w-full text-white shadow-2xl p-6"
           >
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold">Nueva lista</h2>
+              <h2 className="text-lg font-bold">New list</h2>
               <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white text-2xl font-bold cursor-pointer">✕</button>
             </div>
             <form onSubmit={crearLista} className="flex gap-2">
@@ -188,7 +188,7 @@ export default function MisListas() {
                 autoFocus
                 value={nuevoNombre}
                 onChange={(e) => setNuevoNombre(e.target.value)}
-                placeholder="Nombre de la lista..."
+                placeholder="List name..."
                 className="flex-grow bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
               />
               <button
@@ -196,7 +196,7 @@ export default function MisListas() {
                 disabled={creando || !nuevoNombre.trim()}
                 className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold px-4 rounded transition cursor-pointer"
               >
-                Crear
+                Create
               </button>
             </form>
           </div>
@@ -212,9 +212,9 @@ export default function MisListas() {
             onClick={(e) => e.stopPropagation()}
             className="bg-gray-900 border border-gray-700 rounded-lg max-w-sm w-full text-white shadow-2xl p-6"
           >
-            <h2 className="text-lg font-bold mb-2">¿Seguro que quieres eliminar esta lista?</h2>
+            <h2 className="text-lg font-bold mb-2">Are you sure you want to delete this list?</h2>
             <p className="text-sm text-gray-400 mb-6">
-              Se eliminará "{listaABorrar.nombre}" junto con todas las películas que contiene. Esta acción no se puede deshacer.
+              "{listaABorrar.nombre}" will be deleted along with everything in it. This action cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -222,14 +222,14 @@ export default function MisListas() {
                 disabled={borrando}
                 className="px-4 py-2 rounded text-sm font-bold bg-[#2c3440] hover:bg-gray-600 transition cursor-pointer disabled:opacity-50"
               >
-                Cancelar
+                Cancel
               </button>
               <button
                 onClick={confirmarBorrado}
                 disabled={borrando}
                 className="px-4 py-2 rounded text-sm font-bold bg-red-600 hover:bg-red-500 transition cursor-pointer disabled:opacity-50"
               >
-                {borrando ? 'Eliminando...' : 'Eliminar'}
+                {borrando ? 'Deleting...' : 'Delete'}
               </button>
             </div>
           </div>
