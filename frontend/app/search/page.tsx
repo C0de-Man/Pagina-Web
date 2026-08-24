@@ -3,10 +3,10 @@ import Link from 'next/link';
 
 const FILTROS = [
   { label: 'All', value: 'all' },
-  { label: 'Peliculas', value: 'movie' },
+  { label: 'Movies', value: 'movie' },
   { label: 'Series', value: 'tv' },
-  { label: 'Libros', value: 'libro' },
-  { label: 'Juegos', value: 'juego' },
+  { label: 'Books', value: 'libro' },
+  { label: 'Games', value: 'juego' },
 ];
 
 export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q: string; tipo?: string }> }) {

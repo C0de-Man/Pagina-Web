@@ -61,7 +61,7 @@ export default function JuegosLobbyClient({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar un videojuego..."
+          placeholder="Search for a game..."
           className="flex-grow bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
         />
         <button
@@ -69,7 +69,7 @@ export default function JuegosLobbyClient({
           disabled={buscando}
           className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm font-bold px-4 rounded transition cursor-pointer"
         >
-          {buscando ? 'Buscando...' : 'Buscar'}
+          {buscando ? 'Searching...' : 'Search'}
         </button>
         {buscadoYa && (
           <button
@@ -77,16 +77,16 @@ export default function JuegosLobbyClient({
             onClick={limpiarBusqueda}
             className="text-sm text-gray-400 hover:text-white px-3 rounded border border-gray-700 transition cursor-pointer"
           >
-            Volver
+            Back
           </button>
         )}
       </form>
 
       {buscadoYa ? (
         buscando ? (
-          <p className="text-gray-500 text-sm">Buscando...</p>
+          <p className="text-gray-500 text-sm">Searching...</p>
         ) : resultados.length === 0 ? (
-          <p className="text-gray-500 text-sm">No se encontraron juegos para "{query}".</p>
+          <p className="text-gray-500 text-sm">No games found for "{query}".</p>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-4">
             {resultados.map((juego: any) => {
@@ -101,9 +101,9 @@ export default function JuegosLobbyClient({
         <>
           <div className="mb-12">
             <div className="flex justify-between items-end mb-4 border-b border-gray-800 pb-2">
-              <h2 className="text-xl font-bold text-white tracking-wide">Juegos {currentYear}</h2>
-              <Link href="/juegos/todas" className="text-sm text-gray-400 hover:text-white transition flex items-center gap-1 cursor-pointer">
-                Ver todo <span className="text-lg leading-none">›</span>
+              <h2 className="text-xl font-bold text-white tracking-wide">Games {currentYear}</h2>
+              <Link href="/game/all" className="text-sm text-gray-400 hover:text-white transition flex items-center gap-1 cursor-pointer">
+                See all <span className="text-lg leading-none">›</span>
               </Link>
             </div>
             <YearGamesCarousel items={yearGamesConDatos} />
@@ -111,9 +111,9 @@ export default function JuegosLobbyClient({
 
           <div className="mb-12">
             <div className="flex justify-between items-end mb-4 border-b border-gray-800 pb-2">
-              <h2 className="text-xl font-bold text-white tracking-wide">Populares</h2>
-              <Link href="/juegos/todas?tipo=popular" className="text-sm text-gray-400 hover:text-white transition flex items-center gap-1 cursor-pointer">
-                Ver todo <span className="text-lg leading-none">›</span>
+              <h2 className="text-xl font-bold text-white tracking-wide">Popular</h2>
+              <Link href="/game/all?tipo=popular" className="text-sm text-gray-400 hover:text-white transition flex items-center gap-1 cursor-pointer">
+                See all <span className="text-lg leading-none">›</span>
               </Link>
             </div>
             <div className="flex gap-4 overflow-x-auto pb-4 pt-2" style={{ scrollbarWidth: 'none' }}>

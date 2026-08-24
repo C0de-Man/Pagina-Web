@@ -79,7 +79,7 @@ export default async function TodosLosJuegos({
   const { generos, plataformas } = await resFiltros.json();
 
   const sufijoTipo = filtros.toString() ? `&${filtros.toString()}` : '';
-  const urlPagina = (p: number) => `/juegos/todas?page=${p}${sufijoTipo}`;
+  const urlPagina = (p: number) => `/game/all?page=${p}${sufijoTipo}`;
   const paginasAMostrar = getPaginas(currentPage, totalPaginas);
 
   return (
@@ -88,10 +88,10 @@ export default async function TodosLosJuegos({
 
         <div className="border-b border-gray-800 pb-4 mb-6 flex justify-between items-center">
           <h1 className="text-2xl font-bold tracking-wide">
-            {esPopulares ? 'Populares' : `Juegos ${currentYear}`}
-            <span className="text-sm font-normal text-gray-500 ml-3 bg-gray-900 px-2 py-1 rounded">Pág. {currentPage}</span>
+            {esPopulares ? 'Popular' : `Games ${currentYear}`}
+            <span className="text-sm font-normal text-gray-500 ml-3 bg-gray-900 px-2 py-1 rounded">Page {currentPage}</span>
           </h1>
-          <span className="text-sm text-gray-500 font-semibold">Mostrando {juegos.length} títulos</span>
+          <span className="text-sm text-gray-500 font-semibold">Showing {juegos.length} titles</span>
         </div>
 
         <div className="flex flex-col lg:flex-row gap-6">

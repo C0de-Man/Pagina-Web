@@ -111,13 +111,13 @@ const menuLinks = [
                   onMouseEnter={() => setJuegosOpen(true)}
                   onMouseLeave={() => setJuegosOpen(false)}
                 >
-                  <Link href="/juegos" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">
+                  <Link href="/game" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">
                     Games
                   </Link>
                   {juegosOpen && (
                     <div className="absolute left-0 top-full pt-2 w-40 z-50">
                       <div className="bg-[#2c3440] rounded-md shadow-2xl border border-gray-700 py-2">
-                        <Link href="/perfil/juegos" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Jugados</Link>
+                        <Link href="/perfil/juegos" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Played</Link>
                         <Link href="/perfil/watchlist" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Watchlist</Link>
                         <Link href="/perfil/likes" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Likes</Link>
                       </div>
@@ -150,7 +150,7 @@ const menuLinks = [
                     autoFocus
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Buscar película, serie..."
+                    placeholder="Search for a movie, series..."
                     className="w-full bg-[#2c3440] text-white text-sm rounded-full pl-4 pr-10 py-1.5 focus:outline-none focus:ring-1 focus:ring-gray-500"
                   />
                   <button type="submit" className="absolute right-3 top-1.5 text-gray-400">

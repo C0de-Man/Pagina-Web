@@ -62,7 +62,7 @@ function ComboboxFiltro({
             type="text"
             value={texto}
             onChange={(e) => setTexto(e.target.value)}
-            placeholder="Buscar..."
+            placeholder="Search..."
             className="w-full bg-[#2c3440] border-b border-gray-700 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none"
           />
           <div className="overflow-y-auto">
@@ -72,11 +72,11 @@ function ComboboxFiltro({
                 onClick={() => { onChange(''); setTexto(''); setAbierto(false); }}
                 className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-gray-700 cursor-pointer"
               >
-                Quitar filtro
+                Clear filter
               </button>
             )}
             {filtradas.length === 0 ? (
-              <p className="px-3 py-2 text-sm text-gray-500">Sin resultados</p>
+              <p className="px-3 py-2 text-sm text-gray-500">No results</p>
             ) : (
               filtradas.map((o) => (
                 <button
@@ -132,7 +132,7 @@ function YearPicker({ valor, onChange }: { valor: string; onChange: (v: string) 
         onClick={() => setAbierto((v) => !v)}
         className="w-full flex justify-between items-center bg-[#2c3440] border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gray-500 cursor-pointer"
       >
-        <span className={valor ? 'text-white' : 'text-gray-500'}>{valor || 'Elige un año'}</span>
+        <span className={valor ? 'text-white' : 'text-gray-500'}>{valor || 'Choose a year'}</span>
         <span className="text-gray-500 text-xs">{abierto ? '▲' : '▼'}</span>
       </button>
 
@@ -188,7 +188,7 @@ function YearPicker({ valor, onChange }: { valor: string; onChange: (v: string) 
               onClick={() => { onChange(''); setAbierto(false); }}
               className="w-full text-center text-xs text-gray-400 hover:text-white mt-3 pt-2 border-t border-gray-700 cursor-pointer"
             >
-              Quitar año
+              Clear year
             </button>
           )}
         </div>
@@ -258,7 +258,7 @@ export default function FiltersSidebar({
   return (
     <aside className="w-full lg:w-64 flex-shrink-0 bg-[#1c2228] border border-gray-800 rounded-lg p-4 h-fit space-y-6">
       <div>
-        <p className="text-sm font-bold text-gray-300 uppercase tracking-wide mb-3">Categorías</p>
+        <p className="text-sm font-bold text-gray-300 uppercase tracking-wide mb-3">Categories</p>
         <div className="flex flex-wrap gap-2">
           {CATEGORIAS.map((c) => (
             <button
@@ -278,7 +278,7 @@ export default function FiltersSidebar({
       </div>
 
       <div>
-        <p className="text-sm font-bold text-gray-300 uppercase tracking-wide mb-3">Año de lanzamiento</p>
+        <p className="text-sm font-bold text-gray-300 uppercase tracking-wide mb-3">Release year</p>
         <div className="flex gap-2 mb-2">
           <button
             type="button"
@@ -287,7 +287,7 @@ export default function FiltersSidebar({
               estado === 'upcoming' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#2c3440] border-gray-700 text-gray-300 hover:border-gray-500'
             }`}
           >
-            Próximos
+            Upcoming
           </button>
           <button
             type="button"
@@ -296,23 +296,23 @@ export default function FiltersSidebar({
               estado === 'released' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#2c3440] border-gray-700 text-gray-300 hover:border-gray-500'
             }`}
           >
-            Ya lanzados
+            Released
           </button>
         </div>
         <YearPicker valor={anio} onChange={setAnio} />
       </div>
 
       <ComboboxFiltro
-        label="Género"
-        placeholder="Elige un género"
+        label="Genre"
+        placeholder="Choose a genre"
         opciones={generos}
         valor={genero}
         onChange={setGenero}
       />
 
       <ComboboxFiltro
-        label="Plataforma"
-        placeholder="Elige una plataforma"
+        label="Platform"
+        placeholder="Choose a platform"
         opciones={plataformas}
         valor={plataforma}
         onChange={setPlataforma}
@@ -320,7 +320,7 @@ export default function FiltersSidebar({
 
       <div>
         <p className="text-sm font-bold text-gray-300 uppercase tracking-wide mb-3">
-          Valoración <span className="text-gray-500 font-normal normal-case">{ratingMin.toFixed(1)} - {ratingMax.toFixed(1)}</span>
+          Rating <span className="text-gray-500 font-normal normal-case">{ratingMin.toFixed(1)} - {ratingMax.toFixed(1)}</span>
         </p>
         <div className="space-y-2">
           <input
@@ -348,7 +348,7 @@ export default function FiltersSidebar({
         <button
           type="button"
           onClick={resetearFiltros}
-          title="Restablecer filtros"
+          title="Reset filters"
           className="bg-gray-700 hover:bg-gray-600 text-white text-sm font-bold px-4 py-2 rounded transition cursor-pointer"
         >
           ↻
@@ -358,7 +358,7 @@ export default function FiltersSidebar({
           onClick={aplicarFiltros}
           className="flex-1 bg-pink-600 hover:bg-pink-500 text-white text-sm font-bold py-2 rounded transition cursor-pointer"
         >
-          Actualizar filtros
+          Update filters
         </button>
       </div>
     </aside>

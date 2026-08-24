@@ -33,7 +33,7 @@ export default async function JuegosLobby() {
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans py-10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h1 className="text-2xl font-bold mb-6 tracking-wide">Juegos</h1>
+        <h1 className="text-2xl font-bold mb-6 tracking-wide">Games</h1>
         <JuegosLobbyClient
           currentYear={currentYear}
           yearGamesConDatos={yearGamesConDatos}

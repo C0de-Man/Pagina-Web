@@ -80,9 +80,9 @@ export default function GameTabs({
     (dlcsData?.mods?.length || 0) > 0;
 
   const tabs: { key: typeof tab; label: string }[] = [
-    { key: 'descripcion', label: 'Descripcion' },
-    { key: 'mas', label: 'Mas' },
-    ...(hayMasContenido ? [{ key: 'dlcs' as const, label: 'Más contenido' }] : []),
+    { key: 'descripcion', label: 'Description' },
+    { key: 'mas', label: 'Info' },
+    ...(hayMasContenido ? [{ key: 'dlcs' as const, label: 'More content' }] : []),
   ];
 
   // --- Carrusel de 5 con flechas, sin texto debajo de cada carátula ---
@@ -122,7 +122,7 @@ export default function GameTabs({
 
               {navegandoA === j.igdbId ? (
                 <div className="absolute inset-0 flex items-center justify-center rounded pointer-events-none">
-                  <span className="text-white text-xs font-bold bg-black/60 px-2 py-1 rounded">Cargando...</span>
+                  <span className="text-white text-xs font-bold bg-black/60 px-2 py-1 rounded">Loading...</span>
                 </div>
               ) : (
                 <div className="absolute inset-0 rounded bg-black/90 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-center p-2 pointer-events-none">
@@ -157,7 +157,7 @@ export default function GameTabs({
               onClick={() => setModalAbierto(true)}
               className="text-sm text-gray-300 underline cursor-pointer"
             >
-              Ver más
+              See more
             </button>
           )}
         </div>
@@ -179,7 +179,7 @@ export default function GameTabs({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="mb-6 flex items-center justify-between">
-            <h2 className="text-xl font-bold text-white">Más contenido</h2>
+            <h2 className="text-xl font-bold text-white">More content</h2>
             <button
               onClick={() => setModalAbierto(false)}
               className="text-2xl text-gray-400 hover:text-white cursor-pointer transition"
@@ -208,7 +208,7 @@ export default function GameTabs({
                       />
                     )}
                     <p className="mt-2 text-sm font-semibold text-white">
-                      {navegandoA === g.igdbId ? 'Cargando...' : g.titulo}
+                      {navegandoA === g.igdbId ? 'Loading...' : g.titulo}
                     </p>
                     <p className="text-xs text-gray-400">{g.anio}</p>
                   </button>
@@ -237,7 +237,7 @@ export default function GameTabs({
                       />
                     )}
                     {navegandoA === g.igdbId && (
-                      <p className="mt-1 text-xs text-gray-400">Cargando...</p>
+                      <p className="mt-1 text-xs text-gray-400">Loading...</p>
                     )}
                   </button>
                 ))}
@@ -265,7 +265,7 @@ export default function GameTabs({
                       />
                     )}
                     <p className="mt-2 text-sm font-semibold text-white">
-                      {navegandoA === g.igdbId ? 'Cargando...' : g.titulo}
+                      {navegandoA === g.igdbId ? 'Loading...' : g.titulo}
                     </p>
                     <p className="text-xs text-gray-400">{g.anio}</p>
                   </button>
@@ -305,20 +305,20 @@ export default function GameTabs({
       {tab === 'mas' && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 text-sm">
           <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Plataformas</div>
-            <div className="text-gray-200">{detalles?.plataformas?.length > 0 ? detalles.plataformas.join(', ') : 'No disponible'}</div>
+            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Platforms</div>
+            <div className="text-gray-200">{detalles?.plataformas?.length > 0 ? detalles.plataformas.join(', ') : 'Not available'}</div>
           </div>
           <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Géneros</div>
-            <div className="text-gray-200">{detalles?.generos?.length > 0 ? detalles.generos.join(', ') : 'No disponible'}</div>
+            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Genres</div>
+            <div className="text-gray-200">{detalles?.generos?.length > 0 ? detalles.generos.join(', ') : 'Not available'}</div>
           </div>
           <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Desarrolladora</div>
-            <div className="text-gray-200">{detalles?.desarrolladoras?.length > 0 ? detalles.desarrolladoras.join(', ') : 'No disponible'}</div>
+            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Developer</div>
+            <div className="text-gray-200">{detalles?.desarrolladoras?.length > 0 ? detalles.desarrolladoras.join(', ') : 'Not available'}</div>
           </div>
           <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Distribuidora</div>
-            <div className="text-gray-200">{detalles?.distribuidoras?.length > 0 ? detalles.distribuidoras.join(', ') : 'No disponible'}</div>
+            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Publisher</div>
+            <div className="text-gray-200">{detalles?.distribuidoras?.length > 0 ? detalles.distribuidoras.join(', ') : 'Not available'}</div>
           </div>
         </div>
       )}

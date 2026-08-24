@@ -58,7 +58,7 @@ export default function MediaTabs({
     { key: 'descripcion', label: 'Description' },
     { key: 'cast', label: 'Cast' },
     { key: 'crew', label: 'Crew' },
-    { key: 'mas', label: 'More' },
+    { key: 'mas', label: 'Info' },
     ...(hayAdaptaciones ? [{ key: 'adaptation' as const, label: 'Adaptation' }] : []),
   ];
 

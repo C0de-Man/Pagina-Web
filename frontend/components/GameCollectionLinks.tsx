@@ -307,7 +307,7 @@ export default function GameCollectionLinks({
                     e.stopPropagation();
                     setJuegoABorrar(juego);
                 }}
-                title="Quitar de la colección"
+                title="Remove from collection"
                 className="absolute top-1 left-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/80 text-sm font-bold text-white opacity-0 transition hover:bg-red-600 group-hover:opacity-100 cursor-pointer"
             >
                 ×
@@ -335,7 +335,7 @@ export default function GameCollectionLinks({
                         />
                     )}
                     <p className="mt-1 text-sm text-gray-400 text-center">
-                        {navegandoA === juego.igdbId ? 'Cargando...' : etiqueta}
+                        {navegandoA === juego.igdbId ? 'Loading...' : etiqueta}
                     </p>
                 </button>
             </div>
@@ -348,12 +348,12 @@ export default function GameCollectionLinks({
                 <div className="flex justify-center gap-4">
                     {data.prequel && (
                         <div className={data.sequel ? 'w-1/2' : 'w-1/2 max-w-[200px]'}>
-                            <Miniatura juego={data.prequel} etiqueta="Precuela" />
+                            <Miniatura juego={data.prequel} etiqueta="Prequel" />
                         </div>
                     )}
                     {data.sequel && (
                         <div className={data.prequel ? 'w-1/2' : 'w-1/2 max-w-[200px]'}>
-                            <Miniatura juego={data.sequel} etiqueta="Secuela" />
+                            <Miniatura juego={data.sequel} etiqueta="Sequel" />
                         </div>
                     )}
                 </div>
@@ -362,7 +362,7 @@ export default function GameCollectionLinks({
                     onClick={() => setModalAbierto(true)}
                     className="mt-3 w-full text-center text-sm text-gray-300 underline cursor-pointer"
                 >
-                    Ver más de la saga
+                    See full saga
                 </button>
             </div>
 
@@ -376,14 +376,14 @@ export default function GameCollectionLinks({
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="mb-6 flex items-center justify-between">
-                            <h2 className="text-xl font-bold text-white">{data.collection?.nombre} — Colección</h2>
+                            <h2 className="text-xl font-bold text-white">{data.collection?.nombre} — Collection</h2>
                             <div className="flex items-center gap-4">
                                 {esAdmin && (
                                     <button
                                         onClick={() => setConfirmandoReinicio(true)}
                                         className="text-xs font-semibold text-amber-400 hover:text-amber-300 underline cursor-pointer transition"
                                     >
-                                        Reiniciar
+                                        Reset
                                     </button>
                                 )}
                                 <button
@@ -403,7 +403,7 @@ export default function GameCollectionLinks({
                                     : 'text-gray-500 hover:text-gray-300'
                                     }`}
                             >
-                                Juegos
+                                Games
                             </button>
                             {(data.cancelados.length > 0 || esAdmin) && (
                                 <button
@@ -413,7 +413,7 @@ export default function GameCollectionLinks({
                                         : 'text-gray-500 hover:text-gray-300'
                                         }`}
                                 >
-                                    Cancelados
+                                    Cancelled
                                 </button>
                             )}
                             {(data.otros.length > 0 || esAdmin) && (
@@ -437,10 +437,10 @@ export default function GameCollectionLinks({
                                     onChange={(e) => setBusquedaTexto(e.target.value)}
                                     placeholder={
                                         tabModal === 'cancelados'
-                                            ? 'Añadir un juego cancelado a esta saga...'
+                                            ? 'Add a cancelled game to this saga...'
                                             : tabModal === 'otros'
-                                                ? 'Añadir un juego a "Other"...'
-                                                : 'Añadir un juego a esta saga...'
+                                                ? 'Add a game to "Other"...'
+                                                : 'Add a game to this saga...'
                                     }
                                     className="w-full max-w-md bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
                                 />
@@ -450,9 +450,9 @@ export default function GameCollectionLinks({
                                 {busquedaTexto.trim().length >= 2 && (
                                     <div className="absolute z-10 mt-1 w-full max-w-md max-h-72 overflow-y-auto rounded border border-gray-700 bg-[#20262e] shadow-xl">
                                         {buscando ? (
-                                            <p className="px-3 py-2 text-sm text-gray-400">Buscando...</p>
+                                            <p className="px-3 py-2 text-sm text-gray-400">Searching...</p>
                                         ) : resultadosBusqueda.length === 0 ? (
-                                            <p className="px-3 py-2 text-sm text-gray-400">Sin resultados.</p>
+                                            <p className="px-3 py-2 text-sm text-gray-400">No results.</p>
                                         ) : (
                                             resultadosBusqueda.map((r) => {
                                                 const anioResultado = r.first_release_date
@@ -476,10 +476,10 @@ export default function GameCollectionLinks({
                                                             {anioResultado ? ` (${anioResultado})` : ''}
                                                         </span>
                                                         {anadiendoId === r.id && (
-                                                            <span className="text-xs text-gray-400">Añadiendo...</span>
+                                                            <span className="text-xs text-gray-400">Adding...</span>
                                                         )}
                                                         {yaEnLaLista && (
-                                                            <span className="text-xs text-gray-600">Ya está</span>
+                                                            <span className="text-xs text-gray-600">Already added</span>
                                                         )}
                                                     </button>
                                                 );
@@ -526,11 +526,11 @@ export default function GameCollectionLinks({
                                                 />
                                             )}
                                             <p className="mt-2 text-sm font-semibold text-white select-text">
-                                                {navegandoA === g.igdbId ? 'Cargando...' : g.titulo}
+                                                {navegandoA === g.igdbId ? 'Loading...' : g.titulo}
                                             </p>
                                             <p className="text-xs text-gray-400">
                                                 {g.anio}
-                                                {esActual ? ' · Estás viendo esta' : ''}
+                                                {esActual ? " · You're viewing this" : ''}
                                             </p>
                                         </button>
                                     </div>
@@ -551,10 +551,10 @@ export default function GameCollectionLinks({
                         className="w-[90vw] max-w-sm rounded-lg bg-[#1c2228] border border-gray-700 p-6 shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <h3 className="text-lg font-bold text-white mb-2">¿Eliminar de la colección?</h3>
+                        <h3 className="text-lg font-bold text-white mb-2">Remove from collection?</h3>
                         <p className="text-sm text-gray-400 mb-6">
-                            Vas a quitar <span className="text-white font-semibold">{juegoABorrar.titulo}</span> de esta
-                            saga. Esto no lo borra de tu catálogo ni de la búsqueda, solo de este listado.
+                            You're about to remove <span className="text-white font-semibold">{juegoABorrar.titulo}</span> from this
+                            saga. This won't remove it from your catalog or from search, only from this list.
                         </p>
                         <div className="flex justify-end gap-3">
                             <button
@@ -562,14 +562,14 @@ export default function GameCollectionLinks({
                                 disabled={borrando}
                                 className="px-4 py-2 text-sm text-gray-300 hover:text-white transition cursor-pointer disabled:opacity-50"
                             >
-                                Cancelar
+                                Cancel
                             </button>
                             <button
                                 onClick={confirmarBorrado}
                                 disabled={borrando}
                                 className="px-4 py-2 text-sm rounded bg-red-600 hover:bg-red-500 text-white font-semibold transition cursor-pointer disabled:opacity-50"
                             >
-                                {borrando ? 'Eliminando...' : 'Sí, eliminar'}
+                                {borrando ? 'Removing...' : 'Yes, remove'}
                             </button>
                         </div>
                     </div>
@@ -586,11 +586,11 @@ export default function GameCollectionLinks({
                         className="w-[90vw] max-w-sm rounded-lg bg-[#1c2228] border border-gray-700 p-6 shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <h3 className="text-lg font-bold text-white mb-2">¿Reiniciar esta colección?</h3>
+                        <h3 className="text-lg font-bold text-white mb-2">Reset this collection?</h3>
                         <p className="text-sm text-gray-400 mb-6">
-                            Se va a borrar <span className="text-white font-semibold">todo</span> lo que hayas editado a
-                            mano en "{data?.collection?.nombre}" — orden, juegos borrados, juegos añadidos, cancelados y
-                            "Other" — y se va a recalcular desde cero con los datos de IGDB. Esto no se puede deshacer.
+                            This will delete <span className="text-white font-semibold">everything</span> you've edited by
+                            hand in "{data?.collection?.nombre}" — order, deleted games, added games, cancelled and
+                            "Other" — and recalculate it from scratch using IGDB data. This can't be undone.
                         </p>
                         <div className="flex justify-end gap-3">
                             <button
@@ -598,14 +598,14 @@ export default function GameCollectionLinks({
                                 disabled={reiniciando}
                                 className="px-4 py-2 text-sm text-gray-300 hover:text-white transition cursor-pointer disabled:opacity-50"
                             >
-                                Cancelar
+                                Cancel
                             </button>
                             <button
                                 onClick={confirmarReinicio}
                                 disabled={reiniciando}
                                 className="px-4 py-2 text-sm rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold transition cursor-pointer disabled:opacity-50"
                             >
-                                {reiniciando ? 'Reiniciando...' : 'Sí, reiniciar'}
+                                {reiniciando ? 'Resetting...' : 'Yes, reset'}
                             </button>
                         </div>
                     </div>

@@ -123,12 +123,12 @@ export default function AddToListModal({ mediaId }: { mediaId: number }) {
             className="bg-gray-900 border border-gray-700 rounded-lg max-w-md w-full max-h-[80vh] text-white shadow-2xl flex flex-col overflow-hidden"
           >
             <div className="flex justify-between items-center gap-3 px-6 py-4 border-b border-gray-700 flex-shrink-0">
-              <h2 className="text-lg font-bold whitespace-nowrap">Añadir a listas</h2>
+              <h2 className="text-lg font-bold whitespace-nowrap">Add to lists</h2>
               <input
                 type="text"
                 value={busqueda}
                 onChange={(e) => setBusqueda(e.target.value)}
-                placeholder="Buscar lista..."
+                placeholder="Search lists..."
                 className="flex-grow min-w-0 bg-[#2c3440] text-white text-sm rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-gray-500"
               />
               <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-white text-2xl font-bold cursor-pointer flex-shrink-0">✕</button>
@@ -136,11 +136,11 @@ export default function AddToListModal({ mediaId }: { mediaId: number }) {
 
             <div className="overflow-y-auto p-4 space-y-1">
               {loading ? (
-                <p className="text-gray-400 text-sm text-center py-4">Cargando listas...</p>
+                <p className="text-gray-400 text-sm text-center py-4">Loading lists...</p>
               ) : lists.length === 0 ? (
-                <p className="text-gray-500 text-sm text-center py-4">Aún no tienes listas. Crea una abajo.</p>
+                <p className="text-gray-500 text-sm text-center py-4">You don't have any lists yet. Create one below.</p>
               ) : listasFiltradas.length === 0 ? (
-                <p className="text-gray-500 text-sm text-center py-4">Ninguna lista coincide con "{busqueda}".</p>
+                <p className="text-gray-500 text-sm text-center py-4">No lists match "{busqueda}".</p>
               ) : (
                 listasFiltradas.map((list) => (
                   <label
@@ -167,7 +167,7 @@ export default function AddToListModal({ mediaId }: { mediaId: number }) {
                 type="text"
                 value={nuevoNombre}
                 onChange={(e) => setNuevoNombre(e.target.value)}
-                placeholder="Nueva lista..."
+                placeholder="New list..."
                 className="flex-grow bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
               />
               <button
@@ -175,7 +175,7 @@ export default function AddToListModal({ mediaId }: { mediaId: number }) {
                 disabled={creando || !nuevoNombre.trim()}
                 className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold px-4 rounded transition cursor-pointer"
               >
-                Crear
+                Create
               </button>
             </form>
           </div>
