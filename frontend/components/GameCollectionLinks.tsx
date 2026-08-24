@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { urlFicha } from '@/lib/slug';
+import Link from 'next/link';
 
 const API_URL = 'http://localhost:3001';
 
@@ -55,11 +54,9 @@ export default function GameCollectionLinks({
     igdbId: number;
     currentMediaIgdbId: number;
 }) {
-    const router = useRouter();
     const esAdmin = useEsAdmin();
     const [data, setData] = useState<CollectionResponse | null>(null);
     const [modalAbierto, setModalAbierto] = useState(false);
-    const [navegandoA, setNavegandoA] = useState<number | null>(null);
     const [tabModal, setTabModal] = useState<'juegos' | 'cancelados' | 'otros'>('juegos');
     const [juegoABorrar, setJuegoABorrar] = useState<JuegoSaga | null>(null);
     const [borrando, setBorrando] = useState(false);
@@ -67,6 +64,15 @@ export default function GameCollectionLinks({
     const [confirmandoReinicio, setConfirmandoReinicio] = useState(false);
     const [reiniciando, setReiniciando] = useState(false);
     const idPeticionRef = useRef(0);
+
+    // /igdb/collection no lleva token y su "portada" es la compartida, no tu
+    // personalización — cruzamos con /media (para saber el dbId de cada
+    // igdbId) y pedimos DE UNA VEZ la personalización de todos los que ya
+    // tienes guardados, igual que CollectionLinks.tsx en películas.
+    const [myDb, setMyDb] = useState<{ id: number; igdbId: number | null; portada: string | null }[]>([]);
+    const [personalizaciones, setPersonalizaciones] = useState<
+        Record<number, { customPoster: string | null; customBackdrop: string | null }>
+    >({});
 
     // --- Buscador para añadir juegos (solo admin) ---
     const [busquedaTexto, setBusquedaTexto] = useState('');
@@ -90,6 +96,48 @@ export default function GameCollectionLinks({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [igdbId]);
 
+    useEffect(() => {
+        fetch(`${API_URL}/media`, { cache: 'no-store' })
+            .then((r) => r.json())
+            .then(setMyDb)
+            .catch(() => {});
+    }, []);
+
+    useEffect(() => {
+        const token = localStorage.getItem('token');
+        if (!token || myDb.length === 0 || !data) return;
+
+        const idsIgdb = [
+            data.prequel?.igdbId,
+            data.sequel?.igdbId,
+            ...data.games.map((g) => g.igdbId),
+            ...data.cancelados.map((g) => g.igdbId),
+            ...data.otros.map((g) => g.igdbId),
+        ].filter(Boolean);
+
+        const dbIds = idsIgdb
+            .map((id) => myDb.find((m) => m.igdbId === id)?.id)
+            .filter((id): id is number => Boolean(id));
+        if (dbIds.length === 0) return;
+
+        fetch(`${API_URL}/media/personalizaciones?ids=${[...new Set(dbIds)].join(',')}`, {
+            headers: { Authorization: `Bearer ${token}` },
+            cache: 'no-store',
+        })
+            .then((res) => res.json())
+            .then(setPersonalizaciones)
+            .catch(() => {});
+    }, [myDb, data]);
+
+    // Portada real de un juego de la saga: tu personalización si existe,
+    // si no la portada guardada en tu base de datos, si no la de la propia
+    // colección (compartida, la que viene de /igdb/collection).
+    function getPortadaReal(juego: JuegoSaga): string | null {
+        const local = myDb.find((m) => m.igdbId === juego.igdbId);
+        const miPersonalizacion = local ? personalizaciones[local.id] : undefined;
+        return miPersonalizacion?.customPoster || local?.portada || juego.portada;
+    }
+
     // Busca en IGDB mientras se escribe (con un pequeño debounce), igual que
     // el buscador principal de juegos de la app.
     useEffect(() => {
@@ -108,24 +156,12 @@ export default function GameCollectionLinks({
         return () => clearTimeout(timeout);
     }, [busquedaTexto, esAdmin]);
 
-    async function irAlJuego(juego: JuegoSaga) {
-        if (juego.igdbId === currentMediaIgdbId) return;
-
-        try {
-            setNavegandoA(juego.igdbId);
-            const res = await fetch(`${API_URL}/media/igdb`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ igdbId: juego.igdbId }),
-            });
-            const media = await res.json();
-            if (!res.ok) throw new Error(media.error || 'No se pudo guardar el juego');
-            router.push(urlFicha(media));
-        } catch (err) {
-            console.error('Error al navegar a un juego de la saga', err);
-            setNavegandoA(null);
-        }
-    }
+    // Href real a la resolvedora /game/igdb/[igdbId] — igual que en
+    // GameTabs/GameCard, para que click central/Ctrl+click/abrir en pestaña
+    // nueva funcionen sin JS. El juego ACTUAL (currentMediaIgdbId) no se
+    // enlaza a sí mismo: se deja sin href utilizable (se comprueba al
+    // renderizar, más abajo).
+    const hrefDeJuego = (juego: JuegoSaga) => `/game/igdb/${juego.igdbId}`;
 
     // Solo quita la fila de la colección curada (CuratedCollectionItem). No
     // toca Media ni UserMedia, así que el catálogo del usuario (visto, like,
@@ -317,27 +353,30 @@ export default function GameCollectionLinks({
 
     function Miniatura({ juego, etiqueta }: { juego: JuegoSaga; etiqueta: string }) {
         const esActual = juego.igdbId === currentMediaIgdbId;
+        const portadaReal = getPortadaReal(juego);
+        const contenido = (
+            <>
+                {portadaReal && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                        src={portadaReal}
+                        alt={juego.titulo}
+                        className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80"
+                    />
+                )}
+                <p className="mt-1 text-sm text-gray-400 text-center">{etiqueta}</p>
+            </>
+        );
         return (
             <div className="group relative">
                 <BotonBorrar juego={juego} />
-                <button
-                    onClick={() => irAlJuego(juego)}
-                    disabled={esActual || navegandoA !== null}
-                    className={`block w-full text-left disabled:cursor-default ${esActual ? '' : 'cursor-pointer'
-                        }`}
-                >
-                    {juego.portada && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                            src={juego.portada}
-                            alt={juego.titulo}
-                            className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80"
-                        />
-                    )}
-                    <p className="mt-1 text-sm text-gray-400 text-center">
-                        {navegandoA === juego.igdbId ? 'Loading...' : etiqueta}
-                    </p>
-                </button>
+                {esActual ? (
+                    <span className="block w-full text-left">{contenido}</span>
+                ) : (
+                    <Link href={hrefDeJuego(juego)} className="block w-full text-left cursor-pointer">
+                        {contenido}
+                    </Link>
+                )}
             </div>
         );
     }
@@ -493,6 +532,32 @@ export default function GameCollectionLinks({
                         <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-5">
                             {(tabModal === 'juegos' ? data.games : tabModal === 'cancelados' ? data.cancelados : data.otros).map((g) => {
                                 const esActual = g.igdbId === currentMediaIgdbId;
+                                const portadaReal = getPortadaReal(g);
+                                const imagen = portadaReal && (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                        src={portadaReal}
+                                        alt={g.titulo}
+                                        // Solo la carátula es arrastrable (no toda la tarjeta): así el
+                                        // título sigue siendo texto normal, seleccionable/copiable —
+                                        // un elemento "draggable" bloquea la selección de texto dentro
+                                        // de él, y antes eso incluía el nombre del juego sin querer.
+                                        draggable={esAdmin}
+                                        className={`w-full aspect-[2/3] object-cover rounded transition ${esActual
+                                            ? 'ring-2 ring-blue-500'
+                                            : 'group-hover:opacity-80 group-hover:scale-[1.02]'
+                                            } ${esAdmin ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                    />
+                                );
+                                const textoTarjeta = (
+                                    <>
+                                        <p className="mt-2 text-sm font-semibold text-white select-text">{g.titulo}</p>
+                                        <p className="text-xs text-gray-400">
+                                            {g.anio}
+                                            {esActual ? " · You're viewing this" : ''}
+                                        </p>
+                                    </>
+                                );
                                 return (
                                     <div
                                         key={g.id}
@@ -503,36 +568,17 @@ export default function GameCollectionLinks({
                                         onDragEnd={() => setArrastrandoId(null)}
                                     >
                                         <BotonBorrar juego={g} />
-                                        <button
-                                            onClick={() => irAlJuego(g)}
-                                            disabled={esActual || navegandoA !== null}
-                                            className={`block w-full rounded text-left disabled:cursor-default ${esActual ? '' : 'cursor-pointer'
-                                                }`}
-                                        >
-                                            {g.portada && (
-                                                // eslint-disable-next-line @next/next/no-img-element
-                                                <img
-                                                    src={g.portada}
-                                                    alt={g.titulo}
-                                                    // Solo la carátula es arrastrable (no toda la tarjeta): así el
-                                                    // título sigue siendo texto normal, seleccionable/copiable —
-                                                    // un elemento "draggable" bloquea la selección de texto dentro
-                                                    // de él, y antes eso incluía el nombre del juego sin querer.
-                                                    draggable={esAdmin}
-                                                    className={`w-full aspect-[2/3] object-cover rounded transition ${esActual
-                                                        ? 'ring-2 ring-blue-500'
-                                                        : 'group-hover:opacity-80 group-hover:scale-[1.02]'
-                                                        } ${esAdmin ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                                                />
-                                            )}
-                                            <p className="mt-2 text-sm font-semibold text-white select-text">
-                                                {navegandoA === g.igdbId ? 'Loading...' : g.titulo}
-                                            </p>
-                                            <p className="text-xs text-gray-400">
-                                                {g.anio}
-                                                {esActual ? " · You're viewing this" : ''}
-                                            </p>
-                                        </button>
+                                        {esActual ? (
+                                            <span className="block w-full rounded text-left">
+                                                {imagen}
+                                                {textoTarjeta}
+                                            </span>
+                                        ) : (
+                                            <Link href={hrefDeJuego(g)} className="block w-full rounded text-left cursor-pointer">
+                                                {imagen}
+                                                {textoTarjeta}
+                                            </Link>
+                                        )}
                                     </div>
                                 );
                             })}
