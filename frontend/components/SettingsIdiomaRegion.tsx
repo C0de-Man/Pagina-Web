@@ -32,7 +32,7 @@ export default function SettingsIdiomaRegion() {
   return (
     <div className="space-y-4">
       <div>
-        <label className="mb-1 block text-sm text-slate-300">Idioma del contenido</label>
+        <label className="mb-1 block text-sm text-slate-300">Content language</label>
         <select
           value={idioma}
           onChange={(e) => setIdioma(e.target.value)}
@@ -45,12 +45,12 @@ export default function SettingsIdiomaRegion() {
           ))}
         </select>
         <p className="mt-1 text-xs text-slate-400">
-          Afecta a títulos, sinopsis y reparto en las fichas de películas.
+          Affects titles, synopsis and cast on movie pages.
         </p>
       </div>
 
       <div>
-        <label className="mb-1 block text-sm text-slate-300">Región</label>
+        <label className="mb-1 block text-sm text-slate-300">Region</label>
         <select
           value={region}
           onChange={(e) => setRegion(e.target.value)}
@@ -63,7 +63,7 @@ export default function SettingsIdiomaRegion() {
           ))}
         </select>
         <p className="mt-1 text-xs text-slate-400">
-          Determina qué plataformas de streaming se muestran en "Dónde ver".
+          Determines which streaming platforms show up under "Where to watch".
         </p>
       </div>
 
@@ -72,7 +72,7 @@ export default function SettingsIdiomaRegion() {
         disabled={guardando}
         className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
       >
-        {guardando ? 'Guardando...' : guardado ? 'Guardado ✓' : 'Guardar cambios'}
+        {guardando ? 'Saving...' : guardado ? 'Saved ✓' : 'Save changes'}
       </button>
     </div>
   );

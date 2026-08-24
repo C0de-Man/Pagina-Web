@@ -118,7 +118,7 @@ export default function Settings() {
                 disabled={guardando}
                 className="mt-6 bg-green-600 hover:bg-green-500 disabled:opacity-50 px-5 py-2 rounded font-bold text-sm transition cursor-pointer"
               >
-                {guardando ? 'Guardando...' : 'Save Changes'}
+                {guardando ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
 
@@ -143,7 +143,7 @@ export default function Settings() {
               </div>
 
               <div className="bg-[#1c2228] border border-gray-700 rounded-lg p-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Favoritos</h3>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Favorites</h3>
                 <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
                   {favoritos.map((item, i) => (
                     <div
@@ -169,7 +169,7 @@ export default function Settings() {
             <SettingsIdiomaRegion />
 
             <p className="text-gray-500 text-sm mt-8 pt-6 border-t border-gray-800">
-              <Link href="/perfil/settings" className="underline">Cambio de email/contraseña</Link> — pendiente de implementar.
+              <Link href="/perfil/settings" className="underline">Change email/password</Link> — not implemented yet.
             </p>
           </div>
         )}
