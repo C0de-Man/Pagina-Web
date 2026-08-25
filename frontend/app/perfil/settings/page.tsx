@@ -13,6 +13,9 @@ export default function Settings() {
   const [cropAbierto, setCropAbierto] = useState(false);
   const [slotAbierto, setSlotAbierto] = useState<number | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const [reseteando, setReseteando] = useState(false);
+  const [resultadoReset, setResultadoReset] = useState<string | null>(null);
+  const [confirmandoReset, setConfirmandoReset] = useState(false);
 
   const cargarDatos = () => {
     const token = localStorage.getItem('token');
@@ -76,6 +79,30 @@ export default function Settings() {
     } finally {
       setGuardando(false);
     }
+  };
+
+  const resetearCaratulas = async () => {
+    const token = localStorage.getItem('token');
+    if (!token || reseteando) return;
+
+    setConfirmandoReset(false);
+    setReseteando(true);
+    setResultadoReset(null);
+    try {
+      const res = await fetch('http://localhost:3001/auth/me/reset-custom-posters', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setResultadoReset(
+        res.ok
+          ? `Done — ${data.actualizados} custom cover${data.actualizados === 1 ? '' : 's'} reset.`
+          : 'Something went wrong, please try again.'
+      );
+    } catch {
+      setResultadoReset('Something went wrong, please try again.');
+    }
+    setReseteando(false);
   };
 
   return (
@@ -168,6 +195,21 @@ export default function Settings() {
 
             <SettingsIdiomaRegion />
 
+            <div className="mt-8 pt-6 border-t border-gray-800">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Custom covers</h3>
+              <p className="text-gray-500 text-sm mb-3">
+                Remove every custom poster and banner you've personally set across your whole catalog, and go back to the default cover for everything.
+              </p>
+              <button
+                onClick={() => setConfirmandoReset(true)}
+                disabled={reseteando}
+                className="bg-red-900/40 hover:bg-red-900/60 disabled:opacity-50 text-red-300 hover:text-red-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
+              >
+                {reseteando ? 'Resetting...' : 'Reset all custom covers'}
+              </button>
+              {resultadoReset && <p className="text-gray-400 text-sm mt-2">{resultadoReset}</p>}
+            </div>
+
             <p className="text-gray-500 text-sm mt-8 pt-6 border-t border-gray-800">
               <Link href="/perfil/settings" className="underline">Change email/password</Link> — not implemented yet.
             </p>
@@ -195,6 +237,31 @@ export default function Settings() {
             setSlotAbierto(null);
           }}
         />
+      )}
+
+      {confirmandoReset && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#1c2228] border border-gray-700 rounded-lg p-6 max-w-md w-full shadow-2xl">
+            <h3 className="text-lg font-bold text-white mb-2">Reset all custom covers?</h3>
+            <p className="text-gray-400 text-sm mb-6">
+              You're about to remove every custom poster and banner you've set, on every movie, series, game or book. Everything will go back to the default cover. This won't remove anything from your catalog — only your custom covers.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmandoReset(false)}
+                className="px-4 py-2 rounded text-sm font-semibold text-gray-300 hover:text-white transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={resetearCaratulas}
+                className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded text-sm font-bold transition cursor-pointer"
+              >
+                Yes, reset
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

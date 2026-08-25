@@ -2171,8 +2171,30 @@ app.post('/media/tmdb', async (req, res) => {
     const response = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${tmdbId}?api_key=${apiKey}&language=${lang}`);
     const data = await response.json();
 
-    const backdropUrl = data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null;
-    const posterUrl = data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null;
+    // La carátula/banner se piden SIEMPRE en inglés (language=en-US), aunque
+    // el título/sinopsis respeten tu idioma — TMDB devuelve una carátula
+    // distinta (a veces con el título traducido dibujado en la propia
+    // imagen) según el idioma pedido, y por defecto queremos la versión en
+    // inglés, no la traducida. Si por lo que sea TMDB no tiene poster/backdrop
+    // en inglés para este título, caemos a los que ya vinieron en "data"
+    // arriba (mejor eso que quedarnos sin carátula).
+    let dataImagenes = data;
+    if (lang && !lang.startsWith('en')) {
+      try {
+        const respImagenes = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${tmdbId}?api_key=${apiKey}&language=en-US`);
+        const dataEn = await respImagenes.json();
+        if (dataEn && !dataEn.status_code) dataImagenes = dataEn;
+      } catch (e) {
+        // si falla, nos quedamos con "data" (el mismo idioma que el resto de la ficha)
+      }
+    }
+
+    const backdropUrl = dataImagenes.backdrop_path
+      ? `https://image.tmdb.org/t/p/w1280${dataImagenes.backdrop_path}`
+      : (data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null);
+    const posterUrl = dataImagenes.poster_path
+      ? `https://image.tmdb.org/t/p/w500${dataImagenes.poster_path}`
+      : (data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null);
     // Las series usan name/first_air_date en vez de title/release_date.
     const fechaLanzamiento = data.release_date || data.first_air_date || null;
 
@@ -3372,6 +3394,28 @@ app.patch('/auth/me/avatar', requireAuth, async (req, res) => {
 // --- ACTUALIZAR MIS PREFERENCIAS DE IDIOMA Y REGIÓN ---
 // idioma: código ISO 639-1 + país tipo "en-US" (formato que espera TMDB en el parámetro `language`)
 // region: código ISO 3166-1 tipo "US" (formato que espera TMDB en `watch/providers` y `discover`)
+// --- RESETEAR TODAS MIS CARÁTULAS/BANNERS PERSONALIZADOS (customPoster y
+// customBackdrop de TODA tu UserMedia, de golpe) ---
+// Solo toca tus propias filas (where: { userId: req.userId }): nunca afecta
+// a lo que otros usuarios hayan personalizado, ni a la portada/backdrop
+// COMPARTIDOS de Media (esos se quedan igual — esto solo quita TU capa de
+// personalización, volviendo a la carátula por defecto para ti).
+app.post('/auth/me/reset-custom-posters', requireAuth, async (req, res) => {
+  try {
+    const resultado = await prisma.userMedia.updateMany({
+      where: {
+        userId: req.userId,
+        OR: [{ customPoster: { not: null } }, { customBackdrop: { not: null } }],
+      },
+      data: { customPoster: null, customBackdrop: null },
+    });
+    res.json({ ok: true, actualizados: resultado.count });
+  } catch (error) {
+    console.error('ERROR EN POST /auth/me/reset-custom-posters:', error);
+    res.status(500).json({ error: 'Error al resetear las carátulas personalizadas' });
+  }
+});
+
 app.patch('/auth/me/preferences', requireAuth, async (req, res) => {
   try {
     const { idioma, region } = req.body;
