@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { urlFicha } from '@/lib/slug';
 
@@ -25,10 +25,21 @@ function formatFecha(fecha: string) {
 export default function Perfil() {
   const [favoritos, setFavoritos] = useState<any[]>([]);
   const [vistas, setVistas] = useState<any[]>([]);
+  const [jugandoAhora, setJugandoAhora] = useState<any[]>([]);
   const [username, setUsername] = useState('');
   const [avatar, setAvatar] = useState<string | null>(null);
   const [logueado, setLogueado] = useState(false);
   const [copiado, setCopiado] = useState(false);
+  const jugandoAhoraRef = useRef<HTMLDivElement>(null);
+
+  // Desplaza el carrusel de Currently Playing una "página" (más o menos el
+  // ancho visible) hacia la izquierda o la derecha, con scroll suave.
+  const desplazarJugandoAhora = (direccion: 'izq' | 'der') => {
+    const el = jugandoAhoraRef.current;
+    if (!el) return;
+    const distancia = el.clientWidth * 0.9;
+    el.scrollBy({ left: direccion === 'izq' ? -distancia : distancia, behavior: 'smooth' });
+  };
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -62,6 +73,14 @@ export default function Perfil() {
       })
         .then((res) => res.json())
         .then(setVistas)
+        .catch(() => {});
+
+      fetch('http://localhost:3001/media/playing', {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      })
+        .then((res) => res.json())
+        .then(setJugandoAhora)
         .catch(() => {});
     }
   }, []);
@@ -187,11 +206,40 @@ export default function Perfil() {
           )}
         </section>
 
-        <section>
-          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Following</h2>
-          <p className="text-gray-500 text-sm">You're not following anyone yet.</p>
-        </section>
+        {/* Solo se muestra si tienes algún juego en curso ahora mismo. */}
+        {jugandoAhora.length > 0 && (
+          <section>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Currently Playing/Watching</h2>
+            <div className="relative group/carousel">
+              <div
+                ref={jugandoAhoraRef}
+                className="flex gap-4 overflow-x-auto pb-2 scroll-smooth"
+                style={{ scrollbarWidth: 'none' }}
+              >
+                {jugandoAhora.map((item) => renderCard(item, false))}
+              </div>
 
+              {jugandoAhora.length > 7 && (
+                <>
+                  <button
+                    onClick={() => desplazarJugandoAhora('izq')}
+                    aria-label="Scroll left"
+                    className="absolute left-0 top-0 bottom-2 flex items-center px-1 bg-gradient-to-r from-[#14181c] via-[#14181c]/90 to-transparent opacity-0 group-hover/carousel:opacity-100 transition cursor-pointer"
+                  >
+                    <span className="text-2xl text-white">‹</span>
+                  </button>
+                  <button
+                    onClick={() => desplazarJugandoAhora('der')}
+                    aria-label="Scroll right"
+                    className="absolute right-0 top-0 bottom-2 flex items-center px-1 bg-gradient-to-l from-[#14181c] via-[#14181c]/90 to-transparent opacity-0 group-hover/carousel:opacity-100 transition cursor-pointer"
+                  >
+                    <span className="text-2xl text-white">›</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+        )}
         <section>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">Recent activity</h2>

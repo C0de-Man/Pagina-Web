@@ -1,0 +1,97 @@
+import MovieCard from '@/components/MovieCard';
+import Link from 'next/link';
+import { cookies } from 'next/headers';
+
+export default async function StudioPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ companyId: string }>;
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { companyId } = await params;
+  const { page } = await searchParams;
+  const currentPage = parseInt(page || '1');
+
+  const cookieStore = await cookies();
+  const idioma = cookieStore.get('idioma')?.value || 'es-ES';
+  const region = cookieStore.get('region')?.value || 'ES';
+
+  const res = await fetch(
+    `http://localhost:3001/tmdb/company/${companyId}?language=${idioma}&region=${region}&page=${currentPage}`,
+    { cache: 'no-store' }
+  );
+
+  if (!res.ok) {
+    return (
+      <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+        Studio not found
+      </main>
+    );
+  }
+
+  const data = await res.json();
+
+  // Igual que en /movie/all: comprobamos qué películas ya están guardadas en
+  // TU base de datos local para que MovieCard pueda enlazar a su ficha propia.
+  const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
+  const myDb = await resDb.json();
+  const getLocalData = (tmdbId: number) => {
+    const local = myDb.find((m: any) => m.tmdbId === tmdbId);
+    return { dbId: local ? local.id : null, customPoster: null };
+  };
+
+  return (
+    <main className="min-h-screen bg-gray-950 text-white font-sans py-10">
+      <div className="max-w-[90rem] mx-auto px-4 sm:px-6 lg:px-16">
+        <div className="flex items-center gap-4 border-b border-gray-800 pb-6 mb-8">
+          {data.logo && (
+            <div className="bg-white rounded p-3 flex-shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={data.logo} alt={data.nombre} className="h-12 object-contain" />
+            </div>
+          )}
+          <div>
+            <h1 className="text-2xl font-bold">{data.nombre}</h1>
+            {data.pais && <p className="text-sm text-gray-500">{data.pais}</p>}
+          </div>
+        </div>
+
+        {data.peliculas.length === 0 ? (
+          <p className="text-gray-500">No movies found for this studio.</p>
+        ) : (
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4">
+            {data.peliculas.map((pelicula: any) => {
+              const { dbId, customPoster } = getLocalData(pelicula.id);
+              return (
+                <div key={pelicula.id} className="w-full">
+                  <MovieCard pelicula={pelicula} dbId={dbId} customPoster={customPoster} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {data.totalPaginas > 1 && (
+          <div className="border-t border-gray-800 mt-8 pt-6 flex items-center justify-between">
+            {currentPage > 1 ? (
+              <Link href={`/studio/${companyId}?page=${currentPage - 1}`} className="text-sm text-gray-400 hover:text-white transition">
+                ‹ Prev
+              </Link>
+            ) : (
+              <span className="text-sm text-gray-700">‹ Prev</span>
+            )}
+            <span className="text-sm text-gray-500">Page {currentPage} of {data.totalPaginas}</span>
+            {currentPage < data.totalPaginas ? (
+              <Link href={`/studio/${companyId}?page=${currentPage + 1}`} className="text-sm text-gray-400 hover:text-white transition">
+                Next ›
+              </Link>
+            ) : (
+              <span className="text-sm text-gray-700">Next ›</span>
+            )}
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}

@@ -17,6 +17,7 @@ interface PerfilPublico {
   isFollowing: boolean | null;
   favoritos: any[];
   actividad: any[];
+  jugandoAhora: any[];
 }
 
 function Estrellas({ rating }: { rating: number }) {
@@ -205,6 +206,22 @@ export default function PerfilPublicoPage() {
           ) : (
             <p className="text-gray-500 text-sm">No favorites yet.</p>
           )}
+        </section>
+
+        {/* Solo se muestra si hay algún juego en curso — un dueño de perfil
+            sin ningún "Playing" no debería ver una sección vacía aquí. */}
+        {perfil.jugandoAhora.length > 0 && (
+          <section>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Currently Playing</h2>
+            <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+              {perfil.jugandoAhora.map((item) => renderCard(item, false))}
+            </div>
+          </section>
+        )}
+
+        <section>
+          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Following</h2>
+          <p className="text-gray-500 text-sm">You're not following anyone yet.</p>
         </section>
 
         <section>

@@ -2259,6 +2259,36 @@ app.get('/media/watchlist', requireAuth, async (req, res) => {
   }
 });
 
+// --- MIS JUEGOS EN CURSO ("Currently Playing", playStatus = 'PLAYING') ---
+app.get('/media/playing', requireAuth, async (req, res) => {
+  try {
+    const entries = await prisma.userMedia.findMany({
+      where: { userId: req.userId, playStatus: 'PLAYING' },
+      orderBy: { updatedAt: 'desc' }
+    });
+
+    const mediaIds = entries.map(e => e.mediaId);
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+
+    const resultado = entries
+      .map(e => {
+        const item = mediaItems.find(m => m.id === e.mediaId);
+        if (!item) return null;
+        return {
+          ...item,
+          portada: e.customPoster || item.portada,
+          backdrop: e.customBackdrop || item.backdrop,
+        };
+      })
+      .filter(Boolean);
+
+    res.json(resultado);
+  } catch (error) {
+    console.error('ERROR EN GET /media/playing:', error);
+    res.status(500).json({ error: 'Error al obtener los juegos en curso' });
+  }
+});
+
 // --- LOGS DE UN VIDEOJUEGO (partidas/reviews, varios logs por juego) ---
 // Solo devuelve/edita los logs del propio usuario (nunca los de otros).
 app.get('/media/:id/logs', requireAuth, async (req, res) => {
@@ -2561,14 +2591,25 @@ app.get('/tmdb/year/:year/page/:page', async (req, res) => {
     const startTmdbPage = Math.floor(startIndex / 20) + 1;
     const endTmdbPage = Math.ceil(endIndex / 20);
 
-    const paramsFiltro = construirFiltrosDiscoverMovie(req.query);
+    // 'anio' en la query string NO se pasa aquí: el año ya viene fijado por
+    // la propia ruta (:year). Si lo dejamos pasar también a
+    // construirFiltrosDiscoverMovie, el fetch a TMDB acababa llevando
+    // "primary_release_year" DOS VECES en la misma URL — lo cual podía
+    // hacer que TMDB devolviera 0 resultados en vez del catálogo real.
+    const { anio, ...queryFiltro } = req.query;
+    const paramsFiltro = construirFiltrosDiscoverMovie(queryFiltro);
     const orden = req.query.orden === 'asc' ? 'asc' : 'desc';
+
+    // LOG TEMPORAL DE DIAGNÓSTICO — bórralo en cuanto confirmemos que ya no pasa
+    console.log('[DEBUG movies year] year:', year, 'query:', req.query, 'paramsFiltro:', paramsFiltro);
 
     let combined = [];
 
     for (let i = startTmdbPage; i <= endTmdbPage; i++) {
       const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&primary_release_year=${year}&sort_by=popularity.${orden}&page=${i}${paramsFiltro}`);
       const data = await response.json();
+      // LOG TEMPORAL DE DIAGNÓSTICO — bórralo junto con el de arriba
+      if (!data.results) console.log('[DEBUG movies year] TMDB respondió sin resultados:', JSON.stringify(data));
       if (data.results) combined.push(...data.results);
     }
 
@@ -2689,7 +2730,10 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
       runtime: data.runtime || null,
       presupuesto: data.budget || 0,
       ganancias: data.revenue || 0,
-      estudios: data.production_companies?.map(c => c.name) || [],
+      // Antes solo el nombre (string). Ahora {id, nombre}: hace falta el id
+      // de TMDB para poder enlazar cada estudio a su propia filmografía
+      // (GET /tmdb/company/:companyId) — el nombre solo no basta para eso.
+      estudios: data.production_companies?.map(c => ({ id: c.id, nombre: c.name })) || [],
       paises: data.production_countries?.map(c => c.name) || [],
       cast: data.credits?.cast?.slice(0, 15).map(a => ({
         id: a.id,
@@ -2821,6 +2865,42 @@ app.get('/tmdb/person/:personId', async (req, res) => {
 });
 
 // --- DÓNDE VER (datos de JustWatch a través de TMDB) ---
+// --- FICHA DE UN ESTUDIO: nombre/logo + filmografía (paginada de 20 en 20, como da TMDB por defecto) ---
+app.get('/tmdb/company/:companyId', async (req, res) => {
+  try {
+    const { companyId } = req.params;
+    const apiKey = process.env.TMDB_API_KEY;
+    const lang = getLang(req);
+    const page = parseInt(req.query.page) || 1;
+
+    const [resCompany, resMovies] = await Promise.all([
+      fetch(`https://api.themoviedb.org/3/company/${companyId}?api_key=${apiKey}`),
+      fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${lang}&with_companies=${companyId}&sort_by=primary_release_date.desc&page=${page}`),
+    ]);
+    const company = await resCompany.json();
+    const movies = await resMovies.json();
+
+    if (!company || company.success === false) {
+      return res.status(404).json({ error: 'Estudio no encontrado' });
+    }
+
+    const peliculas = await mezclarCustomPosters(movies.results || [], getUserIdOpcional(req));
+
+    res.json({
+      id: company.id,
+      nombre: company.name,
+      logo: company.logo_path ? `https://image.tmdb.org/t/p/w300${company.logo_path}` : null,
+      pais: company.origin_country || null,
+      page,
+      totalPaginas: Math.min(movies.total_pages || 1, 500), // límite propio de TMDB
+      peliculas,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /tmdb/company/:companyId:', error);
+    res.status(500).json({ error: 'Error al obtener el estudio' });
+  }
+});
+
 app.get('/tmdb/watch-providers/:tmdbId', async (req, res) => {
   try {
     const { tmdbId } = req.params;
@@ -3428,7 +3508,7 @@ app.get('/users/:username', async (req, res) => {
 
     const miUserId = getUserIdOpcional(req);
 
-    const [followersCount, followingCount, favs, vistas, yaLeSigo] = await Promise.all([
+    const [followersCount, followingCount, favs, vistas, jugandoAhoraEntries, yaLeSigo] = await Promise.all([
       prisma.follow.count({ where: { followingId: usuario.id } }),
       prisma.follow.count({ where: { followerId: usuario.id } }),
       prisma.favorite.findMany({ where: { userId: usuario.id }, orderBy: { orden: 'asc' } }),
@@ -3436,6 +3516,12 @@ app.get('/users/:username', async (req, res) => {
         where: { userId: usuario.id, watched: true },
         orderBy: { updatedAt: 'desc' },
         take: 20,
+      }),
+      // "Currently Playing": juegos donde el propio dueño del perfil ha
+      // puesto el desplegable "Set your played status" en Playing.
+      prisma.userMedia.findMany({
+        where: { userId: usuario.id, playStatus: 'PLAYING' },
+        orderBy: { updatedAt: 'desc' },
       }),
       miUserId
         ? prisma.follow.findUnique({
@@ -3446,7 +3532,8 @@ app.get('/users/:username', async (req, res) => {
 
     const mediaIdsFavoritos = favs.map((f) => f.mediaId);
     const mediaIdsVistas = vistas.map((v) => v.mediaId);
-    const todosLosMediaIds = [...new Set([...mediaIdsFavoritos, ...mediaIdsVistas])];
+    const mediaIdsJugandoAhora = jugandoAhoraEntries.map((j) => j.mediaId);
+    const todosLosMediaIds = [...new Set([...mediaIdsFavoritos, ...mediaIdsVistas, ...mediaIdsJugandoAhora])];
     const mediaItems = await prisma.media.findMany({ where: { id: { in: todosLosMediaIds } } });
 
     // Favorite no guarda carátula personalizada (eso vive en UserMedia), así
@@ -3490,6 +3577,17 @@ app.get('/users/:username', async (req, res) => {
       })
       .filter(Boolean);
 
+    const jugandoAhora = jugandoAhoraEntries
+      .map((j) => {
+        const item = mediaItems.find((m) => m.id === j.mediaId);
+        if (!item) return null;
+        return {
+          ...item,
+          portada: j.customPoster || item.portada,
+        };
+      })
+      .filter(Boolean);
+
     res.json({
       id: usuario.id,
       username: usuario.username,
@@ -3501,6 +3599,7 @@ app.get('/users/:username', async (req, res) => {
       isFollowing: miUserId ? !!yaLeSigo : null,
       favoritos,
       actividad,
+      jugandoAhora,
     });
   } catch (error) {
     console.error('ERROR EN GET /users/:username:', error);

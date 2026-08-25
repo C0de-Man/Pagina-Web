@@ -149,7 +149,24 @@ export default function MediaTabs({
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 text-sm">
           <div>
             <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Studio</div>
-            <div className="text-gray-200">{detalles?.estudios?.length > 0 ? detalles.estudios.join(', ') : 'Not available'}</div>
+            <div className="text-gray-200">
+              {detalles?.estudios?.length > 0 ? (
+                detalles.estudios.map((e: any, i: number) => (
+                  <span key={e.id ?? i}>
+                    {e.id ? (
+                      <Link href={`/studio/${e.id}`} className="hover:underline hover:text-white transition">
+                        {e.nombre}
+                      </Link>
+                    ) : (
+                      e.nombre
+                    )}
+                    {i < detalles.estudios.length - 1 && ', '}
+                  </span>
+                ))
+              ) : (
+                'Not available'
+              )}
+            </div>
           </div>
           <div>
             <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Country</div>
