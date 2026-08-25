@@ -28,6 +28,7 @@ export default function Perfil() {
   const [username, setUsername] = useState('');
   const [avatar, setAvatar] = useState<string | null>(null);
   const [logueado, setLogueado] = useState(false);
+  const [copiado, setCopiado] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -64,6 +65,23 @@ export default function Perfil() {
         .catch(() => {});
     }
   }, []);
+
+  // Copia el enlace público y compartible del perfil (/user/NOMBRE) al
+  // portapapeles. Ese, y no /perfil, es el que tiene sentido pasarle a otra
+  // persona: /perfil es tu vista privada de edición, sin nombre en la URL.
+  const compartirPerfil = async () => {
+    if (!username) return;
+    const url = `${window.location.origin}/user/${username}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+    } catch {
+      // Si el navegador bloquea el portapapeles (p. ej. sin HTTPS en algunos
+      // casos), al menos mostramos el enlace para copiarlo a mano.
+      window.prompt('Copy your profile link:', url);
+    }
+  };
 
   // mostrarFooter: activa el pie estilo Letterboxd (estrellas/corazón/fecha)
   // debajo de la carátula — solo tiene sentido para "Actividad reciente"
@@ -107,23 +125,34 @@ export default function Perfil() {
     <main className="min-h-screen bg-[#14181c] text-white font-sans">
       <div className="border-b border-gray-800">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="flex items-center gap-4">
-            <div className="w-20 h-20 rounded-full overflow-hidden bg-blue-600 flex-shrink-0">
-              <img
-                src={avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username || 'Miguel'}`}
-                alt="Avatar"
-                className="w-full h-full object-cover"
-              />
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-20 h-20 rounded-full overflow-hidden bg-blue-600 flex-shrink-0">
+                <img
+                  src={avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username || 'Miguel'}`}
+                  alt="Avatar"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <h1 className="text-2xl md:text-3xl font-extrabold">{username || 'Guest'}</h1>
             </div>
-            <h1 className="text-2xl md:text-3xl font-extrabold">{username || 'Guest'}</h1>
+
+            {logueado && (
+              <button
+                onClick={compartirPerfil}
+                className="text-sm font-bold px-4 py-2 rounded transition cursor-pointer bg-[#2c3440] text-gray-300 hover:bg-[#3a4552] hover:text-white"
+              >
+                {copiado ? 'Link copied!' : 'Share profile'}
+              </button>
+            )}
           </div>
 
           <div className="flex gap-8 mt-6 border-b border-gray-800 -mb-8 pb-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
             <span className="pb-3 text-sm font-semibold text-white border-b-2 border-blue-500 whitespace-nowrap">Profile</span>
-            <Link href="/perfil/peliculas" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Films</Link>
+            <Link href="/perfil/movies" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Films</Link>
             <Link href="/perfil/series" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Series</Link>
-            <Link href="/perfil/juegos" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Played</Link>
-            <Link href="/comics" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Books</Link>
+            <Link href="/perfil/games" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Played</Link>
+            <Link href="/books" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Books</Link>
             <Link href="/perfil/lists" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Lists</Link>
             <span className="pb-3 text-sm font-semibold text-gray-400 whitespace-nowrap">Reviews</span>
           </div>

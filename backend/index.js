@@ -3322,6 +3322,220 @@ app.patch('/auth/me/preferences', requireAuth, async (req, res) => {
   }
 });
 
+// --- BUSCAR USUARIOS POR NOMBRE (para la sección de Friends) ---
+// requireAuth: necesitamos saber quién pregunta para poder marcar, por cada
+// resultado, si TÚ ya le sigues (isFollowing) — sin sesión no tendría
+// sentido ese dato.
+app.get('/users/search', requireAuth, async (req, res) => {
+  try {
+    const q = (req.query.q || '').toString().trim();
+    if (q.length < 2) return res.json([]);
+
+    const usuarios = await prisma.user.findMany({
+      where: {
+        username: { contains: q, mode: 'insensitive' },
+        id: { not: req.userId }, // no te muestres a ti mismo en tu propia búsqueda
+      },
+      select: { id: true, username: true, avatar: true },
+      take: 20,
+      orderBy: { username: 'asc' },
+    });
+
+    const siguiendo = await prisma.follow.findMany({
+      where: { followerId: req.userId, followingId: { in: usuarios.map((u) => u.id) } },
+      select: { followingId: true },
+    });
+    const idsSeguidos = new Set(siguiendo.map((f) => f.followingId));
+
+    res.json(usuarios.map((u) => ({ ...u, isFollowing: idsSeguidos.has(u.id) })));
+  } catch (error) {
+    console.error('ERROR EN GET /users/search:', error);
+    res.status(500).json({ error: 'Error al buscar usuarios' });
+  }
+});
+
+// --- SEGUIR A UN USUARIO (directo, sin petición/aceptación) ---
+app.post('/users/:id/follow', requireAuth, async (req, res) => {
+  try {
+    const followingId = parseInt(req.params.id);
+    if (followingId === req.userId) {
+      return res.status(400).json({ error: 'No puedes seguirte a ti mismo' });
+    }
+
+    const destino = await prisma.user.findUnique({ where: { id: followingId } });
+    if (!destino) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    await prisma.follow.create({
+      data: { followerId: req.userId, followingId },
+    });
+    res.status(201).json({ ok: true });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      // Ya le seguías — no es un error real, simplemente confirmamos el estado.
+      return res.json({ ok: true });
+    }
+    console.error('ERROR EN POST /users/:id/follow:', error);
+    res.status(500).json({ error: 'Error al seguir al usuario' });
+  }
+});
+
+// --- DEJAR DE SEGUIR A UN USUARIO ---
+app.delete('/users/:id/follow', requireAuth, async (req, res) => {
+  try {
+    const followingId = parseInt(req.params.id);
+    await prisma.follow.deleteMany({
+      where: { followerId: req.userId, followingId },
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN DELETE /users/:id/follow:', error);
+    res.status(500).json({ error: 'Error al dejar de seguir al usuario' });
+  }
+});
+
+// --- USUARIOS A LOS QUE SIGO (para la lista "Following" en /perfil/friends) ---
+app.get('/users/me/following', requireAuth, async (req, res) => {
+  try {
+    const siguiendo = await prisma.follow.findMany({
+      where: { followerId: req.userId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        following: { select: { id: true, username: true, avatar: true } },
+      },
+    });
+    res.json(siguiendo.map((f) => ({ ...f.following, isFollowing: true })));
+  } catch (error) {
+    console.error('ERROR EN GET /users/me/following:', error);
+    res.status(500).json({ error: 'Error al obtener a quién sigues' });
+  }
+});
+
+// --- PERFIL PÚBLICO DE UN USUARIO (por username) ---
+// Público (no requireAuth): cualquiera puede ver un perfil. Si hay sesión
+// (getUserIdOpcional), añadimos isFollowing/isSelf; si no, esos campos
+// llegan como null/false y el frontend simplemente no muestra el botón de
+// seguir (o manda a /login si intentas usarlo).
+// mode: 'insensitive' — un enlace de perfil compartido (Share profile) debe
+// funcionar da igual cómo se escriba la mayúscula/minúscula.
+app.get('/users/:username', async (req, res) => {
+  try {
+    const username = req.params.username;
+    const usuario = await prisma.user.findFirst({
+      where: { username: { equals: username, mode: 'insensitive' } },
+      select: { id: true, username: true, avatar: true, createdAt: true },
+    });
+    if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const miUserId = getUserIdOpcional(req);
+
+    const [followersCount, followingCount, favs, vistas, yaLeSigo] = await Promise.all([
+      prisma.follow.count({ where: { followingId: usuario.id } }),
+      prisma.follow.count({ where: { followerId: usuario.id } }),
+      prisma.favorite.findMany({ where: { userId: usuario.id }, orderBy: { orden: 'asc' } }),
+      prisma.userMedia.findMany({
+        where: { userId: usuario.id, watched: true },
+        orderBy: { updatedAt: 'desc' },
+        take: 20,
+      }),
+      miUserId
+        ? prisma.follow.findUnique({
+            where: { followerId_followingId: { followerId: miUserId, followingId: usuario.id } },
+          })
+        : null,
+    ]);
+
+    const mediaIdsFavoritos = favs.map((f) => f.mediaId);
+    const mediaIdsVistas = vistas.map((v) => v.mediaId);
+    const todosLosMediaIds = [...new Set([...mediaIdsFavoritos, ...mediaIdsVistas])];
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: todosLosMediaIds } } });
+
+    const favoritos = favs
+      .map((f) => mediaItems.find((m) => m.id === f.mediaId))
+      .filter(Boolean);
+
+    const actividad = vistas
+      .map((v) => {
+        const item = mediaItems.find((m) => m.id === v.mediaId);
+        if (!item) return null;
+        return {
+          ...item,
+          portada: v.customPoster || item.portada,
+          fechaVisto: v.updatedAt,
+          rating: v.rating,
+          liked: v.liked,
+        };
+      })
+      .filter(Boolean);
+
+    res.json({
+      id: usuario.id,
+      username: usuario.username,
+      avatar: usuario.avatar,
+      miembroDesde: usuario.createdAt,
+      followersCount,
+      followingCount,
+      isSelf: miUserId === usuario.id,
+      isFollowing: miUserId ? !!yaLeSigo : null,
+      favoritos,
+      actividad,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /users/:username:', error);
+    res.status(500).json({ error: 'Error al obtener el perfil' });
+  }
+});
+
+// --- PELÍCULAS/SERIES/JUEGOS VISTOS DE UN USUARIO (público, sin requireAuth) ---
+// Igual que GET /media/watched, pero busca al usuario por :username de la URL
+// en vez de por el token de quien pregunta, y admite filtrar por ?tipo=
+// (PELICULA, SERIE, VIDEOJUEGO...) para las pestañas del perfil público
+// (Films, Series, Played...).
+app.get('/users/:username/watched', async (req, res) => {
+  try {
+    const username = req.params.username;
+    const tipo = req.query.tipo; // opcional
+
+    const usuario = await prisma.user.findFirst({
+      where: { username: { equals: username, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const entries = await prisma.userMedia.findMany({
+      where: { userId: usuario.id, watched: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const mediaIds = entries.map((e) => e.mediaId);
+    const mediaItems = await prisma.media.findMany({
+      where: {
+        id: { in: mediaIds },
+        ...(tipo ? { tipo } : {}),
+      },
+    });
+
+    const resultado = entries
+      .map((e) => {
+        const item = mediaItems.find((m) => m.id === e.mediaId);
+        if (!item) return null;
+        return {
+          ...item,
+          portada: e.customPoster || item.portada,
+          backdrop: e.customBackdrop || item.backdrop,
+          fechaVisto: e.updatedAt,
+          rating: e.rating,
+          liked: e.liked,
+        };
+      })
+      .filter(Boolean);
+
+    res.json(resultado);
+  } catch (error) {
+    console.error('ERROR EN GET /users/:username/watched:', error);
+    res.status(500).json({ error: 'Error al obtener las vistas del usuario' });
+  }
+});
+
 // --- MIS PELÍCULAS FAVORITAS (máximo 3, ordenadas) ---
 app.get('/favorites', requireAuth, async (req, res) => {
   try {

@@ -46,6 +46,22 @@ model User {
   createdAt DateTime @default(now())
   gameLogs  GameLog[]
   watchLogs WatchLog[]
+  siguiendo  Follow[] @relation("Siguiendo")  // a quién sigo yo (yo soy followerId)
+  seguidores Follow[] @relation("Seguidores") // quién me sigue a mí (yo soy followingId)
+}
+
+// --- SEGUIR USUARIOS ("Friends") ---
+// Directo, sin petición/aceptación (como Twitter/Letterboxd, no como Facebook).
+model Follow {
+  id          Int      @id @default(autoincrement())
+  followerId  Int // quien sigue
+  followingId Int // a quien se sigue
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("Siguiendo", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("Seguidores", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId]) // no puedes seguir dos veces al mismo usuario
 }
 
 model UserMedia {

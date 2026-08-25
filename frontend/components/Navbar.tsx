@@ -56,11 +56,11 @@ export default function Navbar() {
 const menuLinks = [
   { label: 'Home', href: '/' },
   { label: 'Profile', href: '/perfil' },
-  { label: 'Films', href: '/perfil/peliculas' },
+  { label: 'Films', href: '/perfil/movies' },
   { label: 'Watchlist', href: '/perfil/watchlist' },
   { label: 'Lists', href: '/perfil/lists' },
   { label: 'Likes', href: '/perfil/likes' },
-  { label: 'Amigos', href: '/perfil/amigos' },
+  { label: 'Friends', href: '/perfil/friends' },
 ];
 
   return (
@@ -97,7 +97,7 @@ const menuLinks = [
                   {peliculasOpen && (
                     <div className="absolute left-0 top-full pt-2 w-40 z-50">
                       <div className="bg-[#2c3440] rounded-md shadow-2xl border border-gray-700 py-2">
-                        <Link href="/perfil/peliculas" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Films</Link>
+                        <Link href="/perfil/movies" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Films</Link>
                         <Link href="/perfil/watchlist" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Watchlist</Link>
                         <Link href="/perfil/likes" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Likes</Link>
                       </div>
@@ -105,7 +105,7 @@ const menuLinks = [
                   )}
                 </div>
                 <Link href="/series" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Series</Link>
-                <Link href="/comics" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Books</Link>
+                <Link href="/books" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Books</Link>
                 <div
                   className="relative group"
                   onMouseEnter={() => setJuegosOpen(true)}
@@ -117,7 +117,7 @@ const menuLinks = [
                   {juegosOpen && (
                     <div className="absolute left-0 top-full pt-2 w-40 z-50">
                       <div className="bg-[#2c3440] rounded-md shadow-2xl border border-gray-700 py-2">
-                        <Link href="/perfil/juegos" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Played</Link>
+                        <Link href="/perfil/games" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Played</Link>
                         <Link href="/perfil/watchlist" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Watchlist</Link>
                         <Link href="/perfil/likes" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Likes</Link>
                       </div>
