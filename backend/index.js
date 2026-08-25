@@ -3449,8 +3449,31 @@ app.get('/users/:username', async (req, res) => {
     const todosLosMediaIds = [...new Set([...mediaIdsFavoritos, ...mediaIdsVistas])];
     const mediaItems = await prisma.media.findMany({ where: { id: { in: todosLosMediaIds } } });
 
+    // Favorite no guarda carátula personalizada (eso vive en UserMedia), así
+    // que sin esto Favorites siempre mostraba la carátula compartida por
+    // defecto aunque el dueño del perfil hubiera elegido otra — a diferencia
+    // de Recent activity, que sí la aplica porque viene directamente de
+    // UserMedia. Solo hace falta pedir la de los favoritos (los de
+    // "actividad" ya vienen con la suya propia en el objeto "vistas").
+    const personalizacionesFavoritos = mediaIdsFavoritos.length > 0
+      ? await prisma.userMedia.findMany({
+          where: { userId: usuario.id, mediaId: { in: mediaIdsFavoritos } },
+          select: { mediaId: true, customPoster: true, customBackdrop: true },
+        })
+      : [];
+    const personalizacionPorMediaId = new Map(personalizacionesFavoritos.map((p) => [p.mediaId, p]));
+
     const favoritos = favs
-      .map((f) => mediaItems.find((m) => m.id === f.mediaId))
+      .map((f) => {
+        const item = mediaItems.find((m) => m.id === f.mediaId);
+        if (!item) return null;
+        const mia = personalizacionPorMediaId.get(f.mediaId);
+        return {
+          ...item,
+          portada: mia?.customPoster || item.portada,
+          backdrop: mia?.customBackdrop || item.backdrop,
+        };
+      })
       .filter(Boolean);
 
     const actividad = vistas
