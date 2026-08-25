@@ -3574,11 +3574,41 @@ app.post('/auth/me/reset-custom-posters', requireAuth, async (req, res) => {
 // igual que si hubieras elegido esa carátula a mano con "Cambiar carátula /
 // banner". Así cada usuario puede arreglar su propia vista sin afectar a
 // los demás ni necesitar permisos especiales.
+// --- PONER EN INGLÉS SOLO LAS CARÁTULAS/BANNERS DE PELÍCULAS Y SERIES QUE
+// YA TENÍAS PERSONALIZADAS ---
+// Disponible para cualquier usuario (no solo admin), porque a diferencia de
+// /admin/media/refresh-covers-english NO toca Media.portada/backdrop
+// (el valor compartido de todos) — solo actualiza TU personalización que ya
+// existía en UserMedia.customPoster/customBackdrop. No crea personalización
+// nueva en títulos que nunca hayas tocado: esos siguen usando el valor
+// compartido por defecto (que se arregla con el botón de admin o el script,
+// no con este).
 app.post('/auth/me/set-covers-english', requireAuth, async (req, res) => {
   try {
     const apiKey = process.env.TMDB_API_KEY;
+
+    // Solo tus filas de UserMedia que YA tienen alguna personalización.
+    const personalizadas = await prisma.userMedia.findMany({
+      where: {
+        userId: req.userId,
+        OR: [{ customPoster: { not: null } }, { customBackdrop: { not: null } }],
+      },
+      select: { mediaId: true, customPoster: true, customBackdrop: true },
+    });
+
+    if (personalizadas.length === 0) {
+      return res.json({ ok: true, total: 0, actualizados: 0, sinCambios: 0, fallidos: 0 });
+    }
+
+    // De esas, solo las que son película/serie con tmdbId — a un juego con
+    // carátula personalizada de SteamGridDB no le toca este arreglo, no es
+    // un problema de idioma de TMDB.
     const items = await prisma.media.findMany({
-      where: { tipo: { in: ['PELICULA', 'SERIE'] }, tmdbId: { not: null } },
+      where: {
+        id: { in: personalizadas.map((p) => p.mediaId) },
+        tipo: { in: ['PELICULA', 'SERIE'] },
+        tmdbId: { not: null },
+      },
       select: { id: true, tmdbId: true, tipo: true },
     });
 
@@ -3590,27 +3620,29 @@ app.post('/auth/me/set-covers-english', requireAuth, async (req, res) => {
     // evitar disparar cientos de peticiones a TMDB de golpe.
     for (const item of items) {
       try {
+        const personalizacion = personalizadas.find((p) => p.mediaId === item.id);
         const endpointTmdb = item.tipo === 'SERIE' ? 'tv' : 'movie';
         const resp = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${item.tmdbId}?api_key=${apiKey}&language=en-US`);
         const data = await resp.json();
         if (!data || data.status_code) { fallidos++; continue; }
 
-        const customPoster = data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null;
-        const customBackdrop = data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null;
+        // Solo se actualiza el campo que YA tenías personalizado — si solo
+        // habías cambiado la carátula pero no el banner, esto no le añade un
+        // banner personalizado nuevo que nunca elegiste.
+        const nuevoCustomPoster = personalizacion.customPoster && data.poster_path
+          ? `https://image.tmdb.org/t/p/w500${data.poster_path}`
+          : null;
+        const nuevoCustomBackdrop = personalizacion.customBackdrop && data.backdrop_path
+          ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}`
+          : null;
 
-        if (!customPoster && !customBackdrop) { sinCambios++; continue; }
+        if (!nuevoCustomPoster && !nuevoCustomBackdrop) { sinCambios++; continue; }
 
-        await prisma.userMedia.upsert({
+        await prisma.userMedia.update({
           where: { userId_mediaId: { userId: req.userId, mediaId: item.id } },
-          update: {
-            ...(customPoster ? { customPoster } : {}),
-            ...(customBackdrop ? { customBackdrop } : {}),
-          },
-          create: {
-            userId: req.userId,
-            mediaId: item.id,
-            ...(customPoster ? { customPoster } : {}),
-            ...(customBackdrop ? { customBackdrop } : {}),
+          data: {
+            ...(nuevoCustomPoster ? { customPoster: nuevoCustomPoster } : {}),
+            ...(nuevoCustomBackdrop ? { customBackdrop: nuevoCustomBackdrop } : {}),
           },
         });
         actualizados++;

@@ -18,10 +18,6 @@ export default function Settings() {
   const [reseteando, setReseteando] = useState(false);
   const [resultadoReset, setResultadoReset] = useState<string | null>(null);
   const [confirmandoReset, setConfirmandoReset] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [refrescando, setRefrescando] = useState(false);
-  const [resultadoRefresh, setResultadoRefresh] = useState<string | null>(null);
-  const [confirmandoRefresh, setConfirmandoRefresh] = useState(false);
   const [confirmandoBorrado, setConfirmandoBorrado] = useState(false);
   const [usernameConfirmacion, setUsernameConfirmacion] = useState('');
   const [borrandoCuenta, setBorrandoCuenta] = useState(false);
@@ -39,7 +35,6 @@ export default function Settings() {
       .then((data) => {
         setUsername(data.username);
         setAvatarPreview(data.avatar || null);
-        setIsAdmin(!!data.isAdmin);
       })
       .catch(() => { });
 
@@ -100,44 +95,20 @@ export default function Settings() {
     setReseteando(true);
     setResultadoReset(null);
     try {
-      const res = await fetch('http://localhost:3001/auth/me/set-covers-english', {
+      const res = await fetch('http://localhost:3001/auth/me/reset-custom-posters', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       setResultadoReset(
         res.ok
-          ? `Done — ${data.actualizados} set to English, ${data.sinCambios} unchanged, ${data.fallidos} failed (of ${data.total} total).`
+          ? `Done — ${data.actualizados} custom cover${data.actualizados === 1 ? '' : 's'} reset.`
           : 'Something went wrong, please try again.'
       );
     } catch {
       setResultadoReset('Something went wrong, please try again.');
     }
     setReseteando(false);
-  };
-
-  const refrescarCaratulasIngles = async () => {
-    const token = localStorage.getItem('token');
-    if (!token || refrescando) return;
-
-    setConfirmandoRefresh(false);
-    setRefrescando(true);
-    setResultadoRefresh(null);
-    try {
-      const res = await fetch('http://localhost:3001/admin/media/refresh-covers-english', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      setResultadoRefresh(
-        res.ok
-          ? `Done — ${data.actualizados} updated, ${data.sinCambios} unchanged, ${data.fallidos} failed (of ${data.total} total).`
-          : 'Something went wrong, please try again.'
-      );
-    } catch {
-      setResultadoRefresh('Something went wrong, please try again.');
-    }
-    setRefrescando(false);
   };
 
   const borrarCuenta = async () => {
@@ -264,36 +235,19 @@ export default function Settings() {
             <SettingsIdiomaRegion />
 
             <div className="mt-8 pt-6 border-t border-gray-800">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Covers</h3>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Custom covers</h3>
               <p className="text-gray-500 text-sm mb-3">
-                Set every movie and series poster/banner in your catalog to English, as your own personal covers. This only changes what you see — it doesn't affect anyone else's account.
+                Remove every custom poster and banner you've personally set across your whole catalog, and go back to the original default cover for everything.
               </p>
               <button
                 onClick={() => setConfirmandoReset(true)}
                 disabled={reseteando}
-                className="bg-blue-900/40 hover:bg-blue-900/60 disabled:opacity-50 text-blue-300 hover:text-blue-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
+                className="bg-red-900/40 hover:bg-red-900/60 disabled:opacity-50 text-red-300 hover:text-red-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
               >
-                {reseteando ? 'Working... this can take a while' : 'Set all my covers to English'}
+                {reseteando ? 'Resetting...' : 'Reset all custom covers'}
               </button>
               {resultadoReset && <p className="text-gray-400 text-sm mt-2">{resultadoReset}</p>}
             </div>
-
-            {isAdmin && (
-              <div className="mt-8 pt-6 border-t border-gray-800">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Admin: default covers for everyone</h3>
-                <p className="text-gray-500 text-sm mb-3">
-                  Change the shared default poster/banner (what any account sees before personalizing anything, including brand new accounts) to English, for every saved movie and series. This is different from the button above — that one only changes your own view.
-                </p>
-                <button
-                  onClick={() => setConfirmandoRefresh(true)}
-                  disabled={refrescando}
-                  className="bg-red-900/40 hover:bg-red-900/60 disabled:opacity-50 text-red-300 hover:text-red-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
-                >
-                  {refrescando ? 'Refreshing... this can take a while' : 'Refresh default covers for everyone'}
-                </button>
-                {resultadoRefresh && <p className="text-gray-400 text-sm mt-2">{resultadoRefresh}</p>}
-              </div>
-            )}
 
             <p className="text-gray-500 text-sm mt-8 pt-6 border-t border-gray-800">
               <Link href="/perfil/settings" className="underline">Change email/password</Link> — not implemented yet.
@@ -344,9 +298,9 @@ export default function Settings() {
       {confirmandoReset && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-[#1c2228] border border-gray-700 rounded-lg p-6 max-w-md w-full shadow-2xl">
-            <h3 className="text-lg font-bold text-white mb-2">Set all covers to English?</h3>
+            <h3 className="text-lg font-bold text-white mb-2">Reset all custom covers?</h3>
             <p className="text-gray-400 text-sm mb-6">
-              This sets the poster and banner of every movie and series in your catalog to their English version, saved as your own personal covers. It can take a while with a large catalog. It only affects your account — nobody else's covers change.
+              You're about to remove every custom poster and banner you've set, on every movie, series, game or book. Everything will go back to the original default cover. This won't remove anything from your catalog — only your custom covers.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -357,33 +311,9 @@ export default function Settings() {
               </button>
               <button
                 onClick={resetearCaratulas}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold transition cursor-pointer"
-              >
-                Yes, set to English
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {confirmandoRefresh && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#1c2228] border border-gray-700 rounded-lg p-6 max-w-md w-full shadow-2xl">
-            <h3 className="text-lg font-bold text-white mb-2">Refresh default covers for everyone?</h3>
-            <p className="text-gray-400 text-sm mb-6">
-              This re-fetches the shared default poster and banner (in English) for every saved movie and series, for ALL users and any future new account. It can take a while with a large catalog, and won't touch anyone's personal custom covers. Continue?
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setConfirmandoRefresh(false)}
-                className="px-4 py-2 rounded text-sm font-semibold text-gray-300 hover:text-white transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={refrescarCaratulasIngles}
                 className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded text-sm font-bold transition cursor-pointer"
               >
-                Yes, refresh for everyone
+                Yes, reset
               </button>
             </div>
           </div>
