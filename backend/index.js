@@ -1967,6 +1967,58 @@ app.post('/admin/curated-collection-items', requireAuth, requireAdmin, async (re
 // exactamente lo mismo que pasaría si esta saga no se hubiera visto nunca
 // antes. Usa la MISMA función que la siembra inicial (calcularColeccionDesdeIgdb),
 // así que nunca se puede desincronizar de cómo se sembraría hoy.
+// --- ADMIN: recalcular en inglés la carátula/banner COMPARTIDOS (Media.portada
+// / Media.backdrop) de todas las películas y series ya guardadas. ---
+// Solo toca el valor por defecto compartido — la personalización de cada
+// usuario (UserMedia.customPoster/customBackdrop) sigue funcionando igual y
+// puede seguir siendo de cualquier región, esto no la afecta ni la borra.
+app.post('/admin/media/refresh-covers-english', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const apiKey = process.env.TMDB_API_KEY;
+    const items = await prisma.media.findMany({
+      where: { tipo: { in: ['PELICULA', 'SERIE'] }, tmdbId: { not: null } },
+      select: { id: true, tmdbId: true, tipo: true },
+    });
+
+    let actualizados = 0;
+    let sinCambios = 0;
+    let fallidos = 0;
+
+    // Secuencial, no en paralelo: con catálogos grandes, disparar cientos de
+    // peticiones a TMDB de golpe puede toparse con su límite de peticiones,
+    // igual que ya pasaba con IGDB antes de meterle una cola (ver fetchIgdb).
+    for (const item of items) {
+      try {
+        const endpointTmdb = item.tipo === 'SERIE' ? 'tv' : 'movie';
+        const resp = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${item.tmdbId}?api_key=${apiKey}&language=en-US`);
+        const data = await resp.json();
+        if (!data || data.status_code) { fallidos++; continue; }
+
+        const nuevaPortada = data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null;
+        const nuevoBackdrop = data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null;
+
+        if (!nuevaPortada && !nuevoBackdrop) { sinCambios++; continue; }
+
+        await prisma.media.update({
+          where: { id: item.id },
+          data: {
+            ...(nuevaPortada ? { portada: nuevaPortada } : {}),
+            ...(nuevoBackdrop ? { backdrop: nuevoBackdrop } : {}),
+          },
+        });
+        actualizados++;
+      } catch (e) {
+        fallidos++;
+      }
+    }
+
+    res.json({ ok: true, total: items.length, actualizados, sinCambios, fallidos });
+  } catch (error) {
+    console.error('ERROR EN POST /admin/media/refresh-covers-english:', error);
+    res.status(500).json({ error: 'Error al recalcular las carátulas' });
+  }
+});
+
 app.post('/admin/curated-collections/:collectionId/reset', requireAuth, requireAdmin, async (req, res) => {
   try {
     const collectionId = parseInt(req.params.collectionId, 10);
@@ -2018,6 +2070,52 @@ function getLang(req) {
 }
 function getRegion(req) {
   return req.query.region || 'ES';
+}
+
+// --- CARÁTULAS/BANNERS DE CATÁLOGO SIEMPRE EN INGLÉS, AUNQUE EL TÍTULO/
+// SINOPSIS RESPETEN TU IDIOMA ---
+// TMDB devuelve una imagen distinta según el "language" que le pidas (a
+// veces con el título traducido dibujado en la propia carátula) — mismo
+// motivo que ya se corrigió en POST /media/tmdb, pero aquí aplicado a las
+// REJILLAS de catálogo (lobby, populares, año, búsqueda...), que hasta ahora
+// seguían mostrando la carátula en tu idioma porque pedían la lista entera
+// (título+imagen) de una sola vez en ese idioma.
+//
+// urlOriginal: la URL exacta ya usada para pedir la lista (con su
+// "language=xx-XX"). Se reconstruye la misma URL pero en inglés, se pide
+// también, y se le injerta poster_path/backdrop_path a cada resultado por
+// id — sin tocar título/overview/lo demás, que se queda en tu idioma.
+async function conCaratulasIngles(urlOriginal, resultadosOriginales) {
+  if (!resultadosOriginales || resultadosOriginales.length === 0) return resultadosOriginales;
+  if (!/language=/.test(urlOriginal)) return resultadosOriginales;
+
+  const urlIngles = urlOriginal.replace(/language=[^&]+/, 'language=en-US');
+  if (urlIngles === urlOriginal) return resultadosOriginales; // ya se pidió en inglés, nada que hacer
+
+  try {
+    const respIngles = await fetch(urlIngles);
+    const dataIngles = await respIngles.json();
+    const listaIngles = dataIngles.results || (Array.isArray(dataIngles) ? dataIngles : []);
+    // Clave de emparejamiento: id+media_type si el resultado lo trae (caso
+    // del buscador multi, que mezcla película/serie/persona y podría tener
+    // ids numéricos coincidentes entre tipos distintos); si no lo trae
+    // (discover/movie, que es solo películas), basta con el id.
+    const clave = (m) => (m.media_type ? `${m.media_type}-${m.id}` : String(m.id));
+    const porClave = new Map(listaIngles.map((m) => [clave(m), m]));
+
+    return resultadosOriginales.map((item) => {
+      const ingles = porClave.get(clave(item));
+      if (!ingles) return item;
+      return {
+        ...item,
+        poster_path: ingles.poster_path || item.poster_path,
+        backdrop_path: ingles.backdrop_path || item.backdrop_path,
+      };
+    });
+  } catch (e) {
+    console.error('No se pudieron obtener carátulas en inglés, se dejan las del idioma pedido:', e.message);
+    return resultadosOriginales;
+  }
 }
 
 // --- RUTA PARA OBTENER TODOS LOS MEDIOS ---
@@ -2115,16 +2213,20 @@ app.get('/tmdb/buscar', async (req, res) => {
 
     const primeraRes = await fetch(urlPagina(1));
     const primeraData = await primeraRes.json();
-    let resultados = primeraData.results || [];
+    let resultados = await conCaratulasIngles(urlPagina(1), primeraData.results || []);
     const totalPaginas = Math.min(primeraData.total_pages || 1, TOPE_PAGINAS);
 
     if (totalPaginas > 1) {
       const restoPaginas = await Promise.all(
-        Array.from({ length: totalPaginas - 1 }, (_, i) =>
-          fetch(urlPagina(i + 2)).then((r) => r.json()).catch(() => ({ results: [] }))
-        )
+        Array.from({ length: totalPaginas - 1 }, (_, i) => {
+          const p = i + 2;
+          return fetch(urlPagina(p))
+            .then((r) => r.json())
+            .then((d) => conCaratulasIngles(urlPagina(p), d.results || []))
+            .catch(() => []);
+        })
       );
-      for (const pagina of restoPaginas) resultados = resultados.concat(pagina.results || []);
+      for (const pagina of restoPaginas) resultados = resultados.concat(pagina);
     }
 
     // TMDB puede devolver el mismo título en más de una página (los
@@ -2518,9 +2620,11 @@ function construirFiltrosDiscoverMovie(query) {
 app.get('/tmdb/now_playing', async (req, res) => {
   try {
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/movie/now_playing?api_key=${apiKey}&language=${getLang(req)}&page=1`);
+    const url = `https://api.themoviedb.org/3/movie/now_playing?api_key=${apiKey}&language=${getLang(req)}&page=1`;
+    const response = await fetch(url);
     const data = await response.json();
-    res.json(data.results);
+    const resultado = await conCaratulasIngles(url, data.results);
+    res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: "Error" });
   }
@@ -2529,9 +2633,11 @@ app.get('/tmdb/now_playing', async (req, res) => {
 app.get('/tmdb/popular', async (req, res) => {
   try {
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/movie/popular?api_key=${apiKey}&language=${getLang(req)}&page=1`);
+    const url = `https://api.themoviedb.org/3/movie/popular?api_key=${apiKey}&language=${getLang(req)}&page=1`;
+    const response = await fetch(url);
     const data = await response.json();
-    const resultado = await mezclarCustomPosters(data.results, getUserIdOpcional(req));
+    const conIngles = await conCaratulasIngles(url, data.results);
+    const resultado = await mezclarCustomPosters(conIngles, getUserIdOpcional(req));
     res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: "Error" });
@@ -2542,9 +2648,11 @@ app.get('/tmdb/popular', async (req, res) => {
 app.get('/tmdb/popular-historico', async (req, res) => {
   try {
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&sort_by=vote_count.desc&page=1`);
+    const url = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&sort_by=vote_count.desc&page=1`;
+    const response = await fetch(url);
     const data = await response.json();
-    const resultado = await mezclarCustomPosters(data.results || [], getUserIdOpcional(req));
+    const conIngles = await conCaratulasIngles(url, data.results || []);
+    const resultado = await mezclarCustomPosters(conIngles, getUserIdOpcional(req));
     res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: "Error al obtener las populares históricas" });
@@ -2570,9 +2678,10 @@ app.get('/tmdb/popular-historico/page/:page', async (req, res) => {
     let combined = [];
 
     for (let i = startTmdbPage; i <= endTmdbPage; i++) {
-      const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&sort_by=vote_count.${orden}&page=${i}${paramsFiltro}`);
+      const url = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&sort_by=vote_count.${orden}&page=${i}${paramsFiltro}`;
+      const response = await fetch(url);
       const data = await response.json();
-      if (data.results) combined.push(...data.results);
+      if (data.results) combined.push(...(await conCaratulasIngles(url, data.results)));
     }
 
     const offsetDentroDeCombined = startIndex - (startTmdbPage - 1) * 20;
@@ -2590,9 +2699,11 @@ app.get('/tmdb/year/:year', async (req, res) => {
   try {
     const { year } = req.params;
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&primary_release_year=${year}&sort_by=popularity.desc&page=1`);
+    const url = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&primary_release_year=${year}&sort_by=popularity.desc&page=1`;
+    const response = await fetch(url);
     const data = await response.json();
-    const resultado = await mezclarCustomPosters(data.results || [], getUserIdOpcional(req));
+    const conIngles = await conCaratulasIngles(url, data.results || []);
+    const resultado = await mezclarCustomPosters(conIngles, getUserIdOpcional(req));
     res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: "Error al obtener películas" });
@@ -2628,11 +2739,12 @@ app.get('/tmdb/year/:year/page/:page', async (req, res) => {
     let combined = [];
 
     for (let i = startTmdbPage; i <= endTmdbPage; i++) {
-      const response = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&primary_release_year=${year}&sort_by=popularity.${orden}&page=${i}${paramsFiltro}`);
+      const url = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${getLang(req)}&primary_release_year=${year}&sort_by=popularity.${orden}&page=${i}${paramsFiltro}`;
+      const response = await fetch(url);
       const data = await response.json();
       // LOG TEMPORAL DE DIAGNÓSTICO — bórralo junto con el de arriba
       if (!data.results) console.log('[DEBUG movies year] TMDB respondió sin resultados:', JSON.stringify(data));
-      if (data.results) combined.push(...data.results);
+      if (data.results) combined.push(...(await conCaratulasIngles(url, data.results)));
     }
 
     const uniqueCombined = Array.from(new Map(combined.map(m => [m.id, m])).values());
@@ -3376,6 +3488,44 @@ app.get('/auth/me', requireAuth, async (req, res) => {
 });
 
 // --- ACTUALIZAR MI AVATAR (recibe la imagen ya recortada, en base64) ---
+// --- BORRAR MI CUENTA Y TODOS MIS DATOS (irreversible) ---
+// Requiere confirmar escribiendo tu propio username exacto en el body — una
+// protección extra aparte del modal del frontend, para que esta ruta nunca
+// se pueda disparar por accidente (ni siquiera con el token robado sin más).
+//
+// Orden de borrado: todo lo que "cuelga" de tu userId sin onDelete: Cascade
+// en el schema (GameLog, WatchLog, UserMedia, Favorite, ListItem/List) hay
+// que borrarlo A MANO antes que la fila User — si no, Prisma no te deja
+// borrar el User por la relación pendiente. Follow SÍ tiene onDelete:
+// Cascade configurado en el schema, así que ese se limpia solo al borrar
+// User, no hace falta tocarlo aquí.
+app.delete('/auth/me', requireAuth, async (req, res) => {
+  try {
+    const { username } = req.body;
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    if (username !== user.username) {
+      return res.status(400).json({ error: 'El nombre de usuario no coincide' });
+    }
+
+    await prisma.$transaction([
+      prisma.gameLog.deleteMany({ where: { userId: req.userId } }),
+      prisma.watchLog.deleteMany({ where: { userId: req.userId } }),
+      prisma.userMedia.deleteMany({ where: { userId: req.userId } }),
+      prisma.favorite.deleteMany({ where: { userId: req.userId } }),
+      prisma.listItem.deleteMany({ where: { list: { userId: req.userId } } }),
+      prisma.list.deleteMany({ where: { userId: req.userId } }),
+      prisma.user.delete({ where: { id: req.userId } }),
+    ]);
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN DELETE /auth/me:', error);
+    res.status(500).json({ error: 'Error al eliminar la cuenta' });
+  }
+});
+
 app.patch('/auth/me/avatar', requireAuth, async (req, res) => {
   try {
     const { avatar } = req.body;
@@ -3413,6 +3563,66 @@ app.post('/auth/me/reset-custom-posters', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('ERROR EN POST /auth/me/reset-custom-posters:', error);
     res.status(500).json({ error: 'Error al resetear las carátulas personalizadas' });
+  }
+});
+
+// --- PONER MIS CARÁTULAS/BANNERS DE PELÍCULAS Y SERIES EN INGLÉS ---
+// Disponible para cualquier usuario (no solo admin), porque a diferencia de
+// /admin/media/refresh-covers-english NO toca Media.portada/backdrop
+// (el valor compartido de todos) — guarda el resultado como TU propia
+// personalización en UserMedia.customPoster/customBackdrop, exactamente
+// igual que si hubieras elegido esa carátula a mano con "Cambiar carátula /
+// banner". Así cada usuario puede arreglar su propia vista sin afectar a
+// los demás ni necesitar permisos especiales.
+app.post('/auth/me/set-covers-english', requireAuth, async (req, res) => {
+  try {
+    const apiKey = process.env.TMDB_API_KEY;
+    const items = await prisma.media.findMany({
+      where: { tipo: { in: ['PELICULA', 'SERIE'] }, tmdbId: { not: null } },
+      select: { id: true, tmdbId: true, tipo: true },
+    });
+
+    let actualizados = 0;
+    let sinCambios = 0;
+    let fallidos = 0;
+
+    // Secuencial, no en paralelo — mismo motivo que en el endpoint de admin:
+    // evitar disparar cientos de peticiones a TMDB de golpe.
+    for (const item of items) {
+      try {
+        const endpointTmdb = item.tipo === 'SERIE' ? 'tv' : 'movie';
+        const resp = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${item.tmdbId}?api_key=${apiKey}&language=en-US`);
+        const data = await resp.json();
+        if (!data || data.status_code) { fallidos++; continue; }
+
+        const customPoster = data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null;
+        const customBackdrop = data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null;
+
+        if (!customPoster && !customBackdrop) { sinCambios++; continue; }
+
+        await prisma.userMedia.upsert({
+          where: { userId_mediaId: { userId: req.userId, mediaId: item.id } },
+          update: {
+            ...(customPoster ? { customPoster } : {}),
+            ...(customBackdrop ? { customBackdrop } : {}),
+          },
+          create: {
+            userId: req.userId,
+            mediaId: item.id,
+            ...(customPoster ? { customPoster } : {}),
+            ...(customBackdrop ? { customBackdrop } : {}),
+          },
+        });
+        actualizados++;
+      } catch (e) {
+        fallidos++;
+      }
+    }
+
+    res.json({ ok: true, total: items.length, actualizados, sinCambios, fallidos });
+  } catch (error) {
+    console.error('ERROR EN POST /auth/me/set-covers-english:', error);
+    res.status(500).json({ error: 'Error al poner las carátulas en inglés' });
   }
 });
 
