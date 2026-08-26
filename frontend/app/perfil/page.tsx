@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { urlFicha } from '@/lib/slug';
 
@@ -30,16 +30,11 @@ export default function Perfil() {
   const [avatar, setAvatar] = useState<string | null>(null);
   const [logueado, setLogueado] = useState(false);
   const [copiado, setCopiado] = useState(false);
-  const jugandoAhoraRef = useRef<HTMLDivElement>(null);
-
-  // Desplaza el carrusel de Currently Playing una "página" (más o menos el
-  // ancho visible) hacia la izquierda o la derecha, con scroll suave.
-  const desplazarJugandoAhora = (direccion: 'izq' | 'der') => {
-    const el = jugandoAhoraRef.current;
-    if (!el) return;
-    const distancia = el.clientWidth * 0.9;
-    el.scrollBy({ left: direccion === 'izq' ? -distancia : distancia, behavior: 'smooth' });
-  };
+  // Igual que CarruselJuegos en GameTabs.tsx: en vez de scroll continuo (que
+  // cortaba la última carátula a medias), se muestra un bloque fijo de
+  // carátulas COMPLETAS y las flechas cambian de bloque entero.
+  const JUGANDO_AHORA_VISIBLES = 7;
+  const [jugandoAhoraInicio, setJugandoAhoraInicio] = useState(0);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -210,33 +205,32 @@ export default function Perfil() {
         {jugandoAhora.length > 0 && (
           <section>
             <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Currently Playing</h2>
-            <div className="relative group/carousel">
-              <div
-                ref={jugandoAhoraRef}
-                className="flex gap-4 overflow-x-auto pb-2 scroll-smooth"
-                style={{ scrollbarWidth: 'none' }}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setJugandoAhoraInicio((i) => Math.max(0, i - JUGANDO_AHORA_VISIBLES))}
+                disabled={jugandoAhoraInicio === 0}
+                aria-label="Scroll left"
+                className="flex-shrink-0 text-2xl text-gray-500 hover:text-white disabled:opacity-20 disabled:hover:text-gray-500 transition cursor-pointer px-1"
               >
-                {jugandoAhora.map((item) => renderCard(item, false))}
+                ‹
+              </button>
+
+              <div className="flex gap-4 flex-1">
+                {jugandoAhora
+                  .slice(jugandoAhoraInicio, jugandoAhoraInicio + JUGANDO_AHORA_VISIBLES)
+                  .map((item) => renderCard(item, false))}
               </div>
 
-              {jugandoAhora.length > 7 && (
-                <>
-                  <button
-                    onClick={() => desplazarJugandoAhora('izq')}
-                    aria-label="Scroll left"
-                    className="absolute left-0 top-0 bottom-2 flex items-center px-1 bg-gradient-to-r from-[#14181c] via-[#14181c]/90 to-transparent opacity-0 group-hover/carousel:opacity-100 transition cursor-pointer"
-                  >
-                    <span className="text-2xl text-white">‹</span>
-                  </button>
-                  <button
-                    onClick={() => desplazarJugandoAhora('der')}
-                    aria-label="Scroll right"
-                    className="absolute right-0 top-0 bottom-2 flex items-center px-1 bg-gradient-to-l from-[#14181c] via-[#14181c]/90 to-transparent opacity-0 group-hover/carousel:opacity-100 transition cursor-pointer"
-                  >
-                    <span className="text-2xl text-white">›</span>
-                  </button>
-                </>
-              )}
+              <button
+                onClick={() =>
+                  setJugandoAhoraInicio((i) => Math.min(jugandoAhora.length - JUGANDO_AHORA_VISIBLES, i + JUGANDO_AHORA_VISIBLES))
+                }
+                disabled={jugandoAhoraInicio + JUGANDO_AHORA_VISIBLES >= jugandoAhora.length}
+                aria-label="Scroll right"
+                className="flex-shrink-0 text-2xl text-gray-500 hover:text-white disabled:opacity-20 disabled:hover:text-gray-500 transition cursor-pointer px-1"
+              >
+                ›
+              </button>
             </div>
           </section>
         )}

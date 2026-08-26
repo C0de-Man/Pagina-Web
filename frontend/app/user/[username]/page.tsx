@@ -44,6 +44,8 @@ export default function PerfilPublicoPage() {
   const [cargando, setCargando] = useState(true);
   const [noEncontrado, setNoEncontrado] = useState(false);
   const [procesandoFollow, setProcesandoFollow] = useState(false);
+  const JUGANDO_AHORA_VISIBLES = 7;
+  const [jugandoAhoraInicio, setJugandoAhoraInicio] = useState(0);
 
   const cargarPerfil = () => {
     const token = localStorage.getItem('token');
@@ -98,16 +100,16 @@ export default function PerfilPublicoPage() {
   };
 
   const renderCard = (item: any, mostrarFooter = false) => (
-    <div key={item.id} className="flex-shrink-0 w-32 md:w-36">
+    <div key={item.id} className="flex-shrink-0 w-28 md:w-32">
       <Link href={urlFicha(item)} className="group relative block">
         {item.portada ? (
           <img
             src={item.portada}
             alt={item.titulo}
-            className="w-32 h-48 md:w-36 md:h-52 object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition duration-300 shadow-lg"
+            className="w-28 h-40 md:w-32 md:h-48 object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition duration-300 shadow-lg"
           />
         ) : (
-          <div className="w-32 h-48 md:w-36 md:h-52 bg-gray-800 rounded-md border border-gray-700 flex items-center justify-center text-xs text-center p-2 group-hover:border-gray-400 transition shadow-lg">
+          <div className="w-28 h-40 md:w-32 md:h-48 bg-gray-800 rounded-md border border-gray-700 flex items-center justify-center text-xs text-center p-2 group-hover:border-gray-400 transition shadow-lg">
             {item.titulo}
           </div>
         )}
@@ -197,7 +199,7 @@ export default function PerfilPublicoPage() {
         <section>
           <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Favorites</h2>
           {perfil.favoritos.length > 0 ? (
-            <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
+            <div className="flex flex-wrap gap-4 pb-2">
               {perfil.favoritos.map((item) => renderCard(item, false))}
             </div>
           ) : (
@@ -210,8 +212,34 @@ export default function PerfilPublicoPage() {
         {perfil.jugandoAhora.length > 0 && (
           <section>
             <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Currently Playing</h2>
-            <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-              {perfil.jugandoAhora.map((item) => renderCard(item, false))}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setJugandoAhoraInicio((i) => Math.max(0, i - JUGANDO_AHORA_VISIBLES))}
+                disabled={jugandoAhoraInicio === 0}
+                aria-label="Scroll left"
+                className="flex-shrink-0 text-2xl text-gray-500 hover:text-white disabled:opacity-20 disabled:hover:text-gray-500 transition cursor-pointer px-1"
+              >
+                ‹
+              </button>
+
+              <div className="flex gap-4 flex-1">
+                {perfil.jugandoAhora
+                  .slice(jugandoAhoraInicio, jugandoAhoraInicio + JUGANDO_AHORA_VISIBLES)
+                  .map((item) => renderCard(item, false))}
+              </div>
+
+              <button
+                onClick={() =>
+                  setJugandoAhoraInicio((i) =>
+                    Math.min(perfil.jugandoAhora.length - JUGANDO_AHORA_VISIBLES, i + JUGANDO_AHORA_VISIBLES)
+                  )
+                }
+                disabled={jugandoAhoraInicio + JUGANDO_AHORA_VISIBLES >= perfil.jugandoAhora.length}
+                aria-label="Scroll right"
+                className="flex-shrink-0 text-2xl text-gray-500 hover:text-white disabled:opacity-20 disabled:hover:text-gray-500 transition cursor-pointer px-1"
+              >
+                ›
+              </button>
             </div>
           </section>
         )}
@@ -219,8 +247,8 @@ export default function PerfilPublicoPage() {
         <section>
           <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Recent activity</h2>
           {perfil.actividad.length > 0 ? (
-            <div className="flex gap-4 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-              {perfil.actividad.map((item) => renderCard(item, true))}
+            <div className="flex flex-wrap gap-4 pb-2">
+              {perfil.actividad.slice(0, 7).map((item) => renderCard(item, true))}
             </div>
           ) : (
             <p className="text-gray-500 text-sm">No activity yet.</p>
