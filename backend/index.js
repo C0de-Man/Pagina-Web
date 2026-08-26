@@ -2524,7 +2524,7 @@ async function construirResenas(userId) {
 
   const personalizaciones = await prisma.userMedia.findMany({
     where: { userId, mediaId: { in: mediaIds } },
-    select: { mediaId: true, customPoster: true, rating: true, liked: true },
+    select: { mediaId: true, customPoster: true, rating: true, liked: true, watchlist: true },
   });
   const persPorMediaId = new Map(personalizaciones.map((p) => [p.mediaId, p]));
 
@@ -2541,6 +2541,7 @@ async function construirResenas(userId) {
         review: w.review,
         rating: pers?.rating ?? null, // nota general de la película (UserMedia), no por log
         liked: pers?.liked ?? false,
+        watchlist: pers?.watchlist ?? false,
         rewatch: w.rewatch,
         fecha: w.fechaVisto,
       };
@@ -2559,7 +2560,16 @@ async function construirResenas(userId) {
         portada: pers?.customPoster || item.portada,
         review: g.review,
         rating: g.rating ?? null, // nota de ESTE log concreto (GameLog sí la guarda por log)
+        liked: pers?.liked ?? false,
+        watchlist: pers?.watchlist ?? false,
         logNombre: g.nombre,
+        plataforma: g.plataforma || null,
+        jugadoEn: g.jugadoEn || null,
+        propiedad: g.propiedad || null,
+        edicion: g.edicion || null,
+        fechaInicio: g.fechaInicio,
+        fechaFin: g.fechaFin,
+        minutosJugados: g.minutosJugados ?? null,
         fecha: g.fechaFin || g.fechaInicio || g.createdAt,
       };
     })

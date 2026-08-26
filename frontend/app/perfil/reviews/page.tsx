@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { urlFicha } from '@/lib/slug';
+import ReviewDetailModal from '@/components/ReviewDetailModal';
 
 function Estrellas({ rating }: { rating: number }) {
   const sobreCinco = rating / 2;
@@ -29,6 +30,7 @@ export default function MisResenas() {
   const [resenas, setResenas] = useState<any[]>([]);
   const [cargando, setCargando] = useState(true);
   const [logueado, setLogueado] = useState(false);
+  const [resenaAbierta, setResenaAbierta] = useState<any>(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -66,8 +68,12 @@ export default function MisResenas() {
         ) : (
           <div className="space-y-6">
             {resenas.map((r) => (
-              <div key={r.logId} className="flex gap-4 bg-[#1c2228] border border-gray-800 rounded-lg p-4">
-                <Link href={urlFicha(r)} className="flex-shrink-0 w-20">
+              <div
+                key={r.logId}
+                onClick={() => setResenaAbierta(r)}
+                className="flex gap-4 bg-[#1c2228] border border-gray-800 rounded-lg p-4 cursor-pointer hover:border-gray-600 transition"
+              >
+                <Link href={urlFicha(r)} onClick={(e) => e.stopPropagation()} className="flex-shrink-0 w-20">
                   {r.portada ? (
                     <img
                       src={r.portada}
@@ -83,7 +89,7 @@ export default function MisResenas() {
 
                 <div className="flex-grow min-w-0">
                   <div className="flex flex-wrap items-baseline gap-2 mb-1">
-                    <Link href={urlFicha(r)} className="font-bold text-white hover:underline">
+                    <Link href={urlFicha(r)} onClick={(e) => e.stopPropagation()} className="font-bold text-white hover:underline">
                       {r.titulo}
                     </Link>
                     <span className="text-gray-500 text-sm">{r.anio}</span>
@@ -111,6 +117,8 @@ export default function MisResenas() {
           </div>
         )}
       </div>
+
+      <ReviewDetailModal resena={resenaAbierta} onClose={() => setResenaAbierta(null)} />
     </main>
   );
 }
