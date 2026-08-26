@@ -4337,10 +4337,20 @@ app.get('/lists', requireAuth, async (req, res) => {
     const todosMediaIds = [...new Set(lists.flatMap(l => l.items.map(i => i.mediaId)))];
     const mediaItems = await prisma.media.findMany({ where: { id: { in: todosMediaIds } } });
 
+    // Sin esto, la miniatura de "My Lists" siempre mostraba la carátula
+    // compartida, aunque tú hubieras elegido otra a mano con "Cambiar
+    // carátula" — que sí se veía correctamente al entrar DENTRO de la lista
+    // (MovieCard la aplica por su cuenta). Ahora las dos vistas coinciden.
+    const misPersonalizaciones = await prisma.userMedia.findMany({
+      where: { userId: req.userId, mediaId: { in: todosMediaIds } },
+      select: { mediaId: true, customPoster: true },
+    });
+    const customPosterPorMediaId = new Map(misPersonalizaciones.filter((p) => p.customPoster).map((p) => [p.mediaId, p.customPoster]));
+
     res.json(lists.map(l => {
       const portadas = l.items
         .slice(0, 6)
-        .map(i => mediaItems.find(m => m.id === i.mediaId)?.portada)
+        .map(i => customPosterPorMediaId.get(i.mediaId) || mediaItems.find(m => m.id === i.mediaId)?.portada)
         .filter(Boolean);
 
       return {
@@ -4355,6 +4365,209 @@ app.get('/lists', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('ERROR EN GET LISTS:', error);
     res.status(500).json({ error: 'Error al obtener las listas' });
+  }
+});
+
+// --- LISTAS DE UN USUARIO (público, sin sesión) ---
+// Mismo cálculo de portadas/totalItems que GET /lists, pero para el
+// username de la URL en vez de req.userId, y sin exigir sesión.
+app.get('/users/:username/lists', async (req, res) => {
+  try {
+    const username = req.params.username;
+    const usuario = await prisma.user.findFirst({
+      where: { username: { equals: username, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const lists = await prisma.list.findMany({
+      where: { userId: usuario.id },
+      include: { items: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const todosMediaIds = [...new Set(lists.flatMap((l) => l.items.map((i) => i.mediaId)))];
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: todosMediaIds } } });
+
+    // Aquí "req.userId" no existe (ruta pública) — se usa el customPoster
+    // del DUEÑO de la lista (usuario.id), para que cualquiera que la mire
+    // vea exactamente la carátula que ese usuario eligió, no la compartida.
+    const personalizacionesDueno = await prisma.userMedia.findMany({
+      where: { userId: usuario.id, mediaId: { in: todosMediaIds } },
+      select: { mediaId: true, customPoster: true },
+    });
+    const customPosterPorMediaId = new Map(personalizacionesDueno.filter((p) => p.customPoster).map((p) => [p.mediaId, p.customPoster]));
+
+    res.json(
+      lists.map((l) => {
+        const portadas = l.items
+          .slice(0, 6)
+          .map((i) => customPosterPorMediaId.get(i.mediaId) || mediaItems.find((m) => m.id === i.mediaId)?.portada)
+          .filter(Boolean);
+
+        return {
+          id: l.id,
+          nombre: l.nombre,
+          createdAt: l.createdAt,
+          totalItems: l.items.length,
+          portadas,
+        };
+      })
+    );
+  } catch (error) {
+    console.error('ERROR EN GET /users/:username/lists:', error);
+    res.status(500).json({ error: 'Error al obtener las listas del usuario' });
+  }
+});
+
+// --- FICHA PÚBLICA DE UNA LISTA CONCRETA (sin sesión) ---
+// Se comprueba que la lista sea DE ESE username (no basta con que el id
+// exista) — evita que /user/otro/lists/5 muestre una lista de un tercero
+// solo porque el id coincide.
+app.get('/users/:username/lists/:listId', async (req, res) => {
+  try {
+    const username = req.params.username;
+    const listId = parseInt(req.params.listId, 10);
+
+    const usuario = await prisma.user.findFirst({
+      where: { username: { equals: username, mode: 'insensitive' } },
+      select: { id: true, username: true },
+    });
+    if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const list = await prisma.list.findUnique({ where: { id: listId }, include: { items: true } });
+    if (!list || list.userId !== usuario.id) {
+      return res.status(404).json({ error: 'Lista no encontrada' });
+    }
+
+    const mediaIds = list.items.map((i) => i.mediaId);
+    const mediaItemsRaw = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+
+    // Se injerta el customPoster del DUEÑO de la lista directamente en cada
+    // item — así el frontend puede pasárselo a MovieCard sin que este tenga
+    // que ir a buscarlo por su cuenta (lo cual, en una ficha pública, habría
+    // acabado trayendo la personalización de quien MIRA la lista, no la del
+    // dueño, si ambos hubieran marcado el mismo título alguna vez).
+    const personalizacionesDueno = await prisma.userMedia.findMany({
+      where: { userId: usuario.id, mediaId: { in: mediaIds } },
+      select: { mediaId: true, customPoster: true },
+    });
+    const customPosterPorMediaId = new Map(personalizacionesDueno.filter((p) => p.customPoster).map((p) => [p.mediaId, p.customPoster]));
+    const mediaItems = mediaItemsRaw.map((item) => ({
+      ...item,
+      portada: customPosterPorMediaId.get(item.id) || item.portada,
+    }));
+
+    const likesCount = await prisma.listLike.count({ where: { listId } });
+
+    const miUserId = getUserIdOpcional(req);
+    const yaLeDiLike = miUserId
+      ? await prisma.listLike.findUnique({ where: { userId_listId: { userId: miUserId, listId } } })
+      : null;
+
+    res.json({
+      id: list.id,
+      nombre: list.nombre,
+      items: mediaItems,
+      autor: usuario.username,
+      likesCount,
+      isLiked: miUserId ? !!yaLeDiLike : null,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /users/:username/lists/:listId:', error);
+    res.status(500).json({ error: 'Error al obtener la lista' });
+  }
+});
+
+// --- DAR/QUITAR "ME GUSTA" A UNA LISTA AJENA ---
+app.post('/lists/:listId/like', requireAuth, async (req, res) => {
+  try {
+    const listId = parseInt(req.params.listId, 10);
+    const list = await prisma.list.findUnique({ where: { id: listId } });
+    if (!list) return res.status(404).json({ error: 'Lista no encontrada' });
+
+    await prisma.listLike.create({ data: { userId: req.userId, listId } });
+    res.status(201).json({ ok: true });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      // Ya le habías dado al corazón — no es un error real.
+      return res.json({ ok: true });
+    }
+    console.error('ERROR EN POST /lists/:listId/like:', error);
+    res.status(500).json({ error: 'Error al dar like a la lista' });
+  }
+});
+
+app.delete('/lists/:listId/like', requireAuth, async (req, res) => {
+  try {
+    const listId = parseInt(req.params.listId, 10);
+    await prisma.listLike.deleteMany({ where: { userId: req.userId, listId } });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN DELETE /lists/:listId/like:', error);
+    res.status(500).json({ error: 'Error al quitar el like de la lista' });
+  }
+});
+
+// --- LISTAS AJENAS QUE HE MARCADO CON CORAZÓN (para el apartado nuevo de "My Lists") ---
+app.get('/lists/liked', requireAuth, async (req, res) => {
+  try {
+    const likes = await prisma.listLike.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        list: {
+          include: {
+            items: true,
+            // No hay relación directa List -> User en el schema (solo
+            // userId suelto), así que el nombre del dueño se resuelve
+            // aparte más abajo, no aquí.
+          },
+        },
+      },
+    });
+
+    const ownerIds = [...new Set(likes.map((l) => l.list.userId))];
+    const owners = await prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, username: true } });
+    const ownerPorId = new Map(owners.map((o) => [o.id, o.username]));
+
+    const todosMediaIds = [...new Set(likes.flatMap((l) => l.list.items.map((i) => i.mediaId)))];
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: todosMediaIds } } });
+
+    // Cada lista con like puede ser de un dueño distinto, así que se piden
+    // TODAS las personalizaciones de golpe (de todos los dueños implicados,
+    // no las tuyas) y se filtran por userId+mediaId al construir cada una.
+    const personalizacionesDuenos = await prisma.userMedia.findMany({
+      where: { userId: { in: ownerIds }, mediaId: { in: todosMediaIds } },
+      select: { userId: true, mediaId: true, customPoster: true },
+    });
+    const customPosterPorClave = new Map(
+      personalizacionesDuenos.filter((p) => p.customPoster).map((p) => [`${p.userId}-${p.mediaId}`, p.customPoster])
+    );
+
+    res.json(
+      likes.map((l) => {
+        const portadas = l.list.items
+          .slice(0, 6)
+          .map(
+            (i) =>
+              customPosterPorClave.get(`${l.list.userId}-${i.mediaId}`) ||
+              mediaItems.find((m) => m.id === i.mediaId)?.portada
+          )
+          .filter(Boolean);
+
+        return {
+          id: l.list.id,
+          nombre: l.list.nombre,
+          totalItems: l.list.items.length,
+          portadas,
+          autor: ownerPorId.get(l.list.userId) || null,
+        };
+      })
+    );
+  } catch (error) {
+    console.error('ERROR EN GET /lists/liked:', error);
+    res.status(500).json({ error: 'Error al obtener las listas con like' });
   }
 });
 

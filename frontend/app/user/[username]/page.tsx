@@ -187,10 +187,7 @@ export default function PerfilPublicoPage() {
             <Link href={`/user/${username}/series`} className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Series</Link>
             <Link href={`/user/${username}/games`} className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Played</Link>
             <Link href={`/user/${username}/books`} className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Books</Link>
-            {/* Lists todavía no tiene versión pública (el backend de /lists solo
-                sirve tus propias listas con tu sesión) — de momento no es un
-                enlace, para no llevar a un 404. */}
-            <span className="pb-3 text-sm font-semibold text-gray-400 whitespace-nowrap">Lists</span>
+            <Link href={`/user/${username}/lists`} className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Lists</Link>
             <Link href={`/user/${username}/reviews`} className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Reviews</Link>
           </div>
         </div>
@@ -218,11 +215,6 @@ export default function PerfilPublicoPage() {
             </div>
           </section>
         )}
-
-        <section>
-          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Following</h2>
-          <p className="text-gray-500 text-sm">You're not following anyone yet.</p>
-        </section>
 
         <section>
           <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Recent activity</h2>

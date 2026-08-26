@@ -14,6 +14,8 @@ export default function MisListas() {
   const [listaABorrar, setListaABorrar] = useState<{ id: number; nombre: string } | null>(null);
   const [borrando, setBorrando] = useState(false);
 
+  const [listasConLike, setListasConLike] = useState<any[]>([]);
+
   const cargarListas = () => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -26,11 +28,24 @@ export default function MisListas() {
       .catch(() => {});
   };
 
+  const cargarListasConLike = () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetch('http://localhost:3001/lists/liked', {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+      .then((res) => res.json())
+      .then((data) => setListasConLike(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
+
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
     setLogueado(true);
     cargarListas();
+    cargarListasConLike();
   }, []);
 
   useEffect(() => {
@@ -93,6 +108,49 @@ export default function MisListas() {
     l.nombre.toLowerCase().includes(busqueda.trim().toLowerCase())
   );
 
+  // Tarjeta compartida entre "My Lists" y "Liked Lists" — la única
+  // diferencia real es a dónde lleva el Link y si tiene botón de borrar.
+  const renderTarjeta = (list: any, href: string, conBorrar: boolean) => (
+    <div
+      key={`${href}-${list.id}`}
+      className="relative group bg-[#1c2228] rounded-lg border border-gray-700 hover:border-gray-500 transition overflow-hidden h-28"
+    >
+      <Link href={href} className="flex items-center h-full">
+        {list.portadas && list.portadas.length > 0 && (
+          <div className="flex -space-x-8 h-full flex-shrink-0 pl-1">
+            {list.portadas.map((src: string, i: number) => (
+              <img
+                key={i}
+                src={src}
+                alt=""
+                className="h-full aspect-[2/3] object-cover rounded border-2 border-[#1c2228] shadow-lg"
+                style={{ zIndex: list.portadas.length - i }}
+              />
+            ))}
+          </div>
+        )}
+
+        <div className="flex flex-col justify-between h-full flex-grow min-w-0 items-end text-right p-4">
+          <h2 className="font-bold text-white truncate max-w-full">{list.nombre}</h2>
+          {list.autor && <p className="text-[11px] text-gray-500">by {list.autor}</p>}
+          <p className="text-xs text-gray-400">
+            {list.totalItems} {list.totalItems === 1 ? 'title' : 'titles'}
+          </p>
+        </div>
+      </Link>
+
+      {conBorrar && (
+        <button
+          onClick={() => setListaABorrar({ id: list.id, nombre: list.nombre })}
+          className="absolute top-2 right-2 text-gray-500 hover:text-red-400 transition cursor-pointer opacity-0 group-hover:opacity-100 bg-black/40 rounded-full w-6 h-6 flex items-center justify-center"
+          title="Delete list"
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -126,44 +184,21 @@ export default function MisListas() {
               <p className="text-gray-500 text-sm">No lists match "{busqueda}".</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {listasFiltradas.map((list) => (
-                  <div
-                    key={list.id}
-                    className="relative group bg-[#1c2228] rounded-lg border border-gray-700 hover:border-gray-500 transition overflow-hidden h-28"
-                  >
-                    <Link href={`/perfil/lists/${list.id}`} className="flex items-center h-full">
-                      {list.portadas && list.portadas.length > 0 && (
-                        <div className="flex -space-x-8 h-full flex-shrink-0 pl-1">
-                          {list.portadas.map((src: string, i: number) => (
-                            <img
-                              key={i}
-                              src={src}
-                              alt=""
-                              className="h-full aspect-[2/3] object-cover rounded border-2 border-[#1c2228] shadow-lg"
-                              style={{ zIndex: list.portadas.length - i }}
-                            />
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="flex flex-col justify-between h-full flex-grow min-w-0 items-end text-right p-4">
-                        <h2 className="font-bold text-white truncate max-w-full">{list.nombre}</h2>
-                        <p className="text-xs text-gray-400">
-                          {list.totalItems} {list.totalItems === 1 ? 'title' : 'titles'}
-                        </p>
-                      </div>
-                    </Link>
-
-                    <button
-                      onClick={() => setListaABorrar({ id: list.id, nombre: list.nombre })}
-                      className="absolute top-2 right-2 text-gray-500 hover:text-red-400 transition cursor-pointer opacity-0 group-hover:opacity-100 bg-black/40 rounded-full w-6 h-6 flex items-center justify-center"
-                      title="Delete list"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
+                {listasFiltradas.map((list) => renderTarjeta(list, `/perfil/lists/${list.id}`, true))}
               </div>
+            )}
+
+            {/* LISTAS AJENAS CON "ME GUSTA" — solo se muestra si hay alguna,
+                para no dejar un apartado vacío por defecto. */}
+            {listasConLike.length > 0 && (
+              <>
+                <h2 className="text-lg font-bold mt-12 mb-4">Liked Lists</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  {listasConLike.map((list) =>
+                    renderTarjeta(list, `/user/${list.autor}/lists/${list.id}`, false)
+                  )}
+                </div>
+              </>
             )}
           </>
         )}

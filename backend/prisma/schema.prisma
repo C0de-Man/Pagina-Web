@@ -86,6 +86,7 @@ model List {
   nombre    String
   createdAt DateTime   @default(now())
   items     ListItem[]
+  likes     ListLike[]
 }
 
 model ListItem {
@@ -95,6 +96,22 @@ model ListItem {
   list    List @relation(fields: [listId], references: [id], onDelete: Cascade)
 
   @@unique([listId, mediaId]) // No repetir la misma película en la misma lista
+}
+
+// --- "ME GUSTA" EN LISTAS DE OTROS USUARIOS ---
+// Le da el corazón a una lista ajena para que aparezca en tu propio "My
+// Lists", en un apartado nuevo aparte de las que tú has creado. No borra ni
+// copia nada de la lista original — sigue siendo de su dueño, tú solo
+// guardas una referencia a ella.
+model ListLike {
+  id        Int      @id @default(autoincrement())
+  userId    Int      // quien le ha dado al corazón
+  listId    Int
+  createdAt DateTime @default(now())
+
+  list List @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, listId]) // no puedes darle al corazón dos veces a la misma lista
 }
 
 model Favorite {
