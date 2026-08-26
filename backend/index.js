@@ -1815,7 +1815,23 @@ function requireAuth(req, res, next) {
   }
 }
 
-// --- HELPER: como requireAuth pero sin bloquear la petición ---
+// --- HELPER: ¿puede "miUserId" ver el catálogo/listas/reseñas de "usuario"? ---
+// true si: el propio dueño, o la cuenta es pública, o (siendo privada) hay
+// un Follow con estado ACCEPTED de miUserId hacia usuario.id. Se usa en
+// TODAS las rutas públicas de perfil (watched, reviews, lists...) para que
+// una cuenta privada quede tapada de verdad en todos los sitios a la vez,
+// no solo en la página principal del perfil.
+async function puedeVerContenidoPrivado(usuario, miUserId) {
+  if (!usuario.isPrivate) return true;
+  if (miUserId === usuario.id) return true;
+  if (!miUserId) return false;
+  const follow = await prisma.follow.findUnique({
+    where: { followerId_followingId: { followerId: miUserId, followingId: usuario.id } },
+  });
+  return follow?.estado === 'ACCEPTED';
+}
+
+
 // Para rutas públicas (como GET /media/:id, que se puede ver sin login) que
 // además quieren saber, SI hay sesión, quién pregunta — para poder mezclar
 // personalizaciones (customPoster/customBackdrop) sin exigir estar logueado
@@ -2665,9 +2681,12 @@ app.get('/users/:username/reviews', async (req, res) => {
     const username = req.params.username;
     const usuario = await prisma.user.findFirst({
       where: { username: { equals: username, mode: 'insensitive' } },
-      select: { id: true },
+      select: { id: true, isPrivate: true },
     });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const puedeVer = await puedeVerContenidoPrivado(usuario, getUserIdOpcional(req));
+    if (!puedeVer) return res.status(403).json({ error: 'Este perfil es privado', isPrivate: true });
 
     const resenas = await construirResenas(usuario.id);
     res.json(resenas);
@@ -3708,6 +3727,71 @@ app.get('/auth/me', requireAuth, async (req, res) => {
   }
 });
 
+// --- MIS NOTIFICACIONES (campana del navbar) ---
+// Se resuelve aquí el username/avatar de quien la generó y el nombre de la
+// lista (si aplica), en vez de pedírselo al frontend aparte por cada una.
+app.get('/notifications', requireAuth, async (req, res) => {
+  try {
+    const notificaciones = await prisma.notification.findMany({
+      where: { userId: req.userId },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+    });
+
+    const actorIds = [...new Set(notificaciones.map((n) => n.actorId))];
+    const actores = await prisma.user.findMany({
+      where: { id: { in: actorIds } },
+      select: { id: true, username: true, avatar: true },
+    });
+    const actorPorId = new Map(actores.map((a) => [a.id, a]));
+
+    const listIds = notificaciones.filter((n) => n.listId).map((n) => n.listId);
+    const listas = listIds.length > 0
+      ? await prisma.list.findMany({ where: { id: { in: listIds } }, select: { id: true, nombre: true } })
+      : [];
+    const listaPorId = new Map(listas.map((l) => [l.id, l]));
+
+    res.json(
+      notificaciones.map((n) => ({
+        id: n.id,
+        tipo: n.tipo,
+        leida: n.leida,
+        fecha: n.createdAt,
+        actor: actorPorId.get(n.actorId) || null,
+        lista: n.listId ? listaPorId.get(n.listId) || null : null,
+      }))
+    );
+  } catch (error) {
+    console.error('ERROR EN GET /notifications:', error);
+    res.status(500).json({ error: 'Error al obtener las notificaciones' });
+  }
+});
+
+// --- CUÁNTAS SIN LEER (para el numerito rojo de la campana) ---
+app.get('/notifications/unread-count', requireAuth, async (req, res) => {
+  try {
+    const count = await prisma.notification.count({ where: { userId: req.userId, leida: false } });
+    res.json({ count });
+  } catch (error) {
+    console.error('ERROR EN GET /notifications/unread-count:', error);
+    res.status(500).json({ error: 'Error al contar notificaciones' });
+  }
+});
+
+// --- MARCAR TODAS COMO LEÍDAS (se llama al abrir el panel) ---
+app.post('/notifications/mark-read', requireAuth, async (req, res) => {
+  try {
+    await prisma.notification.updateMany({
+      where: { userId: req.userId, leida: false },
+      data: { leida: true },
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN POST /notifications/mark-read:', error);
+    res.status(500).json({ error: 'Error al marcar las notificaciones como leídas' });
+  }
+});
+
 // --- ACTUALIZAR MI AVATAR (recibe la imagen ya recortada, en base64) ---
 // --- BORRAR MI CUENTA Y TODOS MIS DATOS (irreversible) ---
 // Requiere confirmar escribiendo tu propio username exacto en el body — una
@@ -3879,6 +3963,22 @@ app.post('/auth/me/set-covers-english', requireAuth, async (req, res) => {
   }
 });
 
+// --- ACTIVAR/DESACTIVAR CUENTA PRIVADA ---
+app.patch('/auth/me/privacy', requireAuth, async (req, res) => {
+  try {
+    const { isPrivate } = req.body;
+    if (typeof isPrivate !== 'boolean') {
+      return res.status(400).json({ error: 'isPrivate debe ser true o false' });
+    }
+    const user = await prisma.user.update({ where: { id: req.userId }, data: { isPrivate } });
+    const { password: _, ...userSinPassword } = user;
+    res.json(userSinPassword);
+  } catch (error) {
+    console.error('ERROR EN PATCH /auth/me/privacy:', error);
+    res.status(500).json({ error: 'Error al actualizar la privacidad de la cuenta' });
+  }
+});
+
 app.patch('/auth/me/preferences', requireAuth, async (req, res) => {
   try {
     const { idioma, region } = req.body;
@@ -3952,17 +4052,77 @@ app.post('/users/:id/follow', requireAuth, async (req, res) => {
     const destino = await prisma.user.findUnique({ where: { id: followingId } });
     if (!destino) return res.status(404).json({ error: 'Usuario no encontrado' });
 
+    // Cuenta privada → queda PENDING hasta que él la acepte/rechace. Cuenta
+    // pública → ACCEPTED al instante, como hasta ahora.
+    const estadoInicial = destino.isPrivate ? 'PENDING' : 'ACCEPTED';
+
     await prisma.follow.create({
-      data: { followerId: req.userId, followingId },
+      data: { followerId: req.userId, followingId, estado: estadoInicial },
     });
-    res.status(201).json({ ok: true });
+
+    // Notificación para quien acaba de ser seguido (o para quien recibe la
+    // SOLICITUD, si es privada) — dentro del mismo try/catch: si esto falla
+    // por lo que sea, no debe tumbar el follow en sí (ya se ha guardado),
+    // solo se pierde el aviso.
+    await prisma.notification.create({
+      data: {
+        userId: followingId,
+        tipo: estadoInicial === 'PENDING' ? 'FOLLOW_REQUEST' : 'FOLLOW',
+        actorId: req.userId,
+      },
+    });
+
+    res.status(201).json({ ok: true, pendiente: estadoInicial === 'PENDING' });
   } catch (error) {
     if (error.code === 'P2002') {
-      // Ya le seguías — no es un error real, simplemente confirmamos el estado.
-      return res.json({ ok: true });
+      // Ya existía la fila (seguido, o solicitud ya mandada antes) — no es
+      // un error real, se confirma el estado actual tal cual está.
+      const existente = await prisma.follow.findUnique({
+        where: { followerId_followingId: { followerId: req.userId, followingId: parseInt(req.params.id) } },
+      });
+      return res.json({ ok: true, pendiente: existente?.estado === 'PENDING' });
     }
     console.error('ERROR EN POST /users/:id/follow:', error);
     res.status(500).json({ error: 'Error al seguir al usuario' });
+  }
+});
+
+// --- ACEPTAR UNA SOLICITUD DE SEGUIMIENTO (cuenta privada) ---
+app.post('/follow-requests/:followerId/accept', requireAuth, async (req, res) => {
+  try {
+    const followerId = parseInt(req.params.followerId, 10);
+    const solicitud = await prisma.follow.findUnique({
+      where: { followerId_followingId: { followerId, followingId: req.userId } },
+    });
+    if (!solicitud || solicitud.estado !== 'PENDING') {
+      return res.status(404).json({ error: 'Solicitud no encontrada' });
+    }
+
+    await prisma.follow.update({ where: { id: solicitud.id }, data: { estado: 'ACCEPTED' } });
+
+    // Avisamos a quien la mandó de que ya puede ver tu contenido.
+    await prisma.notification.create({
+      data: { userId: followerId, tipo: 'FOLLOW_ACCEPTED', actorId: req.userId },
+    });
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN POST /follow-requests/:followerId/accept:', error);
+    res.status(500).json({ error: 'Error al aceptar la solicitud' });
+  }
+});
+
+// --- RECHAZAR UNA SOLICITUD DE SEGUIMIENTO ---
+app.post('/follow-requests/:followerId/decline', requireAuth, async (req, res) => {
+  try {
+    const followerId = parseInt(req.params.followerId, 10);
+    await prisma.follow.deleteMany({
+      where: { followerId, followingId: req.userId, estado: 'PENDING' },
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN POST /follow-requests/:followerId/decline:', error);
+    res.status(500).json({ error: 'Error al rechazar la solicitud' });
   }
 });
 
@@ -4009,15 +4169,49 @@ app.get('/users/:username', async (req, res) => {
     const username = req.params.username;
     const usuario = await prisma.user.findFirst({
       where: { username: { equals: username, mode: 'insensitive' } },
-      select: { id: true, username: true, avatar: true, createdAt: true },
+      select: { id: true, username: true, avatar: true, createdAt: true, isPrivate: true },
     });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
 
     const miUserId = getUserIdOpcional(req);
 
-    const [followersCount, followingCount, favs, vistas, jugandoAhoraEntries, yaLeSigo] = await Promise.all([
-      prisma.follow.count({ where: { followingId: usuario.id } }),
-      prisma.follow.count({ where: { followerId: usuario.id } }),
+    const [followersCount, followingCount, miFollow] = await Promise.all([
+      prisma.follow.count({ where: { followingId: usuario.id, estado: 'ACCEPTED' } }),
+      prisma.follow.count({ where: { followerId: usuario.id, estado: 'ACCEPTED' } }),
+      miUserId
+        ? prisma.follow.findUnique({
+            where: { followerId_followingId: { followerId: miUserId, followingId: usuario.id } },
+          })
+        : null,
+    ]);
+
+    const isSelf = miUserId === usuario.id;
+    const isFollowing = miFollow?.estado === 'ACCEPTED';
+    const isPending = miFollow?.estado === 'PENDING';
+    const puedeVer = usuario.isPrivate ? isSelf || isFollowing : true;
+
+    const datosBase = {
+      id: usuario.id,
+      username: usuario.username,
+      avatar: usuario.avatar,
+      miembroDesde: usuario.createdAt,
+      followersCount,
+      followingCount,
+      isSelf,
+      isFollowing: miUserId ? isFollowing : null,
+      isPending: miUserId ? isPending : null,
+      isPrivate: usuario.isPrivate,
+    };
+
+    // Cuenta privada y no tienes acceso: ni se consulta el catálogo — se
+    // corta aquí mismo, devolviendo solo lo básico (avatar, nombre,
+    // contadores, botón de seguir) para que el frontend muestre el aviso de
+    // "cuenta privada" en vez del contenido.
+    if (!puedeVer) {
+      return res.json({ ...datosBase, favoritos: [], actividad: [], jugandoAhora: [] });
+    }
+
+    const [favs, vistas, jugandoAhoraEntries] = await Promise.all([
       prisma.favorite.findMany({ where: { userId: usuario.id }, orderBy: { orden: 'asc' } }),
       prisma.userMedia.findMany({
         where: { userId: usuario.id, watched: true },
@@ -4030,11 +4224,6 @@ app.get('/users/:username', async (req, res) => {
         where: { userId: usuario.id, playStatus: 'PLAYING' },
         orderBy: { updatedAt: 'desc' },
       }),
-      miUserId
-        ? prisma.follow.findUnique({
-            where: { followerId_followingId: { followerId: miUserId, followingId: usuario.id } },
-          })
-        : null,
     ]);
 
     const mediaIdsFavoritos = favs.map((f) => f.mediaId);
@@ -4095,19 +4284,7 @@ app.get('/users/:username', async (req, res) => {
       })
       .filter(Boolean);
 
-    res.json({
-      id: usuario.id,
-      username: usuario.username,
-      avatar: usuario.avatar,
-      miembroDesde: usuario.createdAt,
-      followersCount,
-      followingCount,
-      isSelf: miUserId === usuario.id,
-      isFollowing: miUserId ? !!yaLeSigo : null,
-      favoritos,
-      actividad,
-      jugandoAhora,
-    });
+    res.json({ ...datosBase, favoritos, actividad, jugandoAhora });
   } catch (error) {
     console.error('ERROR EN GET /users/:username:', error);
     res.status(500).json({ error: 'Error al obtener el perfil' });
@@ -4126,9 +4303,12 @@ app.get('/users/:username/watched', async (req, res) => {
 
     const usuario = await prisma.user.findFirst({
       where: { username: { equals: username, mode: 'insensitive' } },
-      select: { id: true },
+      select: { id: true, isPrivate: true },
     });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const puedeVer = await puedeVerContenidoPrivado(usuario, getUserIdOpcional(req));
+    if (!puedeVer) return res.status(403).json({ error: 'Este perfil es privado', isPrivate: true });
 
     const entries = await prisma.userMedia.findMany({
       where: { userId: usuario.id, watched: true },
@@ -4376,9 +4556,12 @@ app.get('/users/:username/lists', async (req, res) => {
     const username = req.params.username;
     const usuario = await prisma.user.findFirst({
       where: { username: { equals: username, mode: 'insensitive' } },
-      select: { id: true },
+      select: { id: true, isPrivate: true },
     });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const puedeVer = await puedeVerContenidoPrivado(usuario, getUserIdOpcional(req));
+    if (!puedeVer) return res.status(403).json({ error: 'Este perfil es privado', isPrivate: true });
 
     const lists = await prisma.list.findMany({
       where: { userId: usuario.id },
@@ -4431,9 +4614,12 @@ app.get('/users/:username/lists/:listId', async (req, res) => {
 
     const usuario = await prisma.user.findFirst({
       where: { username: { equals: username, mode: 'insensitive' } },
-      select: { id: true, username: true },
+      select: { id: true, username: true, isPrivate: true },
     });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const puedeVer = await puedeVerContenidoPrivado(usuario, getUserIdOpcional(req));
+    if (!puedeVer) return res.status(403).json({ error: 'Este perfil es privado', isPrivate: true });
 
     const list = await prisma.list.findUnique({ where: { id: listId }, include: { items: true } });
     if (!list || list.userId !== usuario.id) {
@@ -4487,6 +4673,14 @@ app.post('/lists/:listId/like', requireAuth, async (req, res) => {
     if (!list) return res.status(404).json({ error: 'Lista no encontrada' });
 
     await prisma.listLike.create({ data: { userId: req.userId, listId } });
+
+    // Sin notificarte a ti mismo si por lo que sea le das like a tu propia lista.
+    if (list.userId !== req.userId) {
+      await prisma.notification.create({
+        data: { userId: list.userId, tipo: 'LIST_LIKE', actorId: req.userId, listId },
+      });
+    }
+
     res.status(201).json({ ok: true });
   } catch (error) {
     if (error.code === 'P2002') {

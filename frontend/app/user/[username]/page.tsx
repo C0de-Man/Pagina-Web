@@ -15,6 +15,8 @@ interface PerfilPublico {
   followingCount: number;
   isSelf: boolean;
   isFollowing: boolean | null;
+  isPending: boolean | null;
+  isPrivate: boolean;
   favoritos: any[];
   actividad: any[];
   jugandoAhora: any[];
@@ -79,21 +81,36 @@ export default function PerfilPublicoPage() {
 
     setProcesandoFollow(true);
     const siguiendoAntes = perfil.isFollowing;
-    // Actualización optimista
-    setPerfil({
-      ...perfil,
-      isFollowing: !siguiendoAntes,
-      followersCount: perfil.followersCount + (siguiendoAntes ? -1 : 1),
-    });
+    const pendienteAntes = perfil.isPending;
+    // Si ya seguías o ya había una solicitud pendiente, el clic significa
+    // "cancelar" (DELETE) en ambos casos — si no, es "empezar a seguir/pedir".
+    const cancelando = siguiendoAntes || pendienteAntes;
 
     try {
-      await fetch(`${API_URL}/users/${perfil.id}/follow`, {
-        method: siguiendoAntes ? 'DELETE' : 'POST',
+      const res = await fetch(`${API_URL}/users/${perfil.id}/follow`, {
+        method: cancelando ? 'DELETE' : 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
+
+      if (cancelando) {
+        setPerfil({
+          ...perfil,
+          isFollowing: false,
+          isPending: false,
+          followersCount: siguiendoAntes ? perfil.followersCount - 1 : perfil.followersCount,
+        });
+      } else {
+        // El backend dice si quedó pendiente (cuenta privada) o aceptada al
+        // instante (cuenta pública) — no lo asumimos, lo leemos de verdad.
+        const data = await res.json();
+        setPerfil({
+          ...perfil,
+          isFollowing: !data.pendiente,
+          isPending: !!data.pendiente,
+          followersCount: data.pendiente ? perfil.followersCount : perfil.followersCount + 1,
+        });
+      }
     } catch {
-      // si falla, revertimos
-      setPerfil((prev) => prev && { ...prev, isFollowing: siguiendoAntes, followersCount: prev.followersCount });
       cargarPerfil();
     }
     setProcesandoFollow(false);
@@ -173,12 +190,12 @@ export default function PerfilPublicoPage() {
                 onClick={toggleSeguir}
                 disabled={procesandoFollow}
                 className={`text-sm font-bold px-5 py-2 rounded transition cursor-pointer disabled:opacity-50 ${
-                  perfil.isFollowing
+                  perfil.isFollowing || perfil.isPending
                     ? 'bg-[#2c3440] text-gray-300 hover:bg-red-900/40 hover:text-red-300'
                     : 'bg-blue-600 hover:bg-blue-500 text-white'
                 }`}
               >
-                {perfil.isFollowing ? 'Following' : 'Follow'}
+                {perfil.isPending ? 'Requested' : perfil.isFollowing ? 'Following' : 'Follow'}
               </button>
             )}
           </div>
@@ -196,6 +213,20 @@ export default function PerfilPublicoPage() {
       </div>
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-12">
+        {perfil.isPrivate && !perfil.isSelf && !perfil.isFollowing ? (
+          <div className="flex flex-col items-center text-center py-16 gap-3">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            <h2 className="text-lg font-bold text-white">This account is private</h2>
+            <p className="text-gray-500 text-sm max-w-xs">
+              {perfil.isPending
+                ? `Your follow request is waiting for ${perfil.username} to accept it.`
+                : `Follow ${perfil.username} to see their catalog, lists and reviews.`}
+            </p>
+          </div>
+        ) : (
+          <>
         <section>
           <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Favorites</h2>
           {perfil.favoritos.length > 0 ? (
@@ -254,6 +285,8 @@ export default function PerfilPublicoPage() {
             <p className="text-gray-500 text-sm">No activity yet.</p>
           )}
         </section>
+          </>
+        )}
       </div>
     </main>
   );

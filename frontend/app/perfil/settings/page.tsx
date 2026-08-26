@@ -22,6 +22,8 @@ export default function Settings() {
   const [usernameConfirmacion, setUsernameConfirmacion] = useState('');
   const [borrandoCuenta, setBorrandoCuenta] = useState(false);
   const [errorBorrado, setErrorBorrado] = useState<string | null>(null);
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [guardandoPrivacidad, setGuardandoPrivacidad] = useState(false);
 
   const cargarDatos = () => {
     const token = localStorage.getItem('token');
@@ -35,6 +37,7 @@ export default function Settings() {
       .then((data) => {
         setUsername(data.username);
         setAvatarPreview(data.avatar || null);
+        setIsPrivate(!!data.isPrivate);
       })
       .catch(() => { });
 
@@ -109,6 +112,27 @@ export default function Settings() {
       setResultadoReset('Something went wrong, please try again.');
     }
     setReseteando(false);
+  };
+
+  const alternarPrivacidad = async () => {
+    const token = localStorage.getItem('token');
+    if (!token || guardandoPrivacidad) return;
+
+    setGuardandoPrivacidad(true);
+    const nuevoValor = !isPrivate;
+    setIsPrivate(nuevoValor); // optimista
+
+    try {
+      const res = await fetch('http://localhost:3001/auth/me/privacy', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ isPrivate: nuevoValor }),
+      });
+      if (!res.ok) throw new Error('fallo al actualizar');
+    } catch {
+      setIsPrivate(!nuevoValor); // revertimos si falla
+    }
+    setGuardandoPrivacidad(false);
   };
 
   const borrarCuenta = async () => {
@@ -233,6 +257,32 @@ export default function Settings() {
             <h2 className="text-lg font-bold mb-4">Account</h2>
 
             <SettingsIdiomaRegion />
+
+            <div className="mt-8 pt-6 border-t border-gray-800">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">Private account</h3>
+                  <p className="text-gray-500 text-sm">
+                    Only people you approve can see your catalog, lists and reviews. New followers need your acceptance first.
+                  </p>
+                </div>
+                <button
+                  onClick={alternarPrivacidad}
+                  disabled={guardandoPrivacidad}
+                  role="switch"
+                  aria-checked={isPrivate}
+                  className={`relative flex-shrink-0 w-11 h-6 rounded-full transition cursor-pointer disabled:opacity-50 ${
+                    isPrivate ? 'bg-blue-600' : 'bg-gray-700'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                      isPrivate ? 'translate-x-5' : ''
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
 
             <div className="mt-8 pt-6 border-t border-gray-800">
               <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Custom covers</h3>

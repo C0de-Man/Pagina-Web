@@ -41,6 +41,7 @@ model User {
   password  String
   avatar    String?
   isAdmin   Boolean  @default(false) // solo el/los administradores pueden editar colecciones curadas a mano (borrar, reordenar, añadir juegos)
+  isPrivate Boolean  @default(false) // si true, seguirte requiere aceptación tuya, y tu catálogo/listas/reseñas solo las ven tus seguidores aceptados (o tú mismo)
   idioma    String   @default("es-ES") // idioma preferido: título/sinopsis/cast en las peticiones a TMDB
   region    String   @default("ES")    // región preferida: usada para plataformas de streaming (JustWatch vía TMDB)
   createdAt DateTime @default(now())
@@ -51,17 +52,37 @@ model User {
 }
 
 // --- SEGUIR USUARIOS ("Friends") ---
-// Directo, sin petición/aceptación (como Twitter/Letterboxd, no como Facebook).
+// Directo (estado ACCEPTED automático) si el destino tiene cuenta pública;
+// si el destino es privado, se crea en PENDING y hace falta que él la
+// acepte/rechace (ver /follow-requests/:followerId/accept|decline) antes de
+// contar como seguidor de verdad para nada (ni contador, ni ver contenido).
 model Follow {
   id          Int      @id @default(autoincrement())
   followerId  Int // quien sigue
   followingId Int // a quien se sigue
+  estado      String   @default("ACCEPTED") // "PENDING" | "ACCEPTED"
   createdAt   DateTime @default(now())
 
   follower  User @relation("Siguiendo", fields: [followerId], references: [id], onDelete: Cascade)
   following User @relation("Seguidores", fields: [followingId], references: [id], onDelete: Cascade)
 
   @@unique([followerId, followingId]) // no puedes seguir dos veces al mismo usuario
+}
+
+// --- NOTIFICACIONES (campana del navbar) ---
+// Sin relación formal a User/List en el schema (a propósito, igual que
+// Follow/ListLike hacen con userId suelto en otros sitios) — se resuelve el
+// nombre/avatar del actor y el nombre de la lista consultando aparte en el
+// endpoint, así una notificación puede sobrevivir aunque luego se borre la
+// lista en cuestión (solo pierde el enlace, no la notificación en sí).
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int      // quién LA RECIBE
+  tipo      String   // 'FOLLOW' | 'LIST_LIKE'
+  actorId   Int      // quién la generó (quien sigue / quien da like)
+  listId    Int?     // solo rellenado si tipo = 'LIST_LIKE'
+  leida     Boolean  @default(false)
+  createdAt DateTime @default(now())
 }
 
 model UserMedia {
