@@ -118,7 +118,7 @@ export default function MisResenas() {
         )}
       </div>
 
-      <ReviewDetailModal resena={resenaAbierta} onClose={() => setResenaAbierta(null)} />
+      <ReviewDetailModal resena={resenaAbierta} onClose={() => setResenaAbierta(null)} puedeEditar />
     </main>
   );
 }

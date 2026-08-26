@@ -37,6 +37,21 @@ export default function ResenasDeUsuario() {
   const [cargando, setCargando] = useState(true);
   const [noEncontrado, setNoEncontrado] = useState(false);
   const [resenaAbierta, setResenaAbierta] = useState<any>(null);
+  // Solo se puede editar si el perfil que se está viendo es el tuyo propio
+  // — comparado sin distinguir mayúsculas/minúsculas, igual que ya hace el
+  // backend al buscar el usuario por username.
+  const [esMiPerfil, setEsMiPerfil] = useState(false);
+
+  useEffect(() => {
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser || !username) return;
+    try {
+      const miUsername = JSON.parse(rawUser).username;
+      setEsMiPerfil(typeof miUsername === 'string' && miUsername.toLowerCase() === username.toLowerCase());
+    } catch {
+      // si el localStorage viene corrupto por lo que sea, mejor no dejar editar
+    }
+  }, [username]);
 
   useEffect(() => {
     if (!username) return;
@@ -124,7 +139,7 @@ export default function ResenasDeUsuario() {
         )}
       </div>
 
-      <ReviewDetailModal resena={resenaAbierta} onClose={() => setResenaAbierta(null)} />
+      <ReviewDetailModal resena={resenaAbierta} onClose={() => setResenaAbierta(null)} puedeEditar={esMiPerfil} />
     </main>
   );
 }

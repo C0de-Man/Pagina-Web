@@ -36,7 +36,17 @@ const ETIQUETA_TIPO: Record<string, string> = {
   VIDEOJUEGO: 'Game',
 };
 
-export default function ReviewDetailModal({ resena, onClose }: { resena: any; onClose: () => void }) {
+export default function ReviewDetailModal({
+  resena,
+  onClose,
+  puedeEditar = false,
+}: {
+  resena: any;
+  onClose: () => void;
+  // Solo el dueño de la reseña debe poder editarla — la página pública que
+  // muestra las reseñas de OTRO usuario no debe pasar esto en true nunca.
+  puedeEditar?: boolean;
+}) {
   const [editando, setEditando] = useState(false);
   if (!resena) return null;
 
@@ -51,7 +61,7 @@ export default function ReviewDetailModal({ resena, onClose }: { resena: any; on
     onClose();
   };
 
-  if (editando) {
+  if (editando && puedeEditar) {
     if (esJuego) {
       return (
         <GameLogModal
@@ -130,12 +140,14 @@ export default function ReviewDetailModal({ resena, onClose }: { resena: any; on
           </div>
 
           <div className="flex items-center gap-3 flex-shrink-0">
-            <button
-              onClick={() => setEditando(true)}
-              className="text-gray-400 hover:text-white text-xs font-semibold cursor-pointer"
-            >
-              ✎ Edit
-            </button>
+            {puedeEditar && (
+              <button
+                onClick={() => setEditando(true)}
+                className="text-gray-400 hover:text-white text-xs font-semibold cursor-pointer"
+              >
+                ✎ Edit
+              </button>
+            )}
             <button
               onClick={onClose}
               className="text-gray-500 hover:text-white text-xl leading-none cursor-pointer"
