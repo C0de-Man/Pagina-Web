@@ -122,7 +122,7 @@ app.get('/igdb/details/:igdbId', async (req, res) => {
     const { igdbId } = req.params;
     const token = await getIgdbToken();
 
-    const body = `fields platforms.name, genres.name, involved_companies.company.name, involved_companies.developer, involved_companies.publisher; where id = ${igdbId};`;
+    const body = `fields platforms.name, genres.name, involved_companies.company.id, involved_companies.company.name, involved_companies.developer, involved_companies.publisher; where id = ${igdbId};`;
     const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
@@ -140,11 +140,14 @@ app.get('/igdb/details/:igdbId', async (req, res) => {
 
     const companies = juego.involved_companies || [];
 
+    // Antes solo el nombre (string). Ahora {id, nombre}: hace falta el id
+    // de IGDB para poder enlazar cada developer/publisher a su propia
+    // ficha (GET /igdb/company/:companyId).
     res.json({
       plataformas: (juego.platforms || []).map(p => p.name),
       generos: (juego.genres || []).map(g => g.name),
-      desarrolladoras: companies.filter(c => c.developer).map(c => c.company.name),
-      distribuidoras: companies.filter(c => c.publisher).map(c => c.company.name),
+      desarrolladoras: companies.filter(c => c.developer).map(c => ({ id: c.company?.id, nombre: c.company?.name })),
+      distribuidoras: companies.filter(c => c.publisher).map(c => ({ id: c.company?.id, nombre: c.company?.name })),
     });
   } catch (error) {
     console.error('ERROR EN GET /igdb/details:', error);
@@ -275,6 +278,71 @@ app.get('/igdb/dlc-of/:igdbId', async (req, res) => {
 });
 
 // --- BUSCAR JUEGOS EN IGDB ---
+// --- FICHA DE UNA COMPAÑÍA DE IGDB (developer/publisher): nombre/logo + juegos ---
+// IGDB no deja filtrar games directamente por "involved_companies.company = X"
+// en una sola consulta con fiabilidad, así que va en dos pasos: 1) qué
+// involved_company (developer o publisher) tiene esta company, 2) qué juegos
+// cuelgan de esas involved_companies.
+app.get('/igdb/company/:companyId', async (req, res) => {
+  try {
+    const { companyId } = req.params;
+    const token = await getIgdbToken();
+    const headers = {
+      'Client-ID': process.env.IGDB_CLIENT_ID,
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/json',
+      'Content-Type': 'text/plain',
+    };
+
+    const [respCompany, respInvolved] = await Promise.all([
+      fetchIgdb('https://api.igdb.com/v4/companies', {
+        method: 'POST',
+        headers,
+        body: `fields name, logo.image_id, country; where id = ${companyId};`,
+      }),
+      fetchIgdb('https://api.igdb.com/v4/involved_companies', {
+        method: 'POST',
+        headers,
+        body: `fields game; where company = ${companyId} & (developer = true | publisher = true); limit 500;`,
+      }),
+    ]);
+
+    const dataCompany = await respCompany.json();
+    const company = dataCompany[0];
+    if (!company) return res.status(404).json({ error: 'Compañía no encontrada' });
+
+    const dataInvolved = await respInvolved.json();
+    const gameIds = [...new Set((dataInvolved || []).map((ic) => ic.game).filter(Boolean))];
+
+    let juegos = [];
+    if (gameIds.length > 0) {
+      const respJuegos = await fetchIgdb('https://api.igdb.com/v4/games', {
+        method: 'POST',
+        headers,
+        body: `fields name, cover.url, first_release_date; where id = (${gameIds.join(',')}); sort first_release_date desc; limit 500;`,
+      });
+      const dataJuegos = await respJuegos.json();
+      juegos = (dataJuegos || []).map((g) => ({
+        igdbId: g.id,
+        titulo: g.name,
+        anio: g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null,
+        portada: g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null,
+      }));
+    }
+
+    res.json({
+      id: company.id,
+      nombre: company.name,
+      logo: company.logo?.image_id ? `https://images.igdb.com/igdb/image/upload/t_logo_med/${company.logo.image_id}.png` : null,
+      pais: company.country || null,
+      juegos,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/company/:companyId:', error);
+    res.status(500).json({ error: 'Error al obtener la compañía' });
+  }
+});
+
 app.get('/igdb/search', async (req, res) => {
   try {
     const searchQuery = req.query.q;

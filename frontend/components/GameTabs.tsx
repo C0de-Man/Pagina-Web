@@ -283,11 +283,45 @@ export default function GameTabs({
           </div>
           <div>
             <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Developer</div>
-            <div className="text-gray-200">{detalles?.desarrolladoras?.length > 0 ? detalles.desarrolladoras.join(', ') : 'Not available'}</div>
+            <div className="text-gray-200">
+              {detalles?.desarrolladoras?.length > 0 ? (
+                detalles.desarrolladoras.map((d: any, i: number) => (
+                  <span key={d.id ?? i}>
+                    {d.id ? (
+                      <Link href={`/developer/${d.id}`} className="hover:underline hover:text-white transition">
+                        {d.nombre}
+                      </Link>
+                    ) : (
+                      d.nombre
+                    )}
+                    {i < detalles.desarrolladoras.length - 1 && ', '}
+                  </span>
+                ))
+              ) : (
+                'Not available'
+              )}
+            </div>
           </div>
           <div>
             <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Publisher</div>
-            <div className="text-gray-200">{detalles?.distribuidoras?.length > 0 ? detalles.distribuidoras.join(', ') : 'Not available'}</div>
+            <div className="text-gray-200">
+              {detalles?.distribuidoras?.length > 0 ? (
+                detalles.distribuidoras.map((d: any, i: number) => (
+                  <span key={d.id ?? i}>
+                    {d.id ? (
+                      <Link href={`/developer/${d.id}`} className="hover:underline hover:text-white transition">
+                        {d.nombre}
+                      </Link>
+                    ) : (
+                      d.nombre
+                    )}
+                    {i < detalles.distribuidoras.length - 1 && ', '}
+                  </span>
+                ))
+              ) : (
+                'Not available'
+              )}
+            </div>
           </div>
         </div>
       )}
