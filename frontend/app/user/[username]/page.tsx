@@ -191,7 +191,7 @@ export default function PerfilPublicoPage() {
                 sirve tus propias listas con tu sesión) — de momento no es un
                 enlace, para no llevar a un 404. */}
             <span className="pb-3 text-sm font-semibold text-gray-400 whitespace-nowrap">Lists</span>
-            <span className="pb-3 text-sm font-semibold text-gray-400 whitespace-nowrap">Reviews</span>
+            <Link href={`/user/${username}/reviews`} className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Reviews</Link>
           </div>
         </div>
       </div>

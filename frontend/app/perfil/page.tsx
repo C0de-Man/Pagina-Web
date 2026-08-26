@@ -173,7 +173,7 @@ export default function Perfil() {
             <Link href="/perfil/games" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Played</Link>
             <Link href="/books" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Books</Link>
             <Link href="/perfil/lists" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Lists</Link>
-            <span className="pb-3 text-sm font-semibold text-gray-400 whitespace-nowrap">Reviews</span>
+            <Link href="/perfil/reviews" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Reviews</Link>
           </div>
         </div>
       </div>
@@ -209,7 +209,7 @@ export default function Perfil() {
         {/* Solo se muestra si tienes algún juego en curso ahora mismo. */}
         {jugandoAhora.length > 0 && (
           <section>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Currently Playing/Watching</h2>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Currently Playing</h2>
             <div className="relative group/carousel">
               <div
                 ref={jugandoAhoraRef}
@@ -240,6 +240,12 @@ export default function Perfil() {
             </div>
           </section>
         )}
+
+        <section>
+          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Following</h2>
+          <p className="text-gray-500 text-sm">You're not following anyone yet.</p>
+        </section>
+
         <section>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">Recent activity</h2>

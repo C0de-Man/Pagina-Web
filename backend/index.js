@@ -2497,6 +2497,108 @@ app.delete('/logs/:logId', requireAuth, async (req, res) => {
   }
 });
 
+// --- RESEÑAS (pestaña "Reviews" del perfil): mezcla WatchLog.review
+// (películas/series) y GameLog.review (juegos) en una sola lista, ordenada
+// por fecha descendente. La usan tanto la ruta privada (/media/reviews, tu
+// propia sesión) como la pública (/users/:username/reviews, sin sesión),
+// para no duplicar la lógica de combinar+ordenar entre las dos.
+async function construirResenas(userId) {
+  const [watchLogs, gameLogs] = await Promise.all([
+    prisma.watchLog.findMany({
+      where: { userId, review: { not: null } },
+      orderBy: { fechaVisto: 'desc' },
+    }),
+    prisma.gameLog.findMany({
+      where: { userId, review: { not: null } },
+      orderBy: { createdAt: 'desc' },
+    }),
+  ]);
+
+  // review: { not: null } no descarta strings vacíos (""), así que se filtra
+  // aparte tras traerlos.
+  const watchLogsConTexto = watchLogs.filter((w) => w.review && w.review.trim());
+  const gameLogsConTexto = gameLogs.filter((g) => g.review && g.review.trim());
+
+  const mediaIds = [...new Set([...watchLogsConTexto.map((w) => w.mediaId), ...gameLogsConTexto.map((g) => g.mediaId)])];
+  const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+
+  const personalizaciones = await prisma.userMedia.findMany({
+    where: { userId, mediaId: { in: mediaIds } },
+    select: { mediaId: true, customPoster: true, rating: true, liked: true },
+  });
+  const persPorMediaId = new Map(personalizaciones.map((p) => [p.mediaId, p]));
+
+  const resenasPeliculas = watchLogsConTexto
+    .map((w) => {
+      const item = mediaItems.find((m) => m.id === w.mediaId);
+      if (!item) return null;
+      const pers = persPorMediaId.get(w.mediaId);
+      return {
+        ...item, // id, tmdbId, igdbId, tituloOriginal... todo lo que urlFicha() pueda necesitar
+        logId: `watchlog-${w.id}`, // clave de React única — NO usar como id de urlFicha
+        mediaId: w.mediaId,
+        portada: pers?.customPoster || item.portada,
+        review: w.review,
+        rating: pers?.rating ?? null, // nota general de la película (UserMedia), no por log
+        liked: pers?.liked ?? false,
+        rewatch: w.rewatch,
+        fecha: w.fechaVisto,
+      };
+    })
+    .filter(Boolean);
+
+  const resenasJuegos = gameLogsConTexto
+    .map((g) => {
+      const item = mediaItems.find((m) => m.id === g.mediaId);
+      if (!item) return null;
+      const pers = persPorMediaId.get(g.mediaId);
+      return {
+        ...item, // id, tmdbId, igdbId, tituloOriginal... todo lo que urlFicha() pueda necesitar
+        logId: `gamelog-${g.id}`, // clave de React única — NO usar como id de urlFicha
+        mediaId: g.mediaId,
+        portada: pers?.customPoster || item.portada,
+        review: g.review,
+        rating: g.rating ?? null, // nota de ESTE log concreto (GameLog sí la guarda por log)
+        logNombre: g.nombre,
+        fecha: g.fechaFin || g.fechaInicio || g.createdAt,
+      };
+    })
+    .filter(Boolean);
+
+  return [...resenasPeliculas, ...resenasJuegos].sort(
+    (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
+  );
+}
+
+// --- MIS RESEÑAS (privado, tu propia sesión) ---
+app.get('/media/reviews', requireAuth, async (req, res) => {
+  try {
+    const resenas = await construirResenas(req.userId);
+    res.json(resenas);
+  } catch (error) {
+    console.error('ERROR EN GET /media/reviews:', error);
+    res.status(500).json({ error: 'Error al obtener las reseñas' });
+  }
+});
+
+// --- RESEÑAS DE UN USUARIO (público, sin sesión) ---
+app.get('/users/:username/reviews', async (req, res) => {
+  try {
+    const username = req.params.username;
+    const usuario = await prisma.user.findFirst({
+      where: { username: { equals: username, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const resenas = await construirResenas(usuario.id);
+    res.json(resenas);
+  } catch (error) {
+    console.error('ERROR EN GET /users/:username/reviews:', error);
+    res.status(500).json({ error: 'Error al obtener las reseñas del usuario' });
+  }
+});
+
 // --- REGISTROS DE VISIONADO (películas/series) ---
 // Versión simplificada de los logs de juegos: aquí el modal manda todo de
 // una vez (fecha, reseña, si es un rewatch), así que basta con un único
