@@ -242,11 +242,6 @@ export default function Perfil() {
         )}
 
         <section>
-          <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Following</h2>
-          <p className="text-gray-500 text-sm">You're not following anyone yet.</p>
-        </section>
-
-        <section>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">Recent activity</h2>
             <Link href="/perfil/actividad" className="text-xs text-gray-400 hover:text-white transition flex items-center gap-1">
