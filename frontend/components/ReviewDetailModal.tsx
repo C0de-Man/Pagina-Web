@@ -1,6 +1,9 @@
 'use client';
+import { useState } from 'react';
 import Link from 'next/link';
 import { urlFicha } from '@/lib/slug';
+import ReviewLogModal from './ReviewLogModal';
+import GameLogModal from './GameLogModal';
 
 function Estrellas({ rating }: { rating: number }) {
   const sobreCinco = rating / 2;
@@ -34,7 +37,41 @@ const ETIQUETA_TIPO: Record<string, string> = {
 };
 
 export default function ReviewDetailModal({ resena, onClose }: { resena: any; onClose: () => void }) {
+  const [editando, setEditando] = useState(false);
   if (!resena) return null;
+
+  const esJuego = resena.tipo === 'VIDEOJUEGO';
+  // resena.logId viene como "watchlog-123" o "gamelog-456" — se necesita el
+  // número real para llamar al endpoint de editar/borrar ESE registro.
+  const watchLogId = !esJuego && resena.logId ? parseInt(String(resena.logId).replace('watchlog-', ''), 10) : undefined;
+  const gameLogId = esJuego && resena.logId ? parseInt(String(resena.logId).replace('gamelog-', ''), 10) : undefined;
+
+  const cerrarEdicion = () => {
+    setEditando(false);
+    onClose();
+  };
+
+  if (editando) {
+    if (esJuego) {
+      return (
+        <GameLogModal
+          mediaId={resena.mediaId}
+          igdbId={resena.igdbId}
+          abrirAlMontar
+          logIdInicial={gameLogId}
+          onCerrado={cerrarEdicion}
+        />
+      );
+    }
+    return (
+      <ReviewLogModal
+        mediaId={resena.mediaId}
+        logId={watchLogId}
+        datosIniciales={{ fechaVisto: resena.fecha, review: resena.review, rewatch: resena.rewatch }}
+        onClose={cerrarEdicion}
+      />
+    );
+  }
 
   return (
     <div
@@ -92,13 +129,21 @@ export default function ReviewDetailModal({ resena, onClose }: { resena: any; on
 
           </div>
 
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-white text-xl leading-none flex-shrink-0 cursor-pointer"
-            aria-label="Close"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <button
+              onClick={() => setEditando(true)}
+              className="text-gray-400 hover:text-white text-xs font-semibold cursor-pointer"
+            >
+              ✎ Edit
+            </button>
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-white text-xl leading-none cursor-pointer"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {resena.tipo === 'VIDEOJUEGO' && (

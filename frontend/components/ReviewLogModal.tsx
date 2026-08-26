@@ -8,14 +8,21 @@ function formatFechaInput(fecha: Date) {
 export default function ReviewLogModal({
   mediaId,
   onClose,
+  logId,
+  datosIniciales,
 }: {
   mediaId: number;
   onClose: () => void;
+  logId?: number; // si viene, se EDITA ese registro en vez de crear uno nuevo
+  datosIniciales?: { fechaVisto?: string; review?: string; rewatch?: boolean };
 }) {
-  const [fechaVisto, setFechaVisto] = useState(formatFechaInput(new Date()));
-  const [rewatch, setRewatch] = useState(false);
-  const [review, setReview] = useState('');
+  const [fechaVisto, setFechaVisto] = useState(
+    datosIniciales?.fechaVisto ? formatFechaInput(new Date(datosIniciales.fechaVisto)) : formatFechaInput(new Date())
+  );
+  const [rewatch, setRewatch] = useState(datosIniciales?.rewatch ?? false);
+  const [review, setReview] = useState(datosIniciales?.review ?? '');
   const [guardando, setGuardando] = useState(false);
+  const [borrando, setBorrando] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   const guardar = async () => {
@@ -25,30 +32,46 @@ export default function ReviewLogModal({
     setGuardando(true);
     setErrorMsg('');
     try {
-      const res = await fetch(`http://localhost:3001/media/${mediaId}/watchlogs`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ fechaVisto, review: review || null, rewatch }),
-      });
-      if (!res.ok) throw new Error('fallo al guardar el registro');
+      if (logId) {
+        // Editando un registro ya existente
+        const res = await fetch(`http://localhost:3001/watchlogs/${logId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ fechaVisto, review: review || null, rewatch }),
+        });
+        if (!res.ok) throw new Error('fallo al actualizar el registro');
+      } else {
+        // Creando uno nuevo (comportamiento de siempre)
+        const res = await fetch(`http://localhost:3001/media/${mediaId}/watchlogs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ fechaVisto, review: review || null, rewatch }),
+        });
+        if (!res.ok) throw new Error('fallo al guardar el registro');
 
-      // Además de guardar el registro, marcamos la película/serie como vista
-      // (mismo patrón que usa ActionButtons con playStatus en juegos), y
-      // avisamos al ojo de ActionButtons con el mismo evento que ya usa
-      // RatingWidget, sin necesitar que ambos estén en el mismo componente.
-      await fetch(`http://localhost:3001/media/${mediaId}/status`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ watched: true }),
-      });
+        // Además de guardar el registro, marcamos la película/serie como vista
+        // (mismo patrón que usa ActionButtons con playStatus en juegos), y
+        // avisamos al ojo de ActionButtons con el mismo evento que ya usa
+        // RatingWidget, sin necesitar que ambos estén en el mismo componente.
+        // Esto solo tiene sentido al CREAR (si ya existía un log, ya estaba
+        // marcada como vista de antes).
+        await fetch(`http://localhost:3001/media/${mediaId}/status`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ watched: true }),
+        });
 
-      window.dispatchEvent(new CustomEvent('mediaWatchedChanged', { detail: { mediaId, watched: true } }));
+        window.dispatchEvent(new CustomEvent('mediaWatchedChanged', { detail: { mediaId, watched: true } }));
+      }
 
       onClose();
     } catch (error) {
@@ -56,6 +79,26 @@ export default function ReviewLogModal({
       setErrorMsg('No se pudo guardar. Inténtalo de nuevo.');
     }
     setGuardando(false);
+  };
+
+  const borrar = async () => {
+    if (!logId || borrando) return;
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    setBorrando(true);
+    try {
+      const res = await fetch(`http://localhost:3001/watchlogs/${logId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('fallo al borrar el registro');
+      onClose();
+    } catch (error) {
+      console.error('Error al borrar el registro de visionado', error);
+      setErrorMsg('No se pudo borrar. Inténtalo de nuevo.');
+    }
+    setBorrando(false);
   };
 
   return (
@@ -93,7 +136,16 @@ export default function ReviewLogModal({
 
         {errorMsg && <p className="text-red-400 text-xs mt-2">{errorMsg}</p>}
 
-        <div className="flex justify-end gap-3 mt-4">
+        <div className="flex justify-end items-center gap-3 mt-4">
+          {logId && (
+            <button
+              onClick={borrar}
+              disabled={borrando}
+              className="text-gray-400 hover:text-red-400 disabled:opacity-50 text-sm mr-auto cursor-pointer"
+            >
+              {borrando ? 'Deleting...' : '🗑️ Delete'}
+            </button>
+          )}
           <button onClick={onClose} className="text-gray-400 hover:text-white text-sm cursor-pointer">
             Cancel
           </button>
@@ -102,7 +154,7 @@ export default function ReviewLogModal({
             disabled={guardando}
             className="bg-green-600 hover:bg-green-500 disabled:opacity-50 px-5 py-2 rounded font-bold text-sm transition cursor-pointer"
           >
-            {guardando ? 'Guardando...' : 'Log'}
+            {guardando ? 'Guardando...' : logId ? 'Save Changes' : 'Log'}
           </button>
         </div>
       </div>

@@ -38,7 +38,19 @@ function fechaAInput(iso: string | null) {
   return iso ? iso.slice(0, 10) : '';
 }
 
-export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igdbId?: number }) {
+export default function GameLogModal({
+  mediaId,
+  igdbId,
+  abrirAlMontar,
+  logIdInicial,
+  onCerrado,
+}: {
+  mediaId: number;
+  igdbId?: number;
+  abrirAlMontar?: boolean;
+  logIdInicial?: number;
+  onCerrado?: () => void;
+}) {
   const [modalAbierto, setModalAbierto] = useState(false);
   const [logs, setLogs] = useState<LogForm[]>([]);
   const [activo, setActivo] = useState(0);
@@ -68,11 +80,6 @@ export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igd
       .catch(() => {});
   }, [igdbId]);
 
-  // Si hay una versión elegida y esa versión trae sus propias plataformas,
-  // el desplegable de Platform se reduce a esas — no tiene sentido dejar
-  // elegir "Nintendo DS" si la versión seleccionada es la de PlayStation 3.
-  // Sin versión elegida (o sin plataformas para esa versión), se ve la
-  // lista completa de siempre.
   const edicionElegida = ediciones.find((e) => e.titulo === logActual?.edicion);
   const plataformasFiltradas =
     edicionElegida && edicionElegida.plataformas.length > 0 ? edicionElegida.plataformas : plataformas;
@@ -106,7 +113,8 @@ export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igd
             review: l.review || '',
           }))
         );
-        setActivo(0);
+        const idx = logIdInicial ? data.findIndex((l: any) => l.id === logIdInicial) : -1;
+        setActivo(idx >= 0 ? idx : 0);
       } else {
         setLogs([LOG_VACIO('Log')]);
         setActivo(0);
@@ -116,6 +124,16 @@ export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igd
       setActivo(0);
     }
     setCargando(false);
+  };
+
+  useEffect(() => {
+    if (abrirAlMontar) abrirModal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abrirAlMontar]);
+
+  const cerrarModal = () => {
+    setModalAbierto(false);
+    onCerrado?.();
   };
 
   const actualizarCampo = (campo: keyof LogForm, valor: string) => {
@@ -219,8 +237,6 @@ export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igd
           headers: { Authorization: `Bearer ${token}` },
         });
         const creado = await res.json();
-        // El POST crea el log "en blanco" con su nombre por defecto; justo
-        // después mandamos el PATCH con lo que ya haya rellenado el usuario.
         await fetch(`${API_URL}/logs/${creado.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -228,7 +244,7 @@ export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igd
         });
         setLogs((prev) => prev.map((l, i) => (i === activo ? { ...l, id: creado.id, nombre: creado.nombre } : l)));
       }
-      setModalAbierto(false);
+      cerrarModal();
     } catch {
       // si falla, dejamos el modal abierto para que se pueda reintentar
     }
@@ -237,17 +253,19 @@ export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igd
 
   return (
     <>
-      <button
-        onClick={abrirModal}
-        className="w-full bg-[#2c3440] hover:bg-gray-600 text-white font-bold py-2 rounded text-sm transition cursor-pointer"
-      >
-        Review or log...
-      </button>
+      {!abrirAlMontar && (
+        <button
+          onClick={abrirModal}
+          className="w-full bg-[#2c3440] hover:bg-gray-600 text-white font-bold py-2 rounded text-sm transition cursor-pointer"
+        >
+          Review or log...
+        </button>
+      )}
 
       {modalAbierto && (
         <div
           className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
-          onClick={() => setModalAbierto(false)}
+          onClick={cerrarModal}
         >
           <div
             className="bg-[#1c2228] rounded-lg border border-gray-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl"
@@ -257,7 +275,6 @@ export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igd
               <div className="p-8 text-center text-gray-400">Cargando...</div>
             ) : (
               <div className="p-6">
-                {/* PESTAÑAS */}
                 <div className="flex items-center gap-3 mb-6 border-b border-gray-800 pb-3">
                   {logs.map((l, i) =>
                     renombrando && i === activo ? (
@@ -318,7 +335,6 @@ export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igd
                   </button>
                 </div>
 
-                {/* CAMPOS */}
                 <div className="grid grid-cols-3 gap-4 mb-6">
                   <div>
                     <p className="text-white font-bold text-sm mb-1.5">Platform</p>
@@ -397,7 +413,6 @@ export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igd
                   </div>
                 </div>
 
-                {/* REVIEW + TOTAL JUGADO */}
                 <div className="flex gap-4 mb-6">
                   <div className="flex-1">
                     <p className="text-white font-bold text-sm mb-1.5">Review</p>
@@ -434,11 +449,10 @@ export default function GameLogModal({ mediaId, igdbId }: { mediaId: number; igd
                   </div>
                 </div>
 
-                {/* ACCIONES */}
                 <div className="flex justify-between items-center pt-3 border-t border-gray-800">
                   <div className="flex gap-2">
                     <button
-                      onClick={() => setModalAbierto(false)}
+                      onClick={cerrarModal}
                       className="bg-[#2c3440] hover:bg-gray-600 text-white text-sm font-bold px-4 py-2 rounded transition cursor-pointer"
                     >
                       Cancel

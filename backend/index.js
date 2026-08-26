@@ -2717,6 +2717,47 @@ app.post('/media/:id/watchlogs', requireAuth, async (req, res) => {
   }
 });
 
+// --- EDITAR/BORRAR UN REGISTRO DE VISIONADO YA EXISTENTE ---
+// Mismo patrón de comprobación de dueño que ya usan PATCH/DELETE /logs/:logId
+// (juegos): se busca el registro primero y se comprueba que userId coincide
+// con quien pregunta, antes de tocar nada.
+app.patch('/watchlogs/:watchLogId', requireAuth, async (req, res) => {
+  try {
+    const watchLogId = parseInt(req.params.watchLogId, 10);
+    const log = await prisma.watchLog.findUnique({ where: { id: watchLogId } });
+    if (!log || log.userId !== req.userId) {
+      return res.status(404).json({ error: 'Registro no encontrado' });
+    }
+
+    const { fechaVisto, review, rewatch } = req.body;
+    const data = {};
+    if (fechaVisto !== undefined) data.fechaVisto = fechaVisto ? new Date(fechaVisto) : new Date();
+    if (review !== undefined) data.review = review;
+    if (rewatch !== undefined) data.rewatch = !!rewatch;
+
+    const actualizado = await prisma.watchLog.update({ where: { id: watchLogId }, data });
+    res.json(actualizado);
+  } catch (error) {
+    console.error('ERROR EN PATCH /watchlogs/:watchLogId:', error);
+    res.status(500).json({ error: 'Error al actualizar el registro de visionado' });
+  }
+});
+
+app.delete('/watchlogs/:watchLogId', requireAuth, async (req, res) => {
+  try {
+    const watchLogId = parseInt(req.params.watchLogId, 10);
+    const log = await prisma.watchLog.findUnique({ where: { id: watchLogId } });
+    if (!log || log.userId !== req.userId) {
+      return res.status(404).json({ error: 'Registro no encontrado' });
+    }
+    await prisma.watchLog.delete({ where: { id: watchLogId } });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN DELETE /watchlogs/:watchLogId:', error);
+    res.status(500).json({ error: 'Error al borrar el registro de visionado' });
+  }
+});
+
 // --- RUTA PARA OBTENER IMÁGENES DE TMDB ---
 app.get('/tmdb/images/:tmdbId', async (req, res) => {
   try {
