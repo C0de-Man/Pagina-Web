@@ -1831,6 +1831,56 @@ async function puedeVerContenidoPrivado(usuario, miUserId) {
   return follow?.estado === 'ACCEPTED';
 }
 
+// --- ORDENA los items de una lista según ordenPor/ordenDireccion ---
+// "items" ya viene como array de ListItem CON su Media incluida bajo
+// item.media (ver cómo se llama a esta función) y item.orden/createdAt
+// propios del ListItem. Para NOTA_MEDIA y MI_NOTA se necesita consultar
+// UserMedia aparte — se hace aquí dentro para no repetir la consulta en
+// cada sitio que ordena una lista (privada, pública, ambas).
+async function ordenarItemsDeLista(listItems, ordenPor, ordenDireccion, ownerId) {
+  const dir = ordenDireccion === 'ASC' ? 1 : -1;
+
+  if (ordenPor === 'MANUAL') {
+    return [...listItems].sort((a, b) => dir === 1 ? a.orden - b.orden : b.orden - a.orden);
+    // Nota: MANUAL con dir=-1 no tiene mucho sentido de cara al usuario (el
+    // orden que arrastraste a mano ya es el que es), pero se deja coherente
+    // con el resto en vez de ignorar la dirección sin más.
+  }
+
+  if (ordenPor === 'FECHA') {
+    return [...listItems].sort((a, b) => dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
+  }
+
+  if (ordenPor === 'NOMBRE') {
+    return [...listItems].sort((a, b) => dir * (a.media?.titulo || '').localeCompare(b.media?.titulo || ''));
+  }
+
+  if (ordenPor === 'NOTA_MEDIA' || ordenPor === 'MI_NOTA') {
+    const mediaIds = listItems.map((li) => li.mediaId);
+    const ratings = await prisma.userMedia.findMany({
+      where: { mediaId: { in: mediaIds }, rating: { not: null } },
+      select: { mediaId: true, userId: true, rating: true },
+    });
+
+    const notaMediaPorMediaId = new Map();
+    const miNotaPorMediaId = new Map();
+    const porMedia = new Map();
+    for (const r of ratings) {
+      if (!porMedia.has(r.mediaId)) porMedia.set(r.mediaId, []);
+      porMedia.get(r.mediaId).push(r.rating);
+      if (r.userId === ownerId) miNotaPorMediaId.set(r.mediaId, r.rating);
+    }
+    for (const [mediaId, notas] of porMedia) {
+      notaMediaPorMediaId.set(mediaId, notas.reduce((a, b) => a + b, 0) / notas.length);
+    }
+
+    const mapa = ordenPor === 'NOTA_MEDIA' ? notaMediaPorMediaId : miNotaPorMediaId;
+    return [...listItems].sort((a, b) => dir * ((mapa.get(a.mediaId) ?? -1) - (mapa.get(b.mediaId) ?? -1)));
+  }
+
+  return listItems;
+}
+
 
 // Para rutas públicas (como GET /media/:id, que se puede ver sin login) que
 // además quieren saber, SI hay sesión, quién pregunta — para poder mezclar
@@ -3258,7 +3308,9 @@ app.get('/tmdb/company/:companyId', async (req, res) => {
       return res.status(404).json({ error: 'Estudio no encontrado' });
     }
 
-    const peliculas = await mezclarCustomPosters(movies.results || [], getUserIdOpcional(req));
+    const urlMovies = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${lang}&with_companies=${companyId}&sort_by=primary_release_date.desc&page=${page}`;
+    const resultadosEnIngles = await conCaratulasIngles(urlMovies, movies.results || []);
+    const peliculas = await mezclarCustomPosters(resultadosEnIngles, getUserIdOpcional(req));
 
     res.json({
       id: company.id,
@@ -4539,6 +4591,7 @@ app.get('/lists', requireAuth, async (req, res) => {
         createdAt: l.createdAt,
         totalItems: l.items.length,
         portadas,
+        privada: l.privada,
         contieneMedia: mediaId ? l.items.some(i => i.mediaId === mediaId) : undefined
       };
     }));
@@ -4563,8 +4616,16 @@ app.get('/users/:username/lists', async (req, res) => {
     const puedeVer = await puedeVerContenidoPrivado(usuario, getUserIdOpcional(req));
     if (!puedeVer) return res.status(403).json({ error: 'Este perfil es privado', isPrivate: true });
 
+    const miUserId = getUserIdOpcional(req);
     const lists = await prisma.list.findMany({
-      where: { userId: usuario.id },
+      where: {
+        userId: usuario.id,
+        // Las listas privadas (privada=true) solo las ve el propio dueño —
+        // esto es aparte de la privacidad de la CUENTA (isPrivate): una
+        // cuenta pública puede igualmente tener listas sueltas marcadas
+        // como privadas.
+        ...(miUserId === usuario.id ? {} : { privada: false }),
+      },
       include: { items: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -4594,6 +4655,7 @@ app.get('/users/:username/lists', async (req, res) => {
           createdAt: l.createdAt,
           totalItems: l.items.length,
           portadas,
+          privada: l.privada,
         };
       })
     );
@@ -4626,6 +4688,12 @@ app.get('/users/:username/lists/:listId', async (req, res) => {
       return res.status(404).json({ error: 'Lista no encontrada' });
     }
 
+    const miUserId = getUserIdOpcional(req);
+    // Lista marcada como privada (aparte de la privacidad de la cuenta): solo el dueño.
+    if (list.privada && miUserId !== usuario.id) {
+      return res.status(404).json({ error: 'Lista no encontrada' });
+    }
+
     const mediaIds = list.items.map((i) => i.mediaId);
     const mediaItemsRaw = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
 
@@ -4639,14 +4707,18 @@ app.get('/users/:username/lists/:listId', async (req, res) => {
       select: { mediaId: true, customPoster: true },
     });
     const customPosterPorMediaId = new Map(personalizacionesDueno.filter((p) => p.customPoster).map((p) => [p.mediaId, p.customPoster]));
-    const mediaItems = mediaItemsRaw.map((item) => ({
-      ...item,
-      portada: customPosterPorMediaId.get(item.id) || item.portada,
+
+    const mediaPorId = new Map(mediaItemsRaw.map((m) => [m.id, m]));
+    const itemsConMedia = list.items.map((li) => ({ ...li, media: mediaPorId.get(li.mediaId) })).filter((li) => li.media);
+    const ordenados = await ordenarItemsDeLista(itemsConMedia, list.ordenPor, list.ordenDireccion, usuario.id);
+
+    const mediaItems = ordenados.map((li) => ({
+      ...li.media,
+      portada: customPosterPorMediaId.get(li.mediaId) || li.media.portada,
     }));
 
     const likesCount = await prisma.listLike.count({ where: { listId } });
 
-    const miUserId = getUserIdOpcional(req);
     const yaLeDiLike = miUserId
       ? await prisma.listLike.findUnique({ where: { userId_listId: { userId: miUserId, listId } } })
       : null;
@@ -4654,6 +4726,7 @@ app.get('/users/:username/lists/:listId', async (req, res) => {
     res.json({
       id: list.id,
       nombre: list.nombre,
+      modo: list.modo,
       items: mediaItems,
       autor: usuario.username,
       likesCount,
@@ -4796,12 +4869,111 @@ app.get('/lists/:id', requireAuth, async (req, res) => {
     }
 
     const mediaIds = list.items.map(i => i.mediaId);
-    const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+    const mediaItemsRaw = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
 
-    res.json({ id: list.id, nombre: list.nombre, items: mediaItems });
+    const misPersonalizaciones = await prisma.userMedia.findMany({
+      where: { userId: req.userId, mediaId: { in: mediaIds } },
+      select: { mediaId: true, customPoster: true },
+    });
+    const customPosterPorMediaId = new Map(misPersonalizaciones.filter((p) => p.customPoster).map((p) => [p.mediaId, p.customPoster]));
+
+    const mediaPorId = new Map(mediaItemsRaw.map((m) => [m.id, m]));
+    const itemsConMedia = list.items.map((li) => ({ ...li, media: mediaPorId.get(li.mediaId) })).filter((li) => li.media);
+
+    const ordenados = await ordenarItemsDeLista(itemsConMedia, list.ordenPor, list.ordenDireccion, req.userId);
+
+    const items = ordenados.map((li) => ({
+      ...li.media,
+      portada: customPosterPorMediaId.get(li.mediaId) || li.media.portada,
+      listItemId: li.id, // hace falta para el drag-and-drop (reordenar por ListItem, no por Media)
+      orden: li.orden,
+    }));
+
+    res.json({
+      id: list.id,
+      nombre: list.nombre,
+      privada: list.privada,
+      modo: list.modo,
+      ordenPor: list.ordenPor,
+      ordenDireccion: list.ordenDireccion,
+      items,
+    });
   } catch (error) {
     console.error('ERROR EN GET LIST:', error);
     res.status(500).json({ error: 'Error al obtener la lista' });
+  }
+});
+
+// --- EDITAR LOS METADATOS DE UNA LISTA (título, privacidad, modo, orden por defecto) ---
+app.patch('/lists/:id', requireAuth, async (req, res) => {
+  try {
+    const listId = parseInt(req.params.id);
+    const list = await prisma.list.findUnique({ where: { id: listId } });
+    if (!list || list.userId !== req.userId) {
+      return res.status(404).json({ error: 'Lista no encontrada' });
+    }
+
+    const { nombre, privada, modo, ordenPor, ordenDireccion } = req.body;
+    const data = {};
+    if (nombre !== undefined) {
+      if (!nombre.trim()) return res.status(400).json({ error: 'El nombre de la lista es obligatorio' });
+      data.nombre = nombre.trim();
+    }
+    if (privada !== undefined) data.privada = !!privada;
+    if (modo !== undefined) {
+      if (!['RANKED', 'GRID'].includes(modo)) return res.status(400).json({ error: 'modo inválido' });
+      data.modo = modo;
+    }
+    if (ordenPor !== undefined) {
+      if (!['MANUAL', 'NOMBRE', 'FECHA', 'NOTA_MEDIA', 'MI_NOTA'].includes(ordenPor)) {
+        return res.status(400).json({ error: 'ordenPor inválido' });
+      }
+      data.ordenPor = ordenPor;
+    }
+    if (ordenDireccion !== undefined) {
+      if (!['ASC', 'DESC'].includes(ordenDireccion)) return res.status(400).json({ error: 'ordenDireccion inválido' });
+      data.ordenDireccion = ordenDireccion;
+    }
+
+    const actualizada = await prisma.list.update({ where: { id: listId }, data });
+    res.json(actualizada);
+  } catch (error) {
+    console.error('ERROR EN PATCH /lists/:id:', error);
+    res.status(500).json({ error: 'Error al actualizar la lista' });
+  }
+});
+
+// --- REORDENAR A MANO LOS ITEMS DE UNA LISTA (arrastrar y soltar) ---
+// Mismo patrón que /admin/curated-collection-items/reorder: recibe los
+// listItemId YA en el orden final y pone orden = posición en esa lista.
+// También pone ordenPor = "MANUAL" de paso — si estabas viendo la lista
+// ordenada por nota y arrastras un ítem, lo lógico es que a partir de ahí
+// se quede en el orden manual que acabas de dejar, no que "vuelva" a
+// ordenarse por nota en el siguiente refresco.
+app.patch('/lists/:id/reorder', requireAuth, async (req, res) => {
+  try {
+    const listId = parseInt(req.params.id);
+    const list = await prisma.list.findUnique({ where: { id: listId } });
+    if (!list || list.userId !== req.userId) {
+      return res.status(404).json({ error: 'Lista no encontrada' });
+    }
+
+    const { listItemIds } = req.body;
+    if (!Array.isArray(listItemIds) || listItemIds.length === 0) {
+      return res.status(400).json({ error: 'Falta la lista de listItemIds en el nuevo orden' });
+    }
+
+    await prisma.$transaction([
+      ...listItemIds.map((id, index) =>
+        prisma.listItem.update({ where: { id: parseInt(id, 10) }, data: { orden: index } })
+      ),
+      prisma.list.update({ where: { id: listId }, data: { ordenPor: 'MANUAL' } }),
+    ]);
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN PATCH /lists/:id/reorder:', error);
+    res.status(500).json({ error: 'Error al reordenar la lista' });
   }
 });
 
@@ -4816,8 +4988,12 @@ app.post('/lists/:id/items', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Lista no encontrada' });
     }
 
+    // El nuevo item se añade al final del orden manual, no siempre a 0 —
+    // así "Add a game" no desordena lo que ya tenías arrastrado a mano.
+    const totalActual = await prisma.listItem.count({ where: { listId } });
+
     const item = await prisma.listItem.create({
-      data: { listId, mediaId }
+      data: { listId, mediaId, orden: totalActual }
     });
     res.status(201).json(item);
   } catch (error) {

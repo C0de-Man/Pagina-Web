@@ -105,16 +105,22 @@ model List {
   id        Int        @id @default(autoincrement())
   userId    Int
   nombre    String
+  privada   Boolean    @default(false) // si true, SOLO el dueño puede verla — ni siquiera tus seguidores aceptados
+  modo      String     @default("GRID") // "RANKED" | "GRID" — Ranked numera las posiciones, Grid no
+  ordenPor  String     @default("MANUAL") // "MANUAL" (orden que arrastras a mano) | "NOMBRE" | "FECHA" (fecha en que se añadió) | "NOTA_MEDIA" | "MI_NOTA"
+  ordenDireccion String @default("DESC") // "ASC" | "DESC"
   createdAt DateTime   @default(now())
   items     ListItem[]
   likes     ListLike[]
 }
 
 model ListItem {
-  id      Int  @id @default(autoincrement())
-  listId  Int
-  mediaId Int
-  list    List @relation(fields: [listId], references: [id], onDelete: Cascade)
+  id        Int      @id @default(autoincrement())
+  listId    Int
+  mediaId   Int
+  orden     Int      @default(0) // posición cuando ordenPor = "MANUAL" (arrastrar y soltar)
+  createdAt DateTime @default(now()) // para poder ordenar por "fecha en que se añadió"
+  list      List     @relation(fields: [listId], references: [id], onDelete: Cascade)
 
   @@unique([listId, mediaId]) // No repetir la misma película en la misma lista
 }
