@@ -2198,6 +2198,143 @@ app.post('/admin/curated-collections/:collectionId/reset', requireAuth, requireA
   }
 });
 
+// --- CREAR UN UNIVERSO CINEMATOGRÁFICO NUEVO ---
+app.post('/admin/cinematic-universes', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { nombre } = req.body;
+    if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Falta el nombre' });
+    const universo = await prisma.cinematicUniverse.create({ data: { nombre: nombre.trim() } });
+    res.json(universo);
+  } catch (error) {
+    console.error('ERROR EN POST /admin/cinematic-universes:', error);
+    res.status(500).json({ error: 'Error al crear el universo' });
+  }
+});
+
+// --- LISTAR TODOS LOS UNIVERSOS (para el desplegable "añadir a universo existente") ---
+app.get('/admin/cinematic-universes', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const universos = await prisma.cinematicUniverse.findMany({ orderBy: { nombre: 'asc' } });
+    res.json(universos);
+  } catch (error) {
+    console.error('ERROR EN GET /admin/cinematic-universes:', error);
+    res.status(500).json({ error: 'Error al listar universos' });
+  }
+});
+
+// --- AÑADIR UNA COLECCIÓN DE TMDB ENTERA A UN UNIVERSO (siembra automática) ---
+// Trae TODAS las películas de esa Collection de TMDB y las guarda como
+// CinematicUniverseItem, agrupadas bajo su propia pestaña. Las que ya
+// estuvieran (incluso en otra pestaña del mismo universo) se omiten.
+app.post('/admin/cinematic-universes/:universeId/collections', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const universeId = parseInt(req.params.universeId);
+    const { tmdbCollectionId, nombrePestaña } = req.body;
+    if (!tmdbCollectionId) return res.status(400).json({ error: 'Falta tmdbCollectionId' });
+
+    const apiKey = process.env.TMDB_API_KEY;
+    const r = await fetch(`https://api.themoviedb.org/3/collection/${tmdbCollectionId}?api_key=${apiKey}&language=${getLang(req)}`);
+    const d = await r.json();
+    if (!d.parts) return res.status(404).json({ error: 'Colección de TMDB no encontrada' });
+
+    const pestaña = (nombrePestaña || d.name || 'Collection').trim();
+
+    const existentes = await prisma.cinematicUniverseItem.findMany({
+      where: { universeId },
+      select: { tmdbId: true },
+    });
+    const idsExistentes = new Set(existentes.map((e) => e.tmdbId));
+
+    const maxOrden = await prisma.cinematicUniverseItem.aggregate({
+      where: { universeId, pestaña },
+      _max: { orden: true },
+    });
+    let orden = (maxOrden._max.orden ?? -1) + 1;
+
+    const nuevos = d.parts.filter((p) => !idsExistentes.has(p.id));
+    for (const p of nuevos) {
+      await prisma.cinematicUniverseItem.create({
+        data: {
+          universeId,
+          tmdbId: p.id,
+          titulo: p.title,
+          anio: p.release_date ? new Date(p.release_date).getFullYear() : null,
+          portada: p.poster_path ? `https://image.tmdb.org/t/p/w500${p.poster_path}` : null,
+          pestaña,
+          orden: orden++,
+        },
+      });
+    }
+
+    res.json({ añadidos: nuevos.length, omitidos: d.parts.length - nuevos.length });
+  } catch (error) {
+    console.error('ERROR EN POST /admin/cinematic-universes/:universeId/collections:', error);
+    res.status(500).json({ error: 'Error al añadir la colección al universo' });
+  }
+});
+
+// --- AÑADIR UNA PELÍCULA SUELTA A UNA PESTAÑA DE UN UNIVERSO (buscador) ---
+app.post('/admin/cinematic-universe-items', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { universeId, tmdbId, titulo, anio, portada, pestaña } = req.body;
+    if (!universeId || !tmdbId || !titulo || !pestaña) {
+      return res.status(400).json({ error: 'Faltan datos' });
+    }
+
+    const maxOrden = await prisma.cinematicUniverseItem.aggregate({
+      where: { universeId, pestaña },
+      _max: { orden: true },
+    });
+
+    const item = await prisma.cinematicUniverseItem.create({
+      data: {
+        universeId,
+        tmdbId,
+        titulo,
+        anio: anio || null,
+        portada: portada || null,
+        pestaña,
+        orden: (maxOrden._max.orden ?? -1) + 1,
+      },
+    });
+    res.json(item);
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'Esta película ya está en el universo' });
+    }
+    console.error('ERROR EN POST /admin/cinematic-universe-items:', error);
+    res.status(500).json({ error: 'Error al añadir la película' });
+  }
+});
+
+// --- QUITAR UNA PELÍCULA DE UN UNIVERSO (no toca Media ni UserMedia) ---
+app.delete('/admin/cinematic-universe-items/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await prisma.cinematicUniverseItem.delete({ where: { id: parseInt(req.params.id) } });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN DELETE /admin/cinematic-universe-items/:id:', error);
+    res.status(500).json({ error: 'Error al eliminar' });
+  }
+});
+
+// --- REORDENAR (arrastrar y soltar) DENTRO DE UNA MISMA PESTAÑA ---
+// Mismo patrón que /admin/curated-collection-items/reorder: recibe los ids
+// YA en el orden final y los numera tal cual.
+app.patch('/admin/cinematic-universe-items/reorder', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids)) return res.status(400).json({ error: 'Falta el array de ids' });
+    for (let i = 0; i < ids.length; i++) {
+      await prisma.cinematicUniverseItem.update({ where: { id: ids[i] }, data: { orden: i } });
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN PATCH /admin/cinematic-universe-items/reorder:', error);
+    res.status(500).json({ error: 'Error al reordenar' });
+  }
+});
+
 // --- IDIOMA / REGIÓN: el frontend los manda en cada petición (?language=&region=) ---
 // leídos de las preferencias guardadas del usuario (o localStorage si no ha iniciado sesión).
 // Si no llegan, caen a los valores por defecto de siempre.
@@ -3081,6 +3218,35 @@ async function buscarOrdenNarrativoWikidata(imdbId) {
   }
 }
 
+// Igual que construirRespuestaDesdeCurated para juegos: agrupa los items ya
+// guardados de un universo por su "pestaña" (nombre de la sub-colección de
+// TMDB, o "Other" para añadidos sueltos a mano).
+async function construirRespuestaUniverso(tmdbId) {
+  const itemExistente = await prisma.cinematicUniverseItem.findFirst({
+    where: { tmdbId },
+    select: { universeId: true },
+  });
+  if (!itemExistente) return null;
+
+  const universe = await prisma.cinematicUniverse.findUnique({
+    where: { id: itemExistente.universeId },
+    include: { items: { orderBy: { orden: 'asc' } } },
+  });
+  if (!universe) return null;
+
+  const pestañasMap = new Map();
+  for (const item of universe.items) {
+    if (!pestañasMap.has(item.pestaña)) pestañasMap.set(item.pestaña, []);
+    pestañasMap.get(item.pestaña).push(item);
+  }
+
+  return {
+    id: universe.id,
+    nombre: universe.nombre,
+    pestañas: Array.from(pestañasMap.entries()).map(([nombre, items]) => ({ nombre, items })),
+  };
+}
+
 app.get('/tmdb/collection/:tmdbId', async (req, res) => {
   try {
     const { tmdbId } = req.params;
@@ -3090,10 +3256,18 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
     const movieData = await movieRes.json();
 
     if (!movieData.belongs_to_collection) {
-      return res.json({ prequel: null, sequel: null, nombreColeccion: null, parts: [] });
+      const universoSuelto = await construirRespuestaUniverso(parseInt(tmdbId));
+      return res.json({ prequel: null, sequel: null, nombreColeccion: null, collectionId: null, parts: [], universo: universoSuelto });
     }
 
     const collectionId = movieData.belongs_to_collection.id;
+
+    // ¿Esta PELÍCULA (no la colección) ya está guardada como parte de un
+    // universo? Se mira por tmdbId directo, no por collectionId — así
+    // también funcionan películas sueltas añadidas a mano a "Other" que no
+    // pertenecen a ninguna Collection real de TMDB.
+    const universo = await construirRespuestaUniverso(parseInt(tmdbId));
+
     const colRes = await fetch(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${apiKey}&language=${getLang(req)}`);
     const colData = await colRes.json();
 
@@ -3154,7 +3328,7 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
       // si Wikidata falla, nos quedamos con el orden por fecha de estreno
     }
 
-    res.json({ prequel, sequel, nombreColeccion: colData.name || null, parts });
+    res.json({ prequel, sequel, nombreColeccion: colData.name || null, collectionId, parts, universo });
   } catch (error) {
     console.error("Error al obtener la colección:", error);
     res.status(500).json({ error: "Error al obtener colección" });
