@@ -2458,7 +2458,7 @@ app.get('/media/watched', requireAuth, async (req, res) => {
   try {
     const entries = await prisma.userMedia.findMany({
       where: { userId: req.userId, watched: true },
-      orderBy: { updatedAt: 'desc' }
+      orderBy: { lastActivityAt: 'desc' }
     });
 
     const mediaIds = entries.map(e => e.mediaId);
@@ -2472,7 +2472,7 @@ app.get('/media/watched', requireAuth, async (req, res) => {
           ...item,
           portada: e.customPoster || item.portada,
           backdrop: e.customBackdrop || item.backdrop,
-          fechaVisto: e.updatedAt,
+          fechaVisto: e.lastActivityAt,
           rating: e.rating,
           liked: e.liked
         };
@@ -2491,7 +2491,7 @@ app.get('/media/watchlist', requireAuth, async (req, res) => {
   try {
     const entries = await prisma.userMedia.findMany({
       where: { userId: req.userId, watchlist: true },
-      orderBy: { updatedAt: 'desc' }
+      orderBy: { lastActivityAt: 'desc' }
     });
 
     const mediaIds = entries.map(e => e.mediaId);
@@ -2505,7 +2505,7 @@ app.get('/media/watchlist', requireAuth, async (req, res) => {
           ...item,
           portada: e.customPoster || item.portada,
           backdrop: e.customBackdrop || item.backdrop,
-          fechaAgregado: e.updatedAt
+          fechaAgregado: e.lastActivityAt
         };
       })
       .filter(Boolean);
@@ -2522,7 +2522,7 @@ app.get('/media/playing', requireAuth, async (req, res) => {
   try {
     const entries = await prisma.userMedia.findMany({
       where: { userId: req.userId, playStatus: 'PLAYING' },
-      orderBy: { updatedAt: 'desc' }
+      orderBy: { lastActivityAt: 'desc' }
     });
 
     const mediaIds = entries.map(e => e.mediaId);
@@ -4494,6 +4494,14 @@ app.patch('/media/:id/status', requireAuth, async (req, res) => {
       data.playStatus = playStatus;
       data.watched = playStatus !== null;
     }
+
+    // lastActivityAt es lo que ordena Watched/Watchlist/Currently Playing.
+    // Solo se toca cuando pasa algo que de verdad cuenta como actividad —
+    // NO cuando solo cambias customPoster/customBackdrop (eso usaría
+    // updatedAt igualmente, pero ya no se usa updatedAt para ordenar).
+    const camposDeActividadReal = ['watched', 'liked', 'watchlist', 'rating', 'playStatus'];
+    const hayActividadReal = camposDeActividadReal.some((campo) => req.body[campo] !== undefined);
+    if (hayActividadReal) data.lastActivityAt = new Date();
 
     const status = await prisma.userMedia.upsert({
       where: { userId_mediaId: { userId: req.userId, mediaId } },

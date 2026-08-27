@@ -3,6 +3,15 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import StarRating from '@/components/StarRating';
 import { urlFicha } from '@/lib/slug';
+import SortDropdown from '@/components/SortDropdown';
+import { useSortPreference } from '@/hooks/useSortPreference';
+import { OPCIONES_ORDEN_JUEGOS_DISPONIBLE, ordenarItems, type Selectores } from '@/lib/ordenamiento';
+
+const selectoresJuegos: Selectores<any> = {
+  nombre: (i) => i.titulo,
+  fechaLanzamiento: (i) => i.anio,
+  miNota: (i) => i.rating,
+};
 
 export default function MisJuegos() {
   const [juegos, setJuegos] = useState<any[]>([]);
@@ -20,17 +29,26 @@ export default function MisJuegos() {
       .then((res) => res.json())
       .then((data) => {
         const soloJuegos = data.filter((m: any) => m.tipo === 'VIDEOJUEGO');
-        // Orden por defecto: orden de salida (año, ascendente)
-        soloJuegos.sort((a: any, b: any) => (b.anio || 0) - (a.anio || 0));
         setJuegos(soloJuegos);
       })
       .catch(() => {});
   }, []);
 
+  const { valor: orden, setValor: setOrden, cargado: ordenCargado } = useSortPreference('played', {
+    campo: 'fechaLanzamiento',
+    direccion: 'DESC',
+  });
+  const juegosOrdenados = ordenCargado ? ordenarItems(juegos, orden, selectoresJuegos) : juegos;
+
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <h1 className="text-2xl font-extrabold mb-6">Played</h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-extrabold">Played</h1>
+          {logueado && juegos.length > 0 && (
+            <SortDropdown opciones={OPCIONES_ORDEN_JUEGOS_DISPONIBLE} valor={orden} onChange={setOrden} />
+          )}
+        </div>
 
         {!logueado ? (
           <p className="text-gray-400 text-sm">
@@ -40,7 +58,7 @@ export default function MisJuegos() {
           <p className="text-gray-500 text-sm">Aún no has marcado ningún juego como jugado.</p>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
-            {juegos.map((item) => (
+            {juegosOrdenados.map((item) => (
               <div key={item.id} className="flex flex-col gap-1.5">
                 <Link href={urlFicha(item)} className="group relative block">
                   {item.portada ? (

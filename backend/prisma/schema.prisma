@@ -86,6 +86,7 @@ model Notification {
 }
 
 model UserMedia {
+  lastActivityAt DateTime?
   id            Int      @id @default(autoincrement())
   userId        Int
   mediaId       Int

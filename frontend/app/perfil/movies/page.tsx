@@ -3,6 +3,15 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import StarRating from '@/components/StarRating';
 import { urlFicha } from '@/lib/slug';
+import SortDropdown from '@/components/SortDropdown';
+import { useSortPreference } from '@/hooks/useSortPreference';
+import { OPCIONES_ORDEN_WATCHED_DISPONIBLE, ordenarItems, type Selectores } from '@/lib/ordenamiento';
+
+const selectoresPeliculas: Selectores<any> = {
+  nombre: (i) => i.titulo,
+  fechaEstreno: (i) => i.anio,
+  miNota: (i) => i.rating,
+};
 
 export default function MisPeliculas() {
   const [peliculas, setPeliculas] = useState<any[]>([]);
@@ -20,17 +29,28 @@ export default function MisPeliculas() {
       .then((res) => res.json())
       .then((data) => {
         const soloPeliculas = data.filter((m: any) => m.tipo === 'PELICULA');
-        // Orden por defecto: orden de salida (año, ascendente)
-        soloPeliculas.sort((a: any, b: any) => (b.anio || 0) - (a.anio || 0));
         setPeliculas(soloPeliculas);
       })
       .catch(() => {});
   }, []);
 
+  const { valor: orden, setValor: setOrden, cargado: ordenCargado } = useSortPreference('watched', {
+    campo: 'fechaEstreno',
+    direccion: 'DESC',
+  });
+  const peliculasOrdenadas = ordenCargado
+    ? ordenarItems(peliculas, orden, selectoresPeliculas)
+    : peliculas;
+
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <h1 className="text-2xl font-extrabold mb-6">Watched</h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-extrabold">Watched</h1>
+          {logueado && peliculas.length > 0 && (
+            <SortDropdown opciones={OPCIONES_ORDEN_WATCHED_DISPONIBLE} valor={orden} onChange={setOrden} />
+          )}
+        </div>
 
         {!logueado ? (
           <p className="text-gray-400 text-sm">
@@ -40,7 +60,7 @@ export default function MisPeliculas() {
           <p className="text-gray-500 text-sm">You haven't marked any movies as watched yet.</p>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
-            {peliculas.map((item) => (
+            {peliculasOrdenadas.map((item) => (
               <div key={item.id} className="flex flex-col gap-1.5">
                 <Link href={urlFicha(item)} className="group relative block">
                   {item.portada ? (
