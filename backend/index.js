@@ -122,7 +122,7 @@ app.get('/igdb/details/:igdbId', async (req, res) => {
     const { igdbId } = req.params;
     const token = await getIgdbToken();
 
-    const body = `fields platforms.name, genres.name, involved_companies.company.id, involved_companies.company.name, involved_companies.developer, involved_companies.publisher; where id = ${igdbId};`;
+    const body = `fields first_release_date, platforms.name, genres.name, involved_companies.company.id, involved_companies.company.name, involved_companies.developer, involved_companies.publisher; where id = ${igdbId};`;
     const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
@@ -136,7 +136,7 @@ app.get('/igdb/details/:igdbId', async (req, res) => {
     const data = await response.json();
     const juego = data[0];
 
-    if (!juego) return res.json({ plataformas: [], generos: [], desarrolladoras: [], distribuidoras: [] });
+    if (!juego) return res.json({ plataformas: [], generos: [], desarrolladoras: [], distribuidoras: [], fechaLanzamiento: null });
 
     const companies = juego.involved_companies || [];
 
@@ -144,6 +144,8 @@ app.get('/igdb/details/:igdbId', async (req, res) => {
     // de IGDB para poder enlazar cada developer/publisher a su propia
     // ficha (GET /igdb/company/:companyId).
     res.json({
+      // IGDB da first_release_date como timestamp Unix en SEGUNDOS (no ms)
+      fechaLanzamiento: juego.first_release_date ? juego.first_release_date * 1000 : null,
       plataformas: (juego.platforms || []).map(p => p.name),
       generos: (juego.genres || []).map(g => g.name),
       desarrolladoras: companies.filter(c => c.developer).map(c => ({ id: c.company?.id, nombre: c.company?.name })),
@@ -3174,6 +3176,7 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
 
     res.json({
       runtime: data.runtime || null,
+      fechaEstreno: data.release_date || null,
       presupuesto: data.budget || 0,
       ganancias: data.revenue || 0,
       // Antes solo el nombre (string). Ahora {id, nombre}: hace falta el id

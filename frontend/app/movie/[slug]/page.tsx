@@ -10,6 +10,7 @@ import WatchProviders from '@/components/WatchProviders';
 import PosterImage from '@/components/PosterImage';
 import BackdropImage from '@/components/BackdropImage';
 import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
+import { formatFechaEstrenoTmdb } from '@/lib/fecha';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
@@ -53,6 +54,7 @@ if (!media || media.error) {
   }
 
   const duracion = detalles ? formatRuntime(detalles.runtime) : null;
+  const fechaCompleta = detalles ? formatFechaEstrenoTmdb(detalles.fechaEstreno, idioma) : null;
 
   return (
     <main className="min-h-screen bg-gray-950 text-white font-sans pb-16">
@@ -70,7 +72,7 @@ if (!media || media.error) {
           <div className="flex-grow pt-24 md:pt-32">
             <h1 className="text-4xl md:text-5xl font-extrabold text-white mb-2">{media.titulo}</h1>
             <div className="flex items-center gap-2 text-gray-400 mb-6">
-              <span className="text-lg">{media.anio}</span>
+              <span className="text-lg">{fechaCompleta || media.anio}</span>
               {duracion && <span className="text-lg text-gray-500">({duracion})</span>}
               <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{media.tipo}</span>
             </div>

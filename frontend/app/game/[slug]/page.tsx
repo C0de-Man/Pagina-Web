@@ -10,6 +10,7 @@ import GameLogModal from '@/components/GameLogModal';
 import PosterImage from '@/components/PosterImage';
 import BackdropImage from '@/components/BackdropImage';
 import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
+import { formatFechaLanzamientoIgdb } from '@/lib/fecha';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
@@ -33,6 +34,8 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
     const resDetalles = await fetch(`http://localhost:3001/igdb/details/${media.igdbId}`, { cache: 'no-store' });
     detalles = await resDetalles.json();
   }
+
+  const fechaCompleta = detalles ? formatFechaLanzamientoIgdb(detalles.fechaLanzamiento, idioma) : null;
 
   if (!media || media.error) {
     return <div className="p-8 text-white text-center min-h-screen bg-gray-950 flex items-center justify-center">Medio no encontrado</div>;
@@ -59,7 +62,7 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
           <div className="flex-grow pt-24 md:pt-32">
             <h1 className="text-4xl md:text-5xl font-extrabold text-white mb-2">{media.titulo}</h1>
             <div className="flex items-center gap-2 text-gray-400 mb-6">
-              <span className="text-lg">{media.anio}</span>
+              <span className="text-lg">{fechaCompleta || media.anio}</span>
               <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{media.tipo}</span>
             </div>
 
