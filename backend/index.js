@@ -3095,6 +3095,28 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
     const colRes = await fetch(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${apiKey}&language=${getLang(req)}`);
     const colData = await colRes.json();
 
+    // Igual que en /tmdb/company/:companyId: si tu idioma no es inglés, se
+    // pide también en inglés y se superponen esas carátulas — si no, el
+    // modal mostraba en inglés solo las películas que ya habías abierto
+    // antes (guardadas en tu base de datos con el arreglo aplicado), y en
+    // el idioma pedido las que todavía no habías visitado. No se reutiliza
+    // conCaratulasIngles porque ese helper espera un array bajo "results"
+    // (discover/search), y /collection/:id devuelve un objeto con "parts".
+    if (getLang(req) !== 'en-US' && colData.parts?.length > 0) {
+      try {
+        const colResIngles = await fetch(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${apiKey}&language=en-US`);
+        const colDataIngles = await colResIngles.json();
+        const partesInglesPorId = new Map((colDataIngles.parts || []).map((p) => [p.id, p]));
+        colData.parts = colData.parts.map((p) => {
+          const ingles = partesInglesPorId.get(p.id);
+          if (!ingles) return p;
+          return { ...p, poster_path: ingles.poster_path || p.poster_path, backdrop_path: ingles.backdrop_path || p.backdrop_path };
+        });
+      } catch (e) {
+        console.error('No se pudieron obtener carátulas en inglés de la colección, se dejan las del idioma pedido:', e.message);
+      }
+    }
+
     const parts = colData.parts.sort((a, b) => new Date(a.release_date) - new Date(b.release_date));
 
     const currentIndex = parts.findIndex(p => p.id === parseInt(tmdbId));
