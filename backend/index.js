@@ -2233,7 +2233,10 @@ app.post('/admin/cinematic-universes/:universeId/collections', requireAuth, requ
     if (!tmdbCollectionId) return res.status(400).json({ error: 'Falta tmdbCollectionId' });
 
     const apiKey = process.env.TMDB_API_KEY;
-    const r = await fetch(`https://api.themoviedb.org/3/collection/${tmdbCollectionId}?api_key=${apiKey}&language=${getLang(req)}`);
+    // Sin &language= aquí a propósito: TMDB cae a inglés por defecto. Igual
+    // que el resto del catálogo, las carátulas de universo siempre se
+    // guardan en inglés — nunca en tu idioma de la interfaz.
+    const r = await fetch(`https://api.themoviedb.org/3/collection/${tmdbCollectionId}?api_key=${apiKey}`);
     const d = await r.json();
     if (!d.parts) return res.status(404).json({ error: 'Colección de TMDB no encontrada' });
 
