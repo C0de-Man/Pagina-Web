@@ -2259,12 +2259,19 @@ app.post('/admin/cinematic-universes/:universeId/collections', requireAuth, requ
           tmdbId: p.id,
           titulo: p.title,
           anio: p.release_date ? new Date(p.release_date).getFullYear() : null,
+          fechaEstreno: p.release_date ? new Date(p.release_date) : null,
           portada: p.poster_path ? `https://image.tmdb.org/t/p/w500${p.poster_path}` : null,
           pestaña,
           orden: orden++,
         },
       });
     }
+
+    await prisma.cinematicUniverseSource.upsert({
+      where: { universeId_tipo_tmdbId: { universeId, tipo: 'collection', tmdbId: parseInt(tmdbCollectionId) } },
+      update: {},
+      create: { universeId, tipo: 'collection', tmdbId: parseInt(tmdbCollectionId) },
+    });
 
     res.json({ añadidos: nuevos.length, omitidos: d.parts.length - nuevos.length });
   } catch (error) {
@@ -2273,10 +2280,334 @@ app.post('/admin/cinematic-universes/:universeId/collections', requireAuth, requ
   }
 });
 
+// --- IMPORTAR UN UNIVERSO ENTERO POR PRODUCTORA DE TMDB (siembra masiva) ---
+// TMDB no tiene el concepto de "universo" — esto es el mejor atajo posible:
+// trae TODAS las películas de una compañía (ej. Marvel Studios, id 420) y,
+// para cada una, mira a qué Collection propia pertenece para colocarla en
+// su pestaña automáticamente. Las que no pertenezcan a ninguna Collection
+// van a la pestaña "Other". No es infalible (coproducciones raras pueden
+// faltar) — es un punto de partida rápido, no sustituye la revisión manual.
+app.post('/admin/cinematic-universes/:universeId/import-by-company', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const universeId = parseInt(req.params.universeId);
+    const { tmdbCompanyId } = req.body;
+    if (!tmdbCompanyId) return res.status(400).json({ error: 'Falta tmdbCompanyId' });
+
+    const apiKey = process.env.TMDB_API_KEY;
+
+    // 1. Todas las películas de esa productora (todas las páginas, tope de seguridad 10)
+    let peliculas = [];
+    let pagina = 1;
+    let totalPaginas = 1;
+    do {
+      const r = await fetch(
+        `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&with_companies=${tmdbCompanyId}&sort_by=primary_release_date.asc&page=${pagina}`
+      );
+      const d = await r.json();
+      peliculas.push(...(d.results || []));
+      totalPaginas = d.total_pages || 1;
+      pagina++;
+    } while (pagina <= totalPaginas && pagina <= 10);
+
+    const existentes = await prisma.cinematicUniverseItem.findMany({
+      where: { universeId },
+      select: { tmdbId: true },
+    });
+    const idsExistentes = new Set(existentes.map((e) => e.tmdbId));
+
+    const ordenPorPestaña = {};
+    let añadidos = 0;
+
+    // Secuencial, no en paralelo: evita disparar decenas de peticiones a
+    // TMDB de golpe (mismo criterio que ya usas en refresh-covers-english).
+    for (const p of peliculas) {
+      if (idsExistentes.has(p.id)) continue;
+
+      let pestaña = 'Other';
+      try {
+        const detR = await fetch(`https://api.themoviedb.org/3/movie/${p.id}?api_key=${apiKey}`);
+        const det = await detR.json();
+        if (det.belongs_to_collection?.name) pestaña = det.belongs_to_collection.name;
+      } catch (e) {
+        // si falla la consulta de detalle, se queda en "Other"
+      }
+
+      if (ordenPorPestaña[pestaña] === undefined) {
+        const max = await prisma.cinematicUniverseItem.aggregate({
+          where: { universeId, pestaña },
+          _max: { orden: true },
+        });
+        ordenPorPestaña[pestaña] = (max._max.orden ?? -1) + 1;
+      }
+
+      await prisma.cinematicUniverseItem.create({
+        data: {
+          universeId,
+          tmdbId: p.id,
+          titulo: p.title,
+          anio: p.release_date ? new Date(p.release_date).getFullYear() : null,
+          fechaEstreno: p.release_date ? new Date(p.release_date) : null,
+          portada: p.poster_path ? `https://image.tmdb.org/t/p/w500${p.poster_path}` : null,
+          pestaña,
+          orden: ordenPorPestaña[pestaña]++,
+        },
+      });
+      idsExistentes.add(p.id);
+      añadidos++;
+    }
+
+    await prisma.cinematicUniverseSource.upsert({
+      where: { universeId_tipo_tmdbId: { universeId, tipo: 'company', tmdbId: parseInt(tmdbCompanyId) } },
+      update: {},
+      create: { universeId, tipo: 'company', tmdbId: parseInt(tmdbCompanyId) },
+    });
+
+    res.json({ añadidos, total: peliculas.length });
+  } catch (error) {
+    console.error('ERROR EN POST /admin/cinematic-universes/:universeId/import-by-company:', error);
+    res.status(500).json({ error: 'Error al importar por productora' });
+  }
+});
+
+// --- VACIAR UN UNIVERSO ENTERO (borra TODOS sus items, sin recalcular nada) ---
+// A diferencia de la colección curada de juegos, aquí no hay ninguna fuente
+// automática de la que recalcular ("universo" no existe como concepto en
+// TMDB) — esto solo deja el universo vacío, listo para volver a rellenarlo
+// con "Import whole studio" y/o "Add collection".
+app.post('/admin/cinematic-universes/:universeId/reset', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const universeId = parseInt(req.params.universeId);
+    const resultado = await prisma.cinematicUniverseItem.deleteMany({ where: { universeId } });
+    res.json({ ok: true, borrados: resultado.count });
+  } catch (error) {
+    console.error('ERROR EN POST /admin/cinematic-universes/:universeId/reset:', error);
+    res.status(500).json({ error: 'Error al vaciar el universo' });
+  }
+});
+
+// --- IMPORTAR UN UNIVERSO ENTERO POR KEYWORD DE TMDB (siembra masiva, más precisa que por productora) ---
+// TMDB tiene "keywords" curadas a mano por la comunidad, como "marvel
+// cinematic universe (mcu)" (id 180547, 82 películas exactas) — mucho más
+// preciso que filtrar por productora, que arrastra películas de otros
+// estudios que casualmente tienen "Marvel" en el nombre de la productora
+// (Ghost Rider, Spider-Man 3, Fantastic Four de Sony/Fox, etc.). Encuentras
+// el id del keyword en la URL de la página, tipo:
+// themoviedb.org/keyword/180547-marvel-cinematic-universe-mcu/movie
+app.post('/admin/cinematic-universes/:universeId/import-by-keyword', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const universeId = parseInt(req.params.universeId);
+    const { tmdbKeywordId } = req.body;
+    if (!tmdbKeywordId) return res.status(400).json({ error: 'Falta tmdbKeywordId' });
+
+    const apiKey = process.env.TMDB_API_KEY;
+
+    let peliculas = [];
+    let pagina = 1;
+    let totalPaginas = 1;
+    do {
+      const r = await fetch(
+        `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&with_keywords=${tmdbKeywordId}&sort_by=primary_release_date.asc&page=${pagina}`
+      );
+      const d = await r.json();
+      peliculas.push(...(d.results || []));
+      totalPaginas = d.total_pages || 1;
+      pagina++;
+    } while (pagina <= totalPaginas && pagina <= 10);
+
+    const existentes = await prisma.cinematicUniverseItem.findMany({
+      where: { universeId },
+      select: { tmdbId: true },
+    });
+    const idsExistentes = new Set(existentes.map((e) => e.tmdbId));
+
+    const ordenPorPestaña = {};
+    let añadidos = 0;
+
+    for (const p of peliculas) {
+      if (idsExistentes.has(p.id)) continue;
+
+      let pestaña = 'Other';
+      try {
+        const detR = await fetch(`https://api.themoviedb.org/3/movie/${p.id}?api_key=${apiKey}`);
+        const det = await detR.json();
+        if (det.belongs_to_collection?.name) pestaña = det.belongs_to_collection.name;
+      } catch (e) {
+        // si falla la consulta de detalle, se queda en "Other"
+      }
+
+      if (ordenPorPestaña[pestaña] === undefined) {
+        const max = await prisma.cinematicUniverseItem.aggregate({
+          where: { universeId, pestaña },
+          _max: { orden: true },
+        });
+        ordenPorPestaña[pestaña] = (max._max.orden ?? -1) + 1;
+      }
+
+      await prisma.cinematicUniverseItem.create({
+        data: {
+          universeId,
+          tmdbId: p.id,
+          titulo: p.title,
+          anio: p.release_date ? new Date(p.release_date).getFullYear() : null,
+          fechaEstreno: p.release_date ? new Date(p.release_date) : null,
+          portada: p.poster_path ? `https://image.tmdb.org/t/p/w500${p.poster_path}` : null,
+          pestaña,
+          orden: ordenPorPestaña[pestaña]++,
+        },
+      });
+      idsExistentes.add(p.id);
+      añadidos++;
+    }
+
+    await prisma.cinematicUniverseSource.upsert({
+      where: { universeId_tipo_tmdbId: { universeId, tipo: 'keyword', tmdbId: parseInt(tmdbKeywordId) } },
+      update: {},
+      create: { universeId, tipo: 'keyword', tmdbId: parseInt(tmdbKeywordId) },
+    });
+
+    res.json({ añadidos, total: peliculas.length });
+  } catch (error) {
+    console.error('ERROR EN POST /admin/cinematic-universes/:universeId/import-by-keyword:', error);
+    res.status(500).json({ error: 'Error al importar por keyword' });
+  }
+});
+
+// --- REFRESCAR UN UNIVERSO A MANO (vuelve a comprobar TODAS sus fuentes guardadas) ---
+// Revisa cada colección/productora/keyword que se usó alguna vez para
+// sembrar este universo y añade lo que sea nuevo. Nunca borra ni reordena
+// nada de lo que ya tienes editado a mano — solo puede AÑADIR películas que
+// no existieran ya.
+app.post('/admin/cinematic-universes/:universeId/refresh', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const universeId = parseInt(req.params.universeId);
+    const apiKey = process.env.TMDB_API_KEY;
+    const fuentes = await prisma.cinematicUniverseSource.findMany({ where: { universeId } });
+
+    let totalAñadidos = 0;
+
+    for (const fuente of fuentes) {
+      const existentes = await prisma.cinematicUniverseItem.findMany({
+        where: { universeId },
+        select: { tmdbId: true },
+      });
+      const idsExistentes = new Set(existentes.map((e) => e.tmdbId));
+
+      let peliculas = [];
+
+      if (fuente.tipo === 'collection') {
+        const r = await fetch(`https://api.themoviedb.org/3/collection/${fuente.tmdbId}?api_key=${apiKey}`);
+        const d = await r.json();
+        if (d.parts) peliculas = d.parts.map((p) => ({ ...p, __pestañaFija: d.name || 'Collection' }));
+      } else {
+        const parametro = fuente.tipo === 'company' ? 'with_companies' : 'with_keywords';
+        let pagina = 1;
+        let totalPaginas = 1;
+        do {
+          const r = await fetch(
+            `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&${parametro}=${fuente.tmdbId}&sort_by=primary_release_date.asc&page=${pagina}`
+          );
+          const d = await r.json();
+          peliculas.push(...(d.results || []));
+          totalPaginas = d.total_pages || 1;
+          pagina++;
+        } while (pagina <= totalPaginas && pagina <= 10);
+      }
+
+      const ordenPorPestaña = {};
+      for (const p of peliculas) {
+        if (idsExistentes.has(p.id)) continue;
+
+        let pestaña = p.__pestañaFija || 'Other';
+        if (!p.__pestañaFija) {
+          try {
+            const detR = await fetch(`https://api.themoviedb.org/3/movie/${p.id}?api_key=${apiKey}`);
+            const det = await detR.json();
+            if (det.belongs_to_collection?.name) pestaña = det.belongs_to_collection.name;
+          } catch (e) {}
+        }
+
+        if (ordenPorPestaña[pestaña] === undefined) {
+          const max = await prisma.cinematicUniverseItem.aggregate({
+            where: { universeId, pestaña },
+            _max: { orden: true },
+          });
+          ordenPorPestaña[pestaña] = (max._max.orden ?? -1) + 1;
+        }
+
+        await prisma.cinematicUniverseItem.create({
+          data: {
+            universeId,
+            tmdbId: p.id,
+            titulo: p.title,
+            anio: p.release_date ? new Date(p.release_date).getFullYear() : null,
+            fechaEstreno: p.release_date ? new Date(p.release_date) : null,
+            portada: p.poster_path ? `https://image.tmdb.org/t/p/w500${p.poster_path}` : null,
+            pestaña,
+            orden: ordenPorPestaña[pestaña]++,
+          },
+        });
+        idsExistentes.add(p.id);
+        totalAñadidos++;
+      }
+    }
+
+    res.json({ ok: true, fuentesRevisadas: fuentes.length, añadidos: totalAñadidos });
+  } catch (error) {
+    console.error('ERROR EN POST /admin/cinematic-universes/:universeId/refresh:', error);
+    res.status(500).json({ error: 'Error al refrescar el universo' });
+  }
+});
+
+// --- AÑADIR UNA PELÍCULA CONCRETA A UN UNIVERSO POR SU ID DE TMDB (a mano) ---
+// A diferencia del buscador de texto (que solo aparece en la pestaña propia),
+// esto deja pegar directamente el id de TMDB de una película — útil para
+// títulos raros que el buscador no encuentra bien, o para añadir sin salir
+// de este modal de importación masiva.
+app.post('/admin/cinematic-universes/:universeId/add-movie', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const universeId = parseInt(req.params.universeId);
+    const { tmdbId, pestaña } = req.body;
+    if (!tmdbId || !pestaña || !pestaña.trim()) {
+      return res.status(400).json({ error: 'Faltan datos: tmdbId y pestaña son obligatorios' });
+    }
+
+    const apiKey = process.env.TMDB_API_KEY;
+    const r = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}`);
+    const d = await r.json();
+    if (!d.id) return res.status(404).json({ error: 'Película no encontrada en TMDB' });
+
+    const pestañaLimpia = pestaña.trim();
+    const maxOrden = await prisma.cinematicUniverseItem.aggregate({
+      where: { universeId, pestaña: pestañaLimpia },
+      _max: { orden: true },
+    });
+
+    const item = await prisma.cinematicUniverseItem.create({
+      data: {
+        universeId,
+        tmdbId: d.id,
+        titulo: d.title,
+        anio: d.release_date ? new Date(d.release_date).getFullYear() : null,
+        fechaEstreno: d.release_date ? new Date(d.release_date) : null,
+        portada: d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : null,
+        pestaña: pestañaLimpia,
+        orden: (maxOrden._max.orden ?? -1) + 1,
+      },
+    });
+    res.json(item);
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'Esta película ya está en el universo' });
+    }
+    console.error('ERROR EN POST /admin/cinematic-universes/:universeId/add-movie:', error);
+    res.status(500).json({ error: 'Error al añadir la película' });
+  }
+});
+
 // --- AÑADIR UNA PELÍCULA SUELTA A UNA PESTAÑA DE UN UNIVERSO (buscador) ---
 app.post('/admin/cinematic-universe-items', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { universeId, tmdbId, titulo, anio, portada, pestaña } = req.body;
+    const { universeId, tmdbId, titulo, anio, fechaEstreno, portada, pestaña } = req.body;
     if (!universeId || !tmdbId || !titulo || !pestaña) {
       return res.status(400).json({ error: 'Faltan datos' });
     }
@@ -2292,6 +2623,7 @@ app.post('/admin/cinematic-universe-items', requireAuth, requireAdmin, async (re
         tmdbId,
         titulo,
         anio: anio || null,
+        fechaEstreno: fechaEstreno ? new Date(fechaEstreno) : null,
         portada: portada || null,
         pestaña,
         orden: (maxOrden._max.orden ?? -1) + 1,
@@ -2313,6 +2645,10 @@ app.delete('/admin/cinematic-universe-items/:id', requireAuth, requireAdmin, asy
     await prisma.cinematicUniverseItem.delete({ where: { id: parseInt(req.params.id) } });
     res.json({ ok: true });
   } catch (error) {
+    // P2025 = "no encontrado" — probablemente ya se borró antes (doble clic,
+    // o dos pestañas abiertas). El resultado que quería el admin (que esa
+    // fila no exista) ya es cierto, así que no hace falta tratarlo como error.
+    if (error.code === 'P2025') return res.json({ ok: true });
     console.error('ERROR EN DELETE /admin/cinematic-universe-items/:id:', error);
     res.status(500).json({ error: 'Error al eliminar' });
   }
@@ -2332,6 +2668,111 @@ app.patch('/admin/cinematic-universe-items/reorder', requireAuth, requireAdmin, 
   } catch (error) {
     console.error('ERROR EN PATCH /admin/cinematic-universe-items/reorder:', error);
     res.status(500).json({ error: 'Error al reordenar' });
+  }
+});
+
+// --- REORDENAR A MANO DENTRO DE LA PESTAÑA MEZCLADA DEL UNIVERSO ---
+// Igual que el reorder normal, pero escribe en ordenUniverso en vez de
+// orden — así no interfiere con el orden propio de cada sub-colección.
+// --- FASES ("ventanas") DENTRO DE LA PESTAÑA MEZCLADA DE UN UNIVERSO ---
+app.post('/admin/cinematic-universes/:universeId/phases', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const universeId = parseInt(req.params.universeId);
+    const { nombre } = req.body;
+    if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Falta el nombre de la fase' });
+
+    const max = await prisma.cinematicUniversePhase.aggregate({
+      where: { universeId },
+      _max: { orden: true },
+    });
+
+    const fase = await prisma.cinematicUniversePhase.create({
+      data: { universeId, nombre: nombre.trim(), orden: (max._max.orden ?? -1) + 1 },
+    });
+    res.json(fase);
+  } catch (error) {
+    console.error('ERROR EN POST /admin/cinematic-universes/:universeId/phases:', error);
+    res.status(500).json({ error: 'Error al crear la fase' });
+  }
+});
+
+// --- FASES ("ventanas") DENTRO DE LA PESTAÑA MEZCLADA DE UN UNIVERSO ---
+app.post('/admin/cinematic-universes/:universeId/phases', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const universeId = parseInt(req.params.universeId);
+    const { nombre } = req.body;
+    if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'Falta el nombre de la fase' });
+
+    const max = await prisma.cinematicUniversePhase.aggregate({
+      where: { universeId },
+      _max: { orden: true },
+    });
+
+    const fase = await prisma.cinematicUniversePhase.create({
+      data: { universeId, nombre: nombre.trim(), orden: (max._max.orden ?? -1) + 1 },
+    });
+    res.json(fase);
+  } catch (error) {
+    console.error('ERROR EN POST /admin/cinematic-universes/:universeId/phases:', error);
+    res.status(500).json({ error: 'Error al crear la fase' });
+  }
+});
+
+app.delete('/admin/cinematic-universe-phases/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    // las películas que estuvieran en esta fase quedan sin fase (faseId a
+    // null automáticamente), no se borran del universo
+    await prisma.cinematicUniversePhase.delete({ where: { id: parseInt(req.params.id) } });
+    res.json({ ok: true });
+  } catch (error) {
+    if (error.code === 'P2025') return res.json({ ok: true });
+    console.error('ERROR EN DELETE /admin/cinematic-universe-phases/:id:', error);
+    res.status(500).json({ error: 'Error al borrar la fase' });
+  }
+});
+
+// --- ASIGNAR (O QUITAR) LA FASE DE UNA PELÍCULA CONCRETA ---
+app.patch('/admin/cinematic-universe-items/:id/phase', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { faseId } = req.body; // number | null
+    const item = await prisma.cinematicUniverseItem.update({
+      where: { id },
+      data: { faseId: faseId ?? null },
+    });
+    res.json(item);
+  } catch (error) {
+    console.error('ERROR EN PATCH /admin/cinematic-universe-items/:id/phase:', error);
+    res.status(500).json({ error: 'Error al asignar la fase' });
+  }
+});
+
+app.delete('/admin/cinematic-universe-phases/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    // las películas que estuvieran en esta fase quedan sin fase (faseId a
+    // null automáticamente), no se borran del universo
+    await prisma.cinematicUniversePhase.delete({ where: { id: parseInt(req.params.id) } });
+    res.json({ ok: true });
+  } catch (error) {
+    if (error.code === 'P2025') return res.json({ ok: true });
+    console.error('ERROR EN DELETE /admin/cinematic-universe-phases/:id:', error);
+    res.status(500).json({ error: 'Error al borrar la fase' });
+  }
+});
+
+// --- ASIGNAR (O QUITAR) LA FASE DE UNA PELÍCULA CONCRETA ---
+app.patch('/admin/cinematic-universe-items/:id/phase', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { faseId } = req.body; // number | null
+    const item = await prisma.cinematicUniverseItem.update({
+      where: { id },
+      data: { faseId: faseId ?? null },
+    });
+    res.json(item);
+  } catch (error) {
+    console.error('ERROR EN PATCH /admin/cinematic-universe-items/:id/phase:', error);
+    res.status(500).json({ error: 'Error al asignar la fase' });
   }
 });
 
@@ -3230,7 +3671,10 @@ async function construirRespuestaUniverso(tmdbId) {
 
   const universe = await prisma.cinematicUniverse.findUnique({
     where: { id: itemExistente.universeId },
-    include: { items: { orderBy: { orden: 'asc' } } },
+    include: {
+      items: { orderBy: { orden: 'asc' } },
+      fases: { orderBy: { orden: 'asc' } },
+    },
   });
   if (!universe) return null;
 
@@ -3243,6 +3687,7 @@ async function construirRespuestaUniverso(tmdbId) {
   return {
     id: universe.id,
     nombre: universe.nombre,
+    fases: universe.fases,
     pestañas: Array.from(pestañasMap.entries()).map(([nombre, items]) => ({ nombre, items })),
   };
 }

@@ -210,30 +210,64 @@ model CuratedCollectionItem {
 // grande (ej. "Marvel Cinematic Universe"). Curado a mano, igual que
 // CuratedCollection para juegos, pero gestionado desde Prisma Studio.
 model CinematicUniverse {
-  id        Int                     @id @default(autoincrement())
-  nombre    String                  // "Marvel Cinematic Universe"
-  createdAt DateTime                @default(now())
+  id        Int                          @id @default(autoincrement())
+  nombre    String                       // "Marvel Cinematic Universe"
+  createdAt DateTime                     @default(now())
   items     CinematicUniverseItem[]
+  fuentes   CinematicUniverseSource[]
+  fases     CinematicUniversePhase[]
 }
-
 // Igual que CuratedCollectionItem para juegos: se siembra automáticamente la
 // primera vez que un admin añade una colección de TMDB a un universo (se
 // copian todas sus películas aquí), y a partir de ahí se sirve y se edita
 // desde esta tabla — nunca se vuelve a recalcular sola desde TMDB.
 model CinematicUniverseItem {
-  id         Int      @id @default(autoincrement())
-  universeId Int
-  tmdbId     Int      // id de la película en TMDB
-  titulo     String
-  anio       Int?
-  portada    String?
-  pestaña    String   // nombre del grupo/pestaña (nombre de la sub-colección, o "Other")
-  orden      Int      @default(0) // orden dentro de su propia pestaña (arrastrar y soltar)
-  createdAt  DateTime @default(now())
+  id            Int       @id @default(autoincrement())
+  universeId    Int
+  tmdbId        Int       // id de la película en TMDB
+  titulo        String
+  anio          Int?
+  fechaEstreno  DateTime? // fecha completa de estreno (TMDB release_date) — para ordenar de verdad por año/mes/día, no solo por año
+  portada       String?
+  pestaña       String    // nombre del grupo/pestaña (nombre de la sub-colección, o "Other")
+  orden         Int       @default(0) // orden dentro de su propia pestaña (arrastrar y soltar)
+  ordenUniverso Int?      // orden manual SOLO para la pestaña mezclada del universo entero; si es null, esa pestaña sigue ordenando por fechaEstreno
+  faseId        Int?      // a qué "ventana"/fase pertenece dentro de la pestaña mezclada (null = sin asignar)
+  fase          CinematicUniversePhase? @relation(fields: [faseId], references: [id], onDelete: SetNull)
+  createdAt     DateTime  @default(now())
 
   universe CinematicUniverse @relation(fields: [universeId], references: [id], onDelete: Cascade)
 
   @@unique([universeId, tmdbId])
+}
+
+// Recuerda qué keyword/productora de TMDB se usó para sembrar un universo,
+// para poder repetir la importación más tarde (a mano con "Refresh", o
+// automáticamente) sin tener que volver a teclear el id cada vez.
+model CinematicUniverseSource {
+  id         Int      @id @default(autoincrement())
+  universeId Int
+  tipo       String   // "keyword" | "company"
+  tmdbId     Int
+  createdAt  DateTime @default(now())
+
+  universe CinematicUniverse @relation(fields: [universeId], references: [id], onDelete: Cascade)
+
+  @@unique([universeId, tipo, tmdbId])
+}
+
+// "Ventanas"/fases dentro de la pestaña mezclada de un universo (ej. "Phase
+// 1", "Phase 2" del UCM). Solo agrupan visualmente esa vista mezclada — no
+// afectan a las pestañas de cada sub-colección ni a su orden interno.
+model CinematicUniversePhase {
+  id         Int      @id @default(autoincrement())
+  universeId Int
+  nombre     String
+  orden      Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  universe CinematicUniverse       @relation(fields: [universeId], references: [id], onDelete: Cascade)
+  items    CinematicUniverseItem[]
 }
 
 // --- REGISTROS DE VISIONADO (películas/series) ---

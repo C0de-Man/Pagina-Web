@@ -6,11 +6,19 @@ import { withLangRegion } from '@/lib/preferences';
 
 const API_URL = 'http://localhost:3001';
 
+interface FaseUniverso {
+  id: number;
+  nombre: string;
+}
+
 interface UniverseItem {
   id: number; // id de la fila CinematicUniverseItem — hace falta para borrar/reordenar
   tmdbId: number;
   titulo: string;
   anio: number | null;
+  fechaEstreno: string | null; // fecha completa de estreno, para ordenar por año/mes/día real
+  ordenUniverso: number | null; // orden manual solo para la pestaña mezclada; null = todavía sin arrastrar, se ordena por fecha
+  faseId: number | null; // a qué "ventana"/fase pertenece dentro de la pestaña mezclada
   portada: string | null;
 }
 
@@ -22,6 +30,7 @@ interface UniverseTab {
 interface Universo {
   id: number;
   nombre: string;
+  fases: FaseUniverso[];
   pestañas: UniverseTab[];
 }
 
@@ -74,11 +83,36 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
   const [loadingId, setLoadingId] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  // --- Modo universo: pestaña activa, borrado, drag&drop ---
+  // --- Modo universo: pestaña activa, drag&drop, borrado ---
   const [pestañaActiva, setPestañaActiva] = useState(0);
-  const [itemABorrar, setItemABorrar] = useState<UniverseItem | null>(null);
-  const [borrando, setBorrando] = useState(false);
   const [arrastrandoId, setArrastrandoId] = useState<number | null>(null);
+  const [borrandoId, setBorrandoId] = useState<number | null>(null);
+  const [reiniciando, setReiniciando] = useState(false);
+  const [refrescando, setRefrescando] = useState(false);
+  const [resultadoRefresco, setResultadoRefresco] = useState<string | null>(null);
+  const [nuevaFaseNombre, setNuevaFaseNombre] = useState('');
+  const [creandoFase, setCreandoFase] = useState(false);
+  const [sobreFaseId, setSobreFaseId] = useState<number | 'sin-fase' | null>(null); // para resaltar la ventana al arrastrar por encima
+
+  async function refrescarUniverso() {
+    if (!collection?.universo) return;
+    setRefrescando(true);
+    setResultadoRefresco(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/refresh`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'No se pudo refrescar');
+      setResultadoRefresco(`+${body.añadidos} new movie(s) (checked ${body.fuentesRevisadas} source(s)).`);
+      if (body.añadidos > 0) cargarColeccion();
+    } catch (err) {
+      console.error('Error al refrescar el universo', err);
+    }
+    setRefrescando(false);
+  }
 
   // --- Buscador para añadir películas sueltas a la pestaña actual (solo admin) ---
   const [busquedaTexto, setBusquedaTexto] = useState('');
@@ -98,10 +132,16 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
 
   // --- Admin (ya dentro de un universo): añadir OTRA colección de TMDB entera ---
   const [mostrarAñadirColeccion, setMostrarAñadirColeccion] = useState(false);
+  const [modoAñadir, setModoAñadir] = useState<'coleccion' | 'compañia' | 'keyword' | 'pelicula'>('coleccion');
   const [nuevoTmdbCollectionId, setNuevoTmdbCollectionId] = useState('');
   const [nuevaEtiquetaPestaña, setNuevaEtiquetaPestaña] = useState('');
+  const [tmdbCompanyId, setTmdbCompanyId] = useState('');
+  const [tmdbKeywordId, setTmdbKeywordId] = useState('');
+  const [tmdbMovieId, setTmdbMovieId] = useState('');
+  const [etiquetaPestañaPelicula, setEtiquetaPestañaPelicula] = useState('');
   const [añadiendoColeccion, setAñadiendoColeccion] = useState(false);
   const [errorAñadirColeccion, setErrorAñadirColeccion] = useState<string | null>(null);
+  const [resultadoImportacion, setResultadoImportacion] = useState<string | null>(null);
 
   function cargarColeccion() {
     const miId = ++idPeticionRef.current;
@@ -209,7 +249,18 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
         todas.push(it);
       }
     }
-    todas.sort((a, b) => (a.anio ?? Infinity) - (b.anio ?? Infinity));
+    todas.sort((a, b) => {
+      const tieneOrdenA = a.ordenUniverso != null;
+      const tieneOrdenB = b.ordenUniverso != null;
+      if (tieneOrdenA || tieneOrdenB) {
+        // en cuanto una película tiene orden manual, ese pasa a mandar; las
+        // que todavía no lo tienen (recién importadas) se quedan al final
+        return (a.ordenUniverso ?? Infinity) - (b.ordenUniverso ?? Infinity);
+      }
+      const fechaA = a.fechaEstreno ? new Date(a.fechaEstreno).getTime() : a.anio ? new Date(a.anio, 0, 1).getTime() : Infinity;
+      const fechaB = b.fechaEstreno ? new Date(b.fechaEstreno).getTime() : b.anio ? new Date(b.anio, 0, 1).getTime() : Infinity;
+      return fechaA - fechaB;
+    });
 
     return [
       { tipo: 'propia', nombre: pestañaPropia.nombre, items: pestañaPropia.items, pestañaOrigen: pestañaPropia.nombre },
@@ -328,13 +379,87 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
     });
   }
 
+  async function crearFase() {
+    if (!collection?.universo || !nuevaFaseNombre.trim()) return;
+    setCreandoFase(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/phases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ nombre: nuevaFaseNombre.trim() }),
+      });
+      if (!res.ok) throw new Error('No se pudo crear la fase');
+      setNuevaFaseNombre('');
+      cargarColeccion();
+    } catch (err) {
+      console.error('Error al crear la fase', err);
+    }
+    setCreandoFase(false);
+  }
+
+  async function borrarFase(faseId: number) {
+    try {
+      const token = localStorage.getItem('token');
+      await fetch(`${API_URL}/admin/cinematic-universe-phases/${faseId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      cargarColeccion();
+    } catch (err) {
+      console.error('Error al borrar la fase', err);
+    }
+  }
+
+  async function asignarFase(itemId: number, faseId: number | null) {
+    setCollection((prev) => {
+      if (!prev?.universo) return prev;
+      const pestañas = prev.universo.pestañas.map((p) => ({
+        ...p,
+        items: p.items.map((it) => (it.id === itemId ? { ...it, faseId } : it)),
+      }));
+      return { ...prev, universo: { ...prev.universo, pestañas } };
+    });
+    try {
+      const token = localStorage.getItem('token');
+      await fetch(`${API_URL}/admin/cinematic-universe-items/${itemId}/phase`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ faseId }),
+      });
+    } catch (err) {
+      console.error('Error al asignar la fase', err);
+    }
+  }
+
+  function agruparPorFase(items: UniverseItem[], fases: FaseUniverso[]) {
+    const grupos: { fase: FaseUniverso | null; items: UniverseItem[] }[] = fases.map((fase) => ({
+      fase,
+      items: items.filter((it) => it.faseId === fase.id),
+    }));
+    grupos.push({ fase: null, items: items.filter((it) => it.faseId == null) });
+    return grupos;
+  }
+
+  function actualizarOrdenUniversoLocal(nuevoOrdenIds: number[]) {
+    const posicion = new Map(nuevoOrdenIds.map((id, i) => [id, i]));
+    setCollection((prev) => {
+      if (!prev?.universo) return prev;
+      const pestañas = prev.universo.pestañas.map((p) => ({
+        ...p,
+        items: p.items.map((it) => (posicion.has(it.id) ? { ...it, ordenUniverso: posicion.get(it.id)! } : it)),
+      }));
+      return { ...prev, universo: { ...prev.universo, pestañas } };
+    });
+  }
+
   function handleDragStart(id: number) {
-    if (!esAdmin || tabActiva?.tipo !== 'propia') return;
+    if (!esAdmin) return;
     setArrastrandoId(id);
   }
 
   function handleDragOver(e: React.DragEvent, idDebajo: number) {
-    if (!esAdmin || arrastrandoId === null || tabActiva?.tipo !== 'propia') return;
+    if (!esAdmin || arrastrandoId === null) return;
     e.preventDefault();
     if (arrastrandoId === idDebajo) return;
     const lista = listaDeLaPestañaActual();
@@ -344,7 +469,12 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
     const nueva = [...lista];
     const [movido] = nueva.splice(idxOrigen, 1);
     nueva.splice(idxDestino, 0, movido);
-    actualizarPestañaActual(nueva);
+
+    if (tabActiva?.tipo === 'propia') {
+      actualizarPestañaActual(nueva);
+    } else {
+      actualizarOrdenUniversoLocal(nueva.map((it) => it.id));
+    }
   }
 
   async function handleDrop(e: React.DragEvent) {
@@ -354,7 +484,11 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
     try {
       const token = localStorage.getItem('token');
       const ids = listaDeLaPestañaActual().map((it) => it.id);
-      await fetch(`${API_URL}/admin/cinematic-universe-items/reorder`, {
+      const endpoint =
+        tabActiva?.tipo === 'propia'
+          ? `${API_URL}/admin/cinematic-universe-items/reorder`
+          : `${API_URL}/admin/cinematic-universe-items/reorder-universo`;
+      await fetch(endpoint, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ ids }),
@@ -371,22 +505,28 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
     setErrorAnadir(null);
   }
 
-  async function confirmarBorrado() {
-    if (!itemABorrar) return;
-    setBorrando(true);
+  async function borrarItem(item: UniverseItem) {
+    if (borrandoId !== null) return; // ya hay un borrado en curso, ignora el clic
+    setBorrandoId(item.id);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/cinematic-universe-items/${itemABorrar.id}`, {
+      const res = await fetch(`${API_URL}/admin/cinematic-universe-items/${item.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('No se pudo eliminar');
-      actualizarPestañaActual(listaDeLaPestañaActual().filter((it) => it.id !== itemABorrar.id));
-      setItemABorrar(null);
+      setCollection((prev) => {
+        if (!prev?.universo) return prev;
+        const pestañas = prev.universo.pestañas.map((p) => ({
+          ...p,
+          items: p.items.filter((it) => it.id !== item.id),
+        }));
+        return { ...prev, universo: { ...prev.universo, pestañas } };
+      });
     } catch (err) {
       console.error('Error al borrar de la colección', err);
     }
-    setBorrando(false);
+    setBorrandoId(null);
   }
 
   async function añadirPelicula(resultado: ResultadoTmdb) {
@@ -403,6 +543,7 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
           tmdbId: resultado.id,
           titulo: resultado.title,
           anio: resultado.release_date ? new Date(resultado.release_date).getFullYear() : null,
+          fechaEstreno: resultado.release_date || null,
           portada: resultado.poster_path ? `https://image.tmdb.org/t/p/w500${resultado.poster_path}` : null,
           pestaña: tabActiva.pestañaOrigen,
         }),
@@ -513,16 +654,162 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
     setAñadiendoColeccion(false);
   }
 
+  async function añadirPeliculaPorId() {
+    if (!collection?.universo) return;
+    const idNum = parseInt(tmdbMovieId, 10);
+    if (Number.isNaN(idNum)) {
+      setErrorAñadirColeccion('Ese id de película de TMDB no es válido');
+      return;
+    }
+    if (!etiquetaPestañaPelicula.trim()) {
+      setErrorAñadirColeccion('Ponle un nombre a la pestaña donde quieres que caiga');
+      return;
+    }
+    setAñadiendoColeccion(true);
+    setErrorAñadirColeccion(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/add-movie`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ tmdbId: idNum, pestaña: etiquetaPestañaPelicula.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'No se pudo añadir la película');
+
+      setMostrarAñadirColeccion(false);
+      setTmdbMovieId('');
+      setEtiquetaPestañaPelicula('');
+      cargarColeccion();
+    } catch (err: any) {
+      setErrorAñadirColeccion(err.message || 'Algo falló');
+    }
+    setAñadiendoColeccion(false);
+  }
+
+  async function importarPorKeyword() {
+    if (!collection?.universo) return;
+    const idNum = parseInt(tmdbKeywordId, 10);
+    if (Number.isNaN(idNum)) {
+      setErrorAñadirColeccion('Ese id de keyword de TMDB no es válido');
+      return;
+    }
+    setAñadiendoColeccion(true);
+    setErrorAñadirColeccion(null);
+    setResultadoImportacion(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/import-by-keyword`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ tmdbKeywordId: idNum }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'No se pudo importar');
+
+      setResultadoImportacion(`Added ${body.añadidos} of ${body.total} movies found.`);
+      cargarColeccion();
+    } catch (err: any) {
+      setErrorAñadirColeccion(err.message || 'Algo falló');
+    }
+    setAñadiendoColeccion(false);
+  }
+
+  async function importarPorCompañia() {
+    if (!collection?.universo) return;
+    const idNum = parseInt(tmdbCompanyId, 10);
+    if (Number.isNaN(idNum)) {
+      setErrorAñadirColeccion('Ese id de productora de TMDB no es válido');
+      return;
+    }
+    setAñadiendoColeccion(true);
+    setErrorAñadirColeccion(null);
+    setResultadoImportacion(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/import-by-company`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ tmdbCompanyId: idNum }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'No se pudo importar');
+
+      setResultadoImportacion(`Added ${body.añadidos} of ${body.total} movies found.`);
+      cargarColeccion();
+    } catch (err: any) {
+      setErrorAñadirColeccion(err.message || 'Algo falló');
+    }
+    setAñadiendoColeccion(false);
+  }
+
+  async function reiniciarUniverso() {
+    if (!collection?.universo) return;
+    if (!window.confirm(`Delete ALL movies from "${collection.universo.nombre}"? This can't be undone — you'll need to re-import afterward.`)) {
+      return;
+    }
+    setReiniciando(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/reset`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('No se pudo vaciar el universo');
+      setPestañaActiva(0);
+      cargarColeccion();
+    } catch (err) {
+      console.error('Error al vaciar el universo', err);
+    }
+    setReiniciando(false);
+  }
+
+  function renderTarjetaUniverso(it: UniverseItem) {
+    const esActual = it.tmdbId === tmdbId;
+    const portadaReal = getPortadaUniverso(it);
+    return (
+      <div
+        key={it.id}
+        className={`group relative ${arrastrandoId === it.id ? 'opacity-40' : ''}`}
+        onDragStart={() => handleDragStart(it.id)}
+        onDragOver={(e) => handleDragOver(e, it.id)}
+        onDrop={handleDrop}
+        onDragEnd={() => {
+          setArrastrandoId(null);
+          setSobreFaseId(null);
+        }}
+      >
+        <BotonBorrar item={it} />
+        <a href={hrefDeItemUniverso(it)} className="block w-full rounded text-left cursor-pointer">
+          {portadaReal && (
+            <img
+              src={portadaReal}
+              alt={it.titulo}
+              draggable={esAdmin}
+              className={`w-full aspect-[2/3] object-cover rounded transition ${
+                esActual ? 'ring-2 ring-blue-500' : 'group-hover:opacity-80 group-hover:scale-[1.02]'
+              } ${esAdmin ? 'cursor-grab active:cursor-grabbing' : ''}`}
+            />
+          )}
+          <p className="mt-2 text-sm font-semibold text-white select-text">{it.titulo}</p>
+          <p className="text-xs text-gray-400">{it.anio}{esActual ? " · You're viewing this" : ''}</p>
+        </a>
+      </div>
+    );
+  }
+
   function BotonBorrar({ item }: { item: UniverseItem }) {
     if (!esAdmin) return null;
     return (
       <button
         onClick={(e) => {
           e.stopPropagation();
-          setItemABorrar(item);
+          e.preventDefault();
+          borrarItem(item);
         }}
+        disabled={borrandoId !== null}
         title="Remove from universe"
-        className="absolute top-1 left-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/80 text-sm font-bold text-white opacity-0 transition hover:bg-red-600 group-hover:opacity-100 cursor-pointer"
+        className="absolute top-1 left-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/80 text-sm font-bold text-white opacity-0 transition hover:bg-red-600 group-hover:opacity-100 cursor-pointer disabled:cursor-default"
       >
         ×
       </button>
@@ -584,14 +871,34 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
                   ))}
                 </div>
                 {esAdmin && (
-                  <button
-                    onClick={() => setMostrarAñadirColeccion(true)}
-                    className="mb-2 text-xs font-semibold text-blue-400 hover:text-blue-300 underline cursor-pointer transition whitespace-nowrap"
-                  >
-                    + Add collection
-                  </button>
+                  <div className="mb-2 flex items-center gap-4">
+                    <button
+                      onClick={reiniciarUniverso}
+                      disabled={reiniciando}
+                      className="text-xs font-semibold text-amber-400 hover:text-amber-300 underline cursor-pointer transition whitespace-nowrap disabled:opacity-50"
+                    >
+                      {reiniciando ? 'Resetting...' : 'Reset'}
+                    </button>
+                    <button
+                      onClick={refrescarUniverso}
+                      disabled={refrescando}
+                      className="text-xs font-semibold text-green-400 hover:text-green-300 underline cursor-pointer transition whitespace-nowrap disabled:opacity-50"
+                      title="Re-check saved sources (collections/studio/keyword) for new movies"
+                    >
+                      {refrescando ? 'Refreshing...' : 'Refresh'}
+                    </button>
+                    <button
+                      onClick={() => setMostrarAñadirColeccion(true)}
+                      className="text-xs font-semibold text-blue-400 hover:text-blue-300 underline cursor-pointer transition whitespace-nowrap"
+                    >
+                      + Add collection
+                    </button>
+                  </div>
                 )}
               </div>
+            )}
+            {resultadoRefresco && (
+              <p className="px-6 pt-1 text-xs text-gray-500">{resultadoRefresco}</p>
             )}
 
             {esAdmin && collection.universo && tabActiva?.tipo === 'propia' && (
@@ -696,40 +1003,104 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
               </div>
             )}
 
+            {esAdmin && collection.universo && tabActiva?.tipo === 'universo' && (
+              <div className="px-6 pt-4">
+                <p className="text-xs text-gray-500 mb-2">Phases (drag a movie onto one to file it there):</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {collection.universo.fases.map((fase) => (
+                    <div
+                      key={fase.id}
+                      onDragOver={(e) => {
+                        if (!esAdmin || arrastrandoId === null) return;
+                        e.preventDefault();
+                        setSobreFaseId(fase.id);
+                      }}
+                      onDragLeave={() => setSobreFaseId((prev) => (prev === fase.id ? null : prev))}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (!esAdmin || arrastrandoId === null) return;
+                        asignarFase(arrastrandoId, fase.id);
+                        setArrastrandoId(null);
+                        setSobreFaseId(null);
+                      }}
+                      className={`group flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition ${
+                        sobreFaseId === fase.id ? 'border-blue-400 bg-blue-500/20 text-white' : 'border-gray-700 bg-[#20262e] text-gray-300'
+                      }`}
+                    >
+                      {fase.nombre}
+                      <button
+                        onClick={() => borrarFase(fase.id)}
+                        title="Delete phase"
+                        className="text-gray-500 opacity-0 transition hover:text-red-400 group-hover:opacity-100 cursor-pointer"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <div
+                    onDragOver={(e) => {
+                      if (!esAdmin || arrastrandoId === null) return;
+                      e.preventDefault();
+                      setSobreFaseId('sin-fase');
+                    }}
+                    onDragLeave={() => setSobreFaseId((prev) => (prev === 'sin-fase' ? null : prev))}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (!esAdmin || arrastrandoId === null) return;
+                      asignarFase(arrastrandoId, null);
+                      setArrastrandoId(null);
+                      setSobreFaseId(null);
+                    }}
+                    className={`rounded-md border border-dashed px-3 py-1.5 text-xs text-gray-500 transition ${
+                      sobreFaseId === 'sin-fase' ? 'border-blue-400 bg-blue-500/20 text-white' : 'border-gray-700'
+                    }`}
+                  >
+                    Unsorted
+                  </div>
+                  <input
+                    type="text"
+                    value={nuevaFaseNombre}
+                    onChange={(e) => setNuevaFaseNombre(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && crearFase()}
+                    placeholder="New phase name..."
+                    className="w-40 bg-[#2c3440] text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                  />
+                  <button
+                    onClick={crearFase}
+                    disabled={creandoFase || !nuevaFaseNombre.trim()}
+                    className="text-xs font-semibold text-blue-400 hover:text-blue-300 cursor-pointer disabled:opacity-40"
+                  >
+                    + Add
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="overflow-y-auto p-6">
               {collection.universo ? (
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-6">
-                  {listaDeLaPestañaActual().map((it) => {
-                    const esActual = it.tmdbId === tmdbId;
-                    const portadaReal = getPortadaUniverso(it);
+                tabActiva?.tipo === 'universo' ? (
+                  agruparPorFase(listaDeLaPestañaActual(), collection.universo.fases).map((grupo) => {
+                    if (!grupo.fase && grupo.items.length === 0) return null;
                     return (
-                      <div
-                        key={it.id}
-                        className={`group relative ${arrastrandoId === it.id ? 'opacity-40' : ''}`}
-                        onDragStart={() => handleDragStart(it.id)}
-                        onDragOver={(e) => handleDragOver(e, it.id)}
-                        onDrop={handleDrop}
-                        onDragEnd={() => setArrastrandoId(null)}
-                      >
-                        <BotonBorrar item={it} />
-                        <a href={hrefDeItemUniverso(it)} className="block w-full rounded text-left cursor-pointer">
-                          {portadaReal && (
-                            <img
-                              src={portadaReal}
-                              alt={it.titulo}
-                              draggable={esAdmin && tabActiva?.tipo === 'propia'}
-                              className={`w-full aspect-[2/3] object-cover rounded transition ${
-                                esActual ? 'ring-2 ring-blue-500' : 'group-hover:opacity-80 group-hover:scale-[1.02]'
-                              } ${esAdmin && tabActiva?.tipo === 'propia' ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                            />
-                          )}
-                          <p className="mt-2 text-sm font-semibold text-white select-text">{it.titulo}</p>
-                          <p className="text-xs text-gray-400">{it.anio}{esActual ? " · You're viewing this" : ''}</p>
-                        </a>
+                      <div key={grupo.fase?.id ?? 'sin-fase'} className="mb-8 last:mb-0">
+                        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
+                          {grupo.fase ? grupo.fase.nombre : 'Unsorted'}
+                        </h3>
+                        {grupo.items.length === 0 ? (
+                          <p className="text-xs text-gray-600">Drag movies here to file them under this phase.</p>
+                        ) : (
+                          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-6">
+                            {grupo.items.map((it) => renderTarjetaUniverso(it))}
+                          </div>
+                        )}
                       </div>
                     );
-                  })}
-                </div>
+                  })
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-6">
+                    {listaDeLaPestañaActual().map((it) => renderTarjetaUniverso(it))}
+                  </div>
+                )
               ) : (
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-4">
                   {collection.parts.map(renderFullCard)}
@@ -747,29 +1118,137 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
           onClick={() => !añadiendoColeccion && setMostrarAñadirColeccion(false)}
         >
           <div className="w-[90vw] max-w-md rounded-lg bg-[#1c2228] border border-gray-700 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-white mb-2">Add a collection to "{collection.universo?.nombre}"</h3>
-            <p className="text-sm text-gray-400 mb-4">
-              Paste the TMDB collection id (found in the collection's URL on themoviedb.org) — every movie in it will
-              be added under its own tab.
-            </p>
-            <div className="space-y-3">
-              <input
-                type="text"
-                inputMode="numeric"
-                value={nuevoTmdbCollectionId}
-                onChange={(e) => setNuevoTmdbCollectionId(e.target.value)}
-                placeholder="TMDB collection id (e.g. 131296)"
-                className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
-              />
-              <input
-                type="text"
-                value={nuevaEtiquetaPestaña}
-                onChange={(e) => setNuevaEtiquetaPestaña(e.target.value)}
-                placeholder="Tab label (optional, defaults to TMDB's collection name)"
-                className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
-              />
-              {errorAñadirColeccion && <p className="text-xs text-red-400">{errorAñadirColeccion}</p>}
+            <h3 className="text-lg font-bold text-white mb-4">Add to "{collection.universo?.nombre}"</h3>
+
+            <div className="flex gap-1 mb-4 border-b border-gray-800">
+              <button
+                onClick={() => setModoAñadir('coleccion')}
+                className={`px-3 py-2 text-sm font-semibold cursor-pointer border-b-2 transition ${
+                  modoAñadir === 'coleccion' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                By collection
+              </button>
+              <button
+                onClick={() => setModoAñadir('compañia')}
+                className={`px-3 py-2 text-sm font-semibold cursor-pointer border-b-2 transition ${
+                  modoAñadir === 'compañia' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                Import whole studio
+              </button>
+              <button
+                onClick={() => setModoAñadir('keyword')}
+                className={`px-3 py-2 text-sm font-semibold cursor-pointer border-b-2 transition ${
+                  modoAñadir === 'keyword' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                By keyword
+              </button>
+              <button
+                onClick={() => setModoAñadir('pelicula')}
+                className={`px-3 py-2 text-sm font-semibold cursor-pointer border-b-2 transition ${
+                  modoAñadir === 'pelicula' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                By movie
+              </button>
             </div>
+
+            {modoAñadir === 'coleccion' && (
+              <>
+                <p className="text-sm text-gray-400 mb-4">
+                  Paste the TMDB collection id (found in the collection's URL on themoviedb.org) — every movie in it
+                  will be added under its own tab.
+                </p>
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={nuevoTmdbCollectionId}
+                    onChange={(e) => setNuevoTmdbCollectionId(e.target.value)}
+                    placeholder="TMDB collection id (e.g. 131296)"
+                    className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                  />
+                  <input
+                    type="text"
+                    value={nuevaEtiquetaPestaña}
+                    onChange={(e) => setNuevaEtiquetaPestaña(e.target.value)}
+                    placeholder="Tab label (optional, defaults to TMDB's collection name)"
+                    className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                  />
+                </div>
+              </>
+            )}
+
+            {modoAñadir === 'compañia' && (
+              <>
+                <p className="text-sm text-gray-400 mb-4">
+                  Paste the TMDB company id (e.g. Marvel Studios is <span className="text-gray-300">420</span>) — every
+                  movie from that studio gets added, automatically grouped into a tab per collection it belongs to.
+                  Not perfect (co-productions or one-offs may need a manual fix afterward), but a fast starting point.
+                </p>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={tmdbCompanyId}
+                  onChange={(e) => setTmdbCompanyId(e.target.value)}
+                  placeholder="TMDB company id (e.g. 420)"
+                  className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                />
+                {resultadoImportacion && <p className="mt-2 text-xs text-green-400">{resultadoImportacion}</p>}
+              </>
+            )}
+
+            {modoAñadir === 'keyword' && (
+              <>
+                <p className="text-sm text-gray-400 mb-4">
+                  Paste the TMDB keyword id — found in the keyword page's URL, e.g.{' '}
+                  <span className="text-gray-300">themoviedb.org/keyword/180547-marvel-cinematic-universe-mcu</span>{' '}
+                  → id <span className="text-gray-300">180547</span>. Usually more precise than importing by studio,
+                  since keywords are hand-curated for exactly this kind of grouping.
+                </p>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={tmdbKeywordId}
+                  onChange={(e) => setTmdbKeywordId(e.target.value)}
+                  placeholder="TMDB keyword id (e.g. 180547)"
+                  className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                />
+                {resultadoImportacion && <p className="mt-2 text-xs text-green-400">{resultadoImportacion}</p>}
+              </>
+            )}
+
+            {modoAñadir === 'pelicula' && (
+              <>
+                <p className="text-sm text-gray-400 mb-4">
+                  Paste the TMDB movie id directly (found in the movie's URL on themoviedb.org, e.g.{' '}
+                  <span className="text-gray-300">themoviedb.org/movie/299536</span> → id{' '}
+                  <span className="text-gray-300">299536</span>) and pick which tab it should land in.
+                </p>
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={tmdbMovieId}
+                    onChange={(e) => setTmdbMovieId(e.target.value)}
+                    placeholder="TMDB movie id (e.g. 299536)"
+                    className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                  />
+                  <input
+                    type="text"
+                    value={etiquetaPestañaPelicula}
+                    onChange={(e) => setEtiquetaPestañaPelicula(e.target.value)}
+                    placeholder="Tab it belongs to (e.g. Avengers, or Other)"
+                    className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                  />
+                </div>
+              </>
+            )}
+
+            {errorAñadirColeccion && <p className="text-xs text-red-400 mt-3">{errorAñadirColeccion}</p>}
+
             <div className="flex justify-end gap-3 mt-6">
               <button
                 onClick={() => setMostrarAñadirColeccion(false)}
@@ -779,45 +1258,33 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
                 Cancel
               </button>
               <button
-                onClick={añadirOtraColeccion}
+                onClick={
+                  modoAñadir === 'coleccion'
+                    ? añadirOtraColeccion
+                    : modoAñadir === 'compañia'
+                    ? importarPorCompañia
+                    : modoAñadir === 'keyword'
+                    ? importarPorKeyword
+                    : añadirPeliculaPorId
+                }
                 disabled={añadiendoColeccion}
                 className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold transition cursor-pointer disabled:opacity-50"
               >
-                {añadiendoColeccion ? 'Adding...' : 'Add collection'}
+                {añadiendoColeccion
+                  ? modoAñadir === 'coleccion' || modoAñadir === 'pelicula'
+                    ? 'Adding...'
+                    : 'Importing... (this can take a while)'
+                  : modoAñadir === 'coleccion'
+                  ? 'Add collection'
+                  : modoAñadir === 'pelicula'
+                  ? 'Add movie'
+                  : 'Import'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal de confirmación de borrado */}
-      {itemABorrar && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80" onClick={() => !borrando && setItemABorrar(null)}>
-          <div className="w-[90vw] max-w-sm rounded-lg bg-[#1c2228] border border-gray-700 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-white mb-2">Remove from universe?</h3>
-            <p className="text-sm text-gray-400 mb-6">
-              You're about to remove <span className="text-white font-semibold">{itemABorrar.titulo}</span> from this
-              universe. This won't remove it from your catalog or from search, only from this list.
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setItemABorrar(null)}
-                disabled={borrando}
-                className="px-4 py-2 text-sm text-gray-300 hover:text-white transition cursor-pointer disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmarBorrado}
-                disabled={borrando}
-                className="px-4 py-2 text-sm rounded bg-red-600 hover:bg-red-500 text-white font-semibold transition cursor-pointer disabled:opacity-50"
-              >
-                {borrando ? 'Removing...' : 'Yes, remove'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
