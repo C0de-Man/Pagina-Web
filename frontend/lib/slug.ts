@@ -59,6 +59,6 @@ export function extraerIdDeSlug(slug: string): number | null {
 }
 
 export function urlFicha(media: MediaParaSlug): string {
-  const base = media.tipo === 'VIDEOJUEGO' ? '/game' : '/movie';
+  const base = media.tipo === 'VIDEOJUEGO' ? '/game' : media.tipo === 'SERIE' ? '/series' : '/movie';
   return `${base}/${generarSlug(media)}`;
 }

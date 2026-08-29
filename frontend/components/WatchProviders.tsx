@@ -2,15 +2,16 @@
 import { useState, useEffect } from 'react';
 import { getRegion } from '@/lib/preferences';
 
-export default function WatchProviders({ tmdbId }: { tmdbId: number }) {
+export default function WatchProviders({ tmdbId, tipo }: { tmdbId: number; tipo?: string }) {
   const [data, setData] = useState<{ link: string | null; flatrate: any[]; rent: any[]; buy: any[] } | null>(null);
 
   useEffect(() => {
     if (!tmdbId) return;
-    fetch(`http://localhost:3001/tmdb/watch-providers/${tmdbId}?region=${getRegion()}`).then((res) => res.json())
+    const tipoParam = tipo ? `&tipo=${tipo}` : '';
+    fetch(`http://localhost:3001/tmdb/watch-providers/${tmdbId}?region=${getRegion()}${tipoParam}`).then((res) => res.json())
       .then(setData)
       .catch(() => { });
-  }, [tmdbId]);
+  }, [tmdbId, tipo]);
 
   if (!data || (data.flatrate.length === 0 && data.rent.length === 0 && data.buy.length === 0)) {
     return null;

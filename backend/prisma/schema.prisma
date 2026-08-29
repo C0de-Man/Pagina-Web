@@ -96,7 +96,7 @@ model UserMedia {
   rating        Int?     // Nota personal, ej. de 1 a 10
   customPoster  String?  // Portada elegida por ESTE usuario para este medio (no afecta a los demás)
   customBackdrop String? // Banner elegido por ESTE usuario para este medio (no afecta a los demás)
-  playStatus    String?  // Solo videojuegos: "PLAYING" | "COMPLETED" | "RETIRED" | "SHELVED" | "ABANDONED" | null
+  playStatus    String?  // Juegos: "PLAYING"|"COMPLETED"|"RETIRED"|"SHELVED"|"ABANDONED" — Series: "WATCHING"|"PAUSED"|"ABANDONED"
   updatedAt     DateTime @updatedAt
 
   @@unique([userId, mediaId]) // Un usuario solo puede tener UN estado por película
@@ -224,7 +224,8 @@ model CinematicUniverse {
 model CinematicUniverseItem {
   id            Int       @id @default(autoincrement())
   universeId    Int
-  tmdbId        Int       // id de la película en TMDB
+  tmdbId        Int       // id de la película/serie en TMDB
+  tipo          String    @default("PELICULA") // "PELICULA" | "SERIE" — un universo puede mezclar ambos (ej. Chucky, Juego de Tronos)
   titulo        String
   anio          Int?
   fechaEstreno  DateTime? // fecha completa de estreno (TMDB release_date) — para ordenar de verdad por año/mes/día, no solo por año
@@ -238,7 +239,7 @@ model CinematicUniverseItem {
 
   universe CinematicUniverse @relation(fields: [universeId], references: [id], onDelete: Cascade)
 
-  @@unique([universeId, tmdbId])
+  @@unique([universeId, tmdbId, tipo])
 }
 
 // Recuerda qué keyword/productora de TMDB se usó para sembrar un universo,
@@ -286,4 +287,44 @@ model WatchLog {
 
   user  User  @relation(fields: [userId], references: [id])
   media Media @relation(fields: [mediaId], references: [id])
+}
+
+// --- PROGRESO POR TEMPORADA (series) ---
+// Las temporadas no tienen su propia fila en Media (son sub-entidades de
+// TMDB colgando del tmdbId de la serie) así que su estado de visionado vive
+// aparte, igual que WatchLog vive aparte de UserMedia. Un registro por
+// usuario+serie+número de temporada.
+// NOTA: se mantiene independiente de UserEpisodeWatch a propósito — el
+// "visto"/nota de aquí es una valoración de la temporada como conjunto, no
+// se recalcula sola a partir de los episodios (evita sorpresas si alguien
+// quiere puntuar la temporada sin marcar episodio a episodio).
+model UserSeasonWatch {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  mediaId      Int       // el id de Media de la SERIE (no de la temporada)
+  seasonNumber Int
+  watched      Boolean   @default(false)
+  rating       Int?      // nota personal de esta temporada, 1-10 (se muestra en medias estrellas en la UI)
+  customPoster String?   // póster de ESTA temporada elegido por el usuario, entre las alternativas de TMDB (no afecta a otros usuarios)
+  fechaVisto   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@unique([userId, mediaId, seasonNumber])
+}
+
+// --- PROGRESO POR EPISODIO (series) ---
+// Igual que UserSeasonWatch pero un nivel más abajo. Un registro por
+// usuario+serie+temporada+episodio.
+model UserEpisodeWatch {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  mediaId       Int       // el id de Media de la SERIE
+  seasonNumber  Int
+  episodeNumber Int
+  watched       Boolean   @default(false)
+  rating        Int?      // nota personal de este episodio, 1-10
+  fechaVisto    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([userId, mediaId, seasonNumber, episodeNumber])
 }

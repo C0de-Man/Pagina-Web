@@ -14,7 +14,8 @@ interface FaseUniverso {
 interface UniverseItem {
   id: number; // id de la fila CinematicUniverseItem — hace falta para borrar/reordenar
   tmdbId: number;
-  titulo: string;
+  tipo: string; // "PELICULA" | "SERIE" — un universo puede mezclar ambos
+  titulo: string
   anio: number | null;
   fechaEstreno: string | null; // fecha completa de estreno, para ordenar por año/mes/día real
   ordenUniverso: number | null; // orden manual solo para la pestaña mezclada; null = todavía sin arrastrar, se ordena por fecha
@@ -52,7 +53,9 @@ interface ResultadoTmdb {
   id: number;
   media_type: string;
   title?: string;
+  name?: string;
   release_date?: string;
+  first_air_date?: string;
   poster_path?: string | null;
 }
 
@@ -70,7 +73,7 @@ function useEsAdmin() {
   return esAdmin;
 }
 
-export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
+export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId: number; tipo?: string }) {
   const esAdmin = useEsAdmin();
   const router = useRouter();
   const idPeticionRef = useRef(0);
@@ -132,20 +135,23 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
 
   // --- Admin (ya dentro de un universo): añadir OTRA colección de TMDB entera ---
   const [mostrarAñadirColeccion, setMostrarAñadirColeccion] = useState(false);
-  const [modoAñadir, setModoAñadir] = useState<'coleccion' | 'compañia' | 'keyword' | 'pelicula'>('coleccion');
+  const [modoAñadir, setModoAñadir] = useState<'coleccion' | 'compañia' | 'keyword' | 'pelicula' | 'serie'>('coleccion');
   const [nuevoTmdbCollectionId, setNuevoTmdbCollectionId] = useState('');
   const [nuevaEtiquetaPestaña, setNuevaEtiquetaPestaña] = useState('');
   const [tmdbCompanyId, setTmdbCompanyId] = useState('');
   const [tmdbKeywordId, setTmdbKeywordId] = useState('');
   const [tmdbMovieId, setTmdbMovieId] = useState('');
   const [etiquetaPestañaPelicula, setEtiquetaPestañaPelicula] = useState('');
+  const [tmdbSeriesId, setTmdbSeriesId] = useState('');
+  const [etiquetaPestañaSerie, setEtiquetaPestañaSerie] = useState('');
   const [añadiendoColeccion, setAñadiendoColeccion] = useState(false);
   const [errorAñadirColeccion, setErrorAñadirColeccion] = useState<string | null>(null);
   const [resultadoImportacion, setResultadoImportacion] = useState<string | null>(null);
 
   function cargarColeccion() {
     const miId = ++idPeticionRef.current;
-    fetch(withLangRegion(`${API_URL}/tmdb/collection/${tmdbId}`))
+    const endpoint = tipo === 'SERIE' ? `${API_URL}/tmdb/tv/${tmdbId}/universe` : `${API_URL}/tmdb/collection/${tmdbId}`;
+    fetch(withLangRegion(endpoint))
       .then((r) => r.json())
       .then((d: CollectionResponse) => {
         if (miId === idPeticionRef.current) setCollection(d);
@@ -216,7 +222,7 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
         .then((r) => r.json())
         .then((d) =>
           setResultadosBusqueda(
-            (Array.isArray(d) ? d : []).filter((r: ResultadoTmdb) => r.media_type === 'movie').slice(0, 20)
+            (Array.isArray(d) ? d : []).filter((r: ResultadoTmdb) => r.media_type === 'movie' || r.media_type === 'tv').slice(0, 20)
           )
         )
         .catch((err) => console.error('Error buscando en TMDB', err))
@@ -225,7 +231,8 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
     return () => clearTimeout(timeout);
   }, [busquedaTexto, esAdmin]);
 
-  if (!collection || (!collection.universo && !collection.prequel && !collection.sequel)) return null;
+  const puedeArrancarUniversoSerie = esAdmin && tipo === 'SERIE';
+  if (!collection || (!collection.universo && !collection.prequel && !collection.sequel && !puedeArrancarUniversoSerie)) return null;
 
   // SIEMPRE dos pestañas de cara al usuario, aunque el universo tenga más
   // de dos sub-colecciones guardadas en el backend: la saga PROPIA de esta
@@ -363,7 +370,8 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
     return miPersonalizacion?.customPoster || local?.portada || item.portada;
   }
 
-  const hrefDeItemUniverso = (item: UniverseItem) => `/movie/tmdb/${item.tmdbId}`;
+  const hrefDeItemUniverso = (item: UniverseItem) =>
+    item.tipo === 'SERIE' ? `/series/tmdb/${item.tmdbId}` : `/movie/tmdb/${item.tmdbId}`;
 
   function listaDeLaPestañaActual(): UniverseItem[] {
     return tabActiva?.items || [];
@@ -535,30 +543,34 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
     setErrorAnadir(null);
     try {
       const token = localStorage.getItem('token');
+      const esSerieResultado = resultado.media_type === 'tv';
+      const tituloResultado = resultado.title || resultado.name || '';
+      const fechaResultado = resultado.release_date || resultado.first_air_date || null;
       const res = await fetch(`${API_URL}/admin/cinematic-universe-items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           universeId: collection.universo.id,
           tmdbId: resultado.id,
-          titulo: resultado.title,
-          anio: resultado.release_date ? new Date(resultado.release_date).getFullYear() : null,
-          fechaEstreno: resultado.release_date || null,
+          tipo: esSerieResultado ? 'SERIE' : 'PELICULA',
+          titulo: tituloResultado,
+          anio: fechaResultado ? new Date(fechaResultado).getFullYear() : null,
+          fechaEstreno: fechaResultado,
           portada: resultado.poster_path ? `https://image.tmdb.org/t/p/w500${resultado.poster_path}` : null,
           pestaña: tabActiva.pestañaOrigen,
         }),
       });
       const body = await res.json();
       if (!res.ok) {
-        setErrorAnadir(body.error || 'No se pudo añadir la película');
+        setErrorAnadir(body.error || 'No se pudo añadir el título');
         return;
       }
       setBusquedaTexto('');
       setResultadosBusqueda([]);
       cargarColeccion();
     } catch (err) {
-      console.error('Error al añadir la película al universo', err);
-      setErrorAnadir('No se pudo añadir la película');
+      console.error('Error al añadir el título al universo', err);
+      setErrorAnadir('No se pudo añadir el título');
     } finally {
       setAnadiendoId(null);
     }
@@ -575,6 +587,51 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
       .then((r) => r.json())
       .then(setUniversosExistentes)
       .catch(() => {});
+  }
+
+  async function guardarUniversoSerie() {
+    if (!tmdbId) return;
+    setGuardandoUniverso(true);
+    setErrorUniverso(null);
+    try {
+      const token = localStorage.getItem('token');
+      let universeId: number;
+
+      if (universoElegido === 'nuevo') {
+        if (!nombreNuevoUniverso.trim()) {
+          setErrorUniverso('Ponle un nombre al universo');
+          setGuardandoUniverso(false);
+          return;
+        }
+        const resCrear = await fetch(`${API_URL}/admin/cinematic-universes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ nombre: nombreNuevoUniverso.trim() }),
+        });
+        const nuevo = await resCrear.json();
+        if (!resCrear.ok) throw new Error(nuevo.error || 'No se pudo crear el universo');
+        universeId = nuevo.id;
+      } else {
+        universeId = universoElegido;
+      }
+
+      const resAñadir = await fetch(`${API_URL}/admin/cinematic-universes/${universeId}/add-series`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          tmdbId,
+          pestaña: nombrePestañaNueva.trim() || 'Other',
+        }),
+      });
+      const bodyAñadir = await resAñadir.json();
+      if (!resAñadir.ok) throw new Error(bodyAñadir.error || 'No se pudo añadir la serie al universo');
+
+      setMostrarFormUniverso(false);
+      cargarColeccion();
+    } catch (err: any) {
+      setErrorUniverso(err.message || 'Algo falló');
+    }
+    setGuardandoUniverso(false);
   }
 
   async function guardarUniverso() {
@@ -680,6 +737,39 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
       setMostrarAñadirColeccion(false);
       setTmdbMovieId('');
       setEtiquetaPestañaPelicula('');
+      cargarColeccion();
+    } catch (err: any) {
+      setErrorAñadirColeccion(err.message || 'Algo falló');
+    }
+    setAñadiendoColeccion(false);
+  }
+
+  async function añadirSeriePorId() {
+    if (!collection?.universo) return;
+    const idNum = parseInt(tmdbSeriesId, 10);
+    if (Number.isNaN(idNum)) {
+      setErrorAñadirColeccion('Ese id de serie de TMDB no es válido');
+      return;
+    }
+    if (!etiquetaPestañaSerie.trim()) {
+      setErrorAñadirColeccion('Ponle un nombre a la pestaña donde quieres que caiga');
+      return;
+    }
+    setAñadiendoColeccion(true);
+    setErrorAñadirColeccion(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/add-series`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ tmdbId: idNum, pestaña: etiquetaPestañaSerie.trim() }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'No se pudo añadir la serie');
+
+      setMostrarAñadirColeccion(false);
+      setTmdbSeriesId('');
+      setEtiquetaPestañaSerie('');
       cargarColeccion();
     } catch (err: any) {
       setErrorAñadirColeccion(err.message || 'Algo falló');
@@ -840,6 +930,19 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
             See full saga
           </button>
         )}
+
+        {/* Puerta de entrada para series sin universo todavía: "See full
+            saga" no sirve aquí (las series nunca tienen collection.parts),
+            así que este botón es la única forma de abrir el modal y poder
+            crear/añadirse a un universo desde la propia serie. */}
+        {esAdmin && !collection.universo && tipo === 'SERIE' && (
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="w-full mt-4 text-xs text-blue-400 hover:text-blue-300 text-center underline cursor-pointer bg-gray-900/80 py-2 rounded border border-gray-800 transition"
+          >
+            Add to a Cinematic Universe
+          </button>
+        )}
       </div>
 
       {isModalOpen && (
@@ -907,7 +1010,7 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
                   type="text"
                   value={busquedaTexto}
                   onChange={(e) => setBusquedaTexto(e.target.value)}
-                  placeholder={`Add a movie to "${tabActiva.nombre}"...`}
+                  placeholder={`Add a movie or series to "${tabActiva.nombre}"...`}
                   className="w-full max-w-md bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
                 />
                 {errorAnadir && <p className="mt-1 text-xs text-red-400">{errorAnadir}</p>}
@@ -919,18 +1022,24 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
                       <p className="px-3 py-2 text-sm text-gray-400">No results.</p>
                     ) : (
                       resultadosBusqueda.map((r) => {
-                        const anioResultado = r.release_date ? new Date(r.release_date).getFullYear() : null;
-                        const yaEnLaLista = collection.universo!.pestañas.some((p) => p.items.some((it) => it.tmdbId === r.id));
+                        const esSerieResultado = r.media_type === 'tv';
+                        const fechaResultado = r.release_date || r.first_air_date;
+                        const anioResultado = fechaResultado ? new Date(fechaResultado).getFullYear() : null;
+                        const tipoResultado = esSerieResultado ? 'SERIE' : 'PELICULA';
+                        const yaEnLaLista = collection.universo!.pestañas.some((p) => p.items.some((it) => it.tmdbId === r.id && it.tipo === tipoResultado));
                         return (
                           <button
-                            key={r.id}
+                            key={`${r.media_type}-${r.id}`}
                             onClick={() => !yaEnLaLista && añadirPelicula(r)}
                             disabled={yaEnLaLista || anadiendoId !== null}
                             className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition cursor-pointer disabled:cursor-default ${
                               yaEnLaLista ? 'text-gray-600' : 'text-blue-400 hover:bg-white/5 hover:text-blue-300'
                             }`}
                           >
-                            <span>{r.title}{anioResultado ? ` (${anioResultado})` : ''}</span>
+                            <span>
+                              {r.title || r.name}{anioResultado ? ` (${anioResultado})` : ''}
+                              <span className="ml-1.5 text-[10px] uppercase text-gray-500">{esSerieResultado ? 'TV' : 'Movie'}</span>
+                            </span>
                             {anadiendoId === r.id && <span className="text-xs text-gray-400">Adding...</span>}
                             {yaEnLaLista && <span className="text-xs text-gray-600">Already added</span>}
                           </button>
@@ -992,6 +1101,71 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
                       </button>
                       <button
                         onClick={guardarUniverso}
+                        disabled={guardandoUniverso}
+                        className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold transition cursor-pointer disabled:opacity-50"
+                      >
+                        {guardandoUniverso ? 'Saving...' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Mismo bloque que arriba, pero para SERIES: TMDB no tiene
+                "Collection" para series, así que en vez de collectionId
+                comprobamos tipo === 'SERIE' — y al guardar se llama a
+                add-series en vez de a /collections. */}
+            {esAdmin && !collection.universo && tipo === 'SERIE' && tmdbId && (
+              <div className="px-6 pt-4">
+                {!mostrarFormUniverso ? (
+                  <button
+                    onClick={abrirFormUniverso}
+                    className="text-xs font-semibold text-blue-400 hover:text-blue-300 underline cursor-pointer transition"
+                  >
+                    Add this series to a Cinematic Universe
+                  </button>
+                ) : (
+                  <div className="rounded border border-gray-700 bg-[#20262e] p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <select
+                        value={universoElegido}
+                        onChange={(e) => setUniversoElegido(e.target.value === 'nuevo' ? 'nuevo' : parseInt(e.target.value, 10))}
+                        className="bg-[#2c3440] text-white text-sm rounded px-2 py-1.5 focus:outline-none"
+                      >
+                        <option value="nuevo">+ New universe...</option>
+                        {universosExistentes.map((u) => (
+                          <option key={u.id} value={u.id}>{u.nombre}</option>
+                        ))}
+                      </select>
+                      {universoElegido === 'nuevo' && (
+                        <input
+                          type="text"
+                          value={nombreNuevoUniverso}
+                          onChange={(e) => setNombreNuevoUniverso(e.target.value)}
+                          placeholder="Universe name (e.g. Chucky)"
+                          className="flex-1 bg-[#2c3440] text-white text-sm rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                        />
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={nombrePestañaNueva}
+                      onChange={(e) => setNombrePestañaNueva(e.target.value)}
+                      placeholder="Tab label for this series (e.g. Chucky TV Series, or Other)"
+                      className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                    />
+                    {errorUniverso && <p className="text-xs text-red-400">{errorUniverso}</p>}
+                    <div className="flex justify-end gap-3">
+                      <button
+                        onClick={() => setMostrarFormUniverso(false)}
+                        disabled={guardandoUniverso}
+                        className="px-3 py-1.5 text-sm text-gray-300 hover:text-white transition cursor-pointer disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={guardarUniversoSerie}
                         disabled={guardandoUniverso}
                         className="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold transition cursor-pointer disabled:opacity-50"
                       >
@@ -1153,6 +1327,14 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
               >
                 By movie
               </button>
+              <button
+                onClick={() => setModoAñadir('serie')}
+                className={`px-3 py-2 text-sm font-semibold cursor-pointer border-b-2 transition ${
+                  modoAñadir === 'serie' ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-white'
+                }`}
+              >
+                By series
+              </button>
             </div>
 
             {modoAñadir === 'coleccion' && (
@@ -1247,6 +1429,34 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
               </>
             )}
 
+            {modoAñadir === 'serie' && (
+              <>
+                <p className="text-sm text-gray-400 mb-4">
+                  Paste the TMDB TV series id directly (found in the series' URL on themoviedb.org, e.g.{' '}
+                  <span className="text-gray-300">themoviedb.org/tv/1622</span> → id{' '}
+                  <span className="text-gray-300">1622</span>) and pick which tab it should land in — useful for
+                  universes that mix movies and series, like Chucky or Game of Thrones.
+                </p>
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={tmdbSeriesId}
+                    onChange={(e) => setTmdbSeriesId(e.target.value)}
+                    placeholder="TMDB TV series id (e.g. 1622)"
+                    className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                  />
+                  <input
+                    type="text"
+                    value={etiquetaPestañaSerie}
+                    onChange={(e) => setEtiquetaPestañaSerie(e.target.value)}
+                    placeholder="Tab it belongs to (e.g. Chucky, or Other)"
+                    className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                  />
+                </div>
+              </>
+            )}
+
             {errorAñadirColeccion && <p className="text-xs text-red-400 mt-3">{errorAñadirColeccion}</p>}
 
             <div className="flex justify-end gap-3 mt-6">
@@ -1265,19 +1475,23 @@ export default function CollectionLinks({ tmdbId }: { tmdbId: number }) {
                     ? importarPorCompañia
                     : modoAñadir === 'keyword'
                     ? importarPorKeyword
+                    : modoAñadir === 'serie'
+                    ? añadirSeriePorId
                     : añadirPeliculaPorId
                 }
                 disabled={añadiendoColeccion}
                 className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold transition cursor-pointer disabled:opacity-50"
               >
                 {añadiendoColeccion
-                  ? modoAñadir === 'coleccion' || modoAñadir === 'pelicula'
+                  ? modoAñadir === 'coleccion' || modoAñadir === 'pelicula' || modoAñadir === 'serie'
                     ? 'Adding...'
                     : 'Importing... (this can take a while)'
                   : modoAñadir === 'coleccion'
                   ? 'Add collection'
                   : modoAñadir === 'pelicula'
                   ? 'Add movie'
+                  : modoAñadir === 'serie'
+                  ? 'Add series'
                   : 'Import'}
               </button>
             </div>

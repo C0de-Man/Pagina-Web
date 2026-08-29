@@ -43,7 +43,7 @@ if (!media || media.error) {
   // Esta plantilla es solo para películas/series. Si el id resulta ser un videojuego
   // (por ejemplo, alguien pegó un link viejo o el slug apunta al id equivocado),
   // mandamos a la ficha correcta en /game/.
-  if (media.tipo === 'VIDEOJUEGO') {
+  if (media.tipo === 'VIDEOJUEGO' || media.tipo === 'SERIE') {
     redirect(urlFicha(media));
   }
 

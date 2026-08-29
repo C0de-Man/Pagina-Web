@@ -204,7 +204,7 @@ export default function Perfil() {
         {/* Solo se muestra si tienes algún juego en curso ahora mismo. */}
         {jugandoAhora.length > 0 && (
           <section>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">Currently Playing</h2>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-4">In Progress</h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setJugandoAhoraInicio((i) => Math.max(0, i - JUGANDO_AHORA_VISIBLES))}

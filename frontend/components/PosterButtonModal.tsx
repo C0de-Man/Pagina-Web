@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import BannerCropModal from './BannerCropModal';
 
-export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number; mediaId: number }) {
+export default function PosterButtonModal({ tmdbId, mediaId, tipo }: { tmdbId: number; mediaId: number; tipo?: string }) {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [tab, setTab] = useState<'caratula' | 'banner'>('caratula');
     const [posters, setPosters] = useState<any[]>([]);
@@ -18,7 +18,8 @@ export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number;
         setLoading(true);
         setErrorMsg('');
         try {
-            const res = await fetch(`http://localhost:3001/tmdb/images/${tmdbId}`);
+            const tipoParam = tipo ? `?tipo=${tipo}` : '';
+            const res = await fetch(`http://localhost:3001/tmdb/images/${tmdbId}${tipoParam}`);
             const data = await res.json();
             // TMDB puede devolver el mismo file_path repetido (p. ej. entre
             // distintos idiomas/regiones de la respuesta). Deduplicamos aquí,

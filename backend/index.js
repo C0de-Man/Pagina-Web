@@ -2589,6 +2589,7 @@ app.post('/admin/cinematic-universes/:universeId/add-movie', requireAuth, requir
       data: {
         universeId,
         tmdbId: d.id,
+        tipo: 'PELICULA',
         titulo: d.title,
         anio: d.release_date ? new Date(d.release_date).getFullYear() : null,
         fechaEstreno: d.release_date ? new Date(d.release_date) : null,
@@ -2607,10 +2608,53 @@ app.post('/admin/cinematic-universes/:universeId/add-movie', requireAuth, requir
   }
 });
 
+// --- AÑADIR UNA SERIE A UNA PESTAÑA DE UN UNIVERSO (por id de TMDB) ---
+app.post('/admin/cinematic-universes/:universeId/add-series', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const universeId = parseInt(req.params.universeId);
+    const { tmdbId, pestaña } = req.body;
+    if (!tmdbId || !pestaña || !pestaña.trim()) {
+      return res.status(400).json({ error: 'Faltan datos: tmdbId y pestaña son obligatorios' });
+    }
+
+    const apiKey = process.env.TMDB_API_KEY;
+    const r = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${apiKey}`);
+    const d = await r.json();
+    if (!d.id) return res.status(404).json({ error: 'Serie no encontrada en TMDB' });
+
+    const pestañaLimpia = pestaña.trim();
+    const maxOrden = await prisma.cinematicUniverseItem.aggregate({
+      where: { universeId, pestaña: pestañaLimpia },
+      _max: { orden: true },
+    });
+
+    const item = await prisma.cinematicUniverseItem.create({
+      data: {
+        universeId,
+        tmdbId: d.id,
+        tipo: 'SERIE',
+        titulo: d.name,
+        anio: d.first_air_date ? new Date(d.first_air_date).getFullYear() : null,
+        fechaEstreno: d.first_air_date ? new Date(d.first_air_date) : null,
+        portada: d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : null,
+        pestaña: pestañaLimpia,
+        orden: (maxOrden._max.orden ?? -1) + 1,
+      },
+    });
+    res.json(item);
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'Esta serie ya está en el universo' });
+    }
+    console.error('ERROR EN POST /admin/cinematic-universes/:universeId/add-series:', error);
+    res.status(500).json({ error: 'Error al añadir la serie' });
+  }
+});
+
 // --- AÑADIR UNA PELÍCULA SUELTA A UNA PESTAÑA DE UN UNIVERSO (buscador) ---
 app.post('/admin/cinematic-universe-items', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { universeId, tmdbId, titulo, anio, fechaEstreno, portada, pestaña } = req.body;
+    const { universeId, tmdbId, titulo, anio, fechaEstreno, portada, pestaña, tipo } = req.body;
     if (!universeId || !tmdbId || !titulo || !pestaña) {
       return res.status(400).json({ error: 'Faltan datos' });
     }
@@ -2624,6 +2668,7 @@ app.post('/admin/cinematic-universe-items', requireAuth, requireAdmin, async (re
       data: {
         universeId,
         tmdbId,
+        tipo: tipo === 'SERIE' ? 'SERIE' : 'PELICULA',
         titulo,
         anio: anio || null,
         fechaEstreno: fechaEstreno ? new Date(fechaEstreno) : null,
@@ -3057,7 +3102,8 @@ app.get('/media/watched', requireAuth, async (req, res) => {
           backdrop: e.customBackdrop || item.backdrop,
           fechaVisto: e.lastActivityAt,
           rating: e.rating,
-          liked: e.liked
+          liked: e.liked,
+          playStatus: e.playStatus
         };
       })
       .filter(Boolean);
@@ -3103,8 +3149,9 @@ app.get('/media/watchlist', requireAuth, async (req, res) => {
 // --- MIS JUEGOS EN CURSO ("Currently Playing", playStatus = 'PLAYING') ---
 app.get('/media/playing', requireAuth, async (req, res) => {
   try {
+    // "En curso" ahora cubre tanto juegos (PLAYING) como series (WATCHING)
     const entries = await prisma.userMedia.findMany({
-      where: { userId: req.userId, playStatus: 'PLAYING' },
+      where: { userId: req.userId, playStatus: { in: ['PLAYING', 'WATCHING'] } },
       orderBy: { lastActivityAt: 'desc' }
     });
 
@@ -3416,7 +3463,8 @@ app.get('/tmdb/images/:tmdbId', async (req, res) => {
     const { tmdbId } = req.params;
     if (!tmdbId || tmdbId === 'undefined' || tmdbId === 'null') return res.status(400).json({ error: "Sin tmdbId" });
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/images?api_key=${apiKey}`);
+    const endpointTmdb = req.query.tipo === 'SERIE' ? 'tv' : 'movie';
+    const response = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${tmdbId}/images?api_key=${apiKey}`);
     const data = await response.json();
     res.json({ posters: data.posters || [], backdrops: data.backdrops || [] });
   } catch (error) {
@@ -3488,6 +3536,99 @@ function construirFiltrosDiscoverMovie(query) {
 
   return params;
 }
+
+function construirFiltrosDiscoverTv(query) {
+  let params = '';
+
+  const anio = parseInt(query.anio);
+  if (!isNaN(anio) && anio > 1800) params += `&first_air_date_year=${anio}`;
+
+  const ratingMin = parseFloat(query.ratingMin);
+  const ratingMax = parseFloat(query.ratingMax);
+  if (!isNaN(ratingMin) && ratingMin > 0) params += `&vote_average.gte=${ratingMin}`;
+  if (!isNaN(ratingMax) && ratingMax < 10) params += `&vote_average.lte=${ratingMax}`;
+
+  // Duración de EPISODIO (with_runtime en discover/tv filtra por duración
+  // de episodio, no de la serie entera — no hay equivalente a "duración
+  // total" con series). Mismas franjas que en películas por consistencia.
+  if (query.duracion === 'corta') {
+    params += `&with_runtime.lte=29`;
+  } else if (query.duracion === 'media') {
+    params += `&with_runtime.gte=30&with_runtime.lte=59`;
+  } else if (query.duracion === 'larga') {
+    params += `&with_runtime.gte=60`;
+  }
+
+  return params;
+}
+
+// --- SERIES MÁS POPULARES DE LA HISTORIA, PAGINADAS DE 42 EN 42 ---
+app.get('/tmdb/tv/popular-historico/page/:page', async (req, res) => {
+  try {
+    const page = parseInt(req.params.page) || 1;
+    const apiKey = process.env.TMDB_API_KEY;
+
+    const itemsPerPage = 42;
+    const startIndex = (page - 1) * itemsPerPage;
+    const endIndex = page * itemsPerPage;
+    const startTmdbPage = Math.floor(startIndex / 20) + 1;
+    const endTmdbPage = Math.ceil(endIndex / 20);
+
+    const paramsFiltro = construirFiltrosDiscoverTv(req.query);
+    const orden = req.query.orden === 'asc' ? 'asc' : 'desc';
+
+    let combined = [];
+    for (let i = startTmdbPage; i <= endTmdbPage; i++) {
+      const url = `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&language=${getLang(req)}&sort_by=vote_count.${orden}&page=${i}${paramsFiltro}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.results) combined.push(...(await conCaratulasIngles(url, data.results)));
+    }
+
+    const offsetDentroDeCombined = startIndex - (startTmdbPage - 1) * 20;
+    const resultado = combined.slice(offsetDentroDeCombined, offsetDentroDeCombined + itemsPerPage);
+    const resultadoFinal = await mezclarCustomPosters(resultado, getUserIdOpcional(req));
+
+    res.json({ results: resultadoFinal });
+  } catch (error) {
+    res.status(500).json({ error: "Error al obtener series populares históricas" });
+  }
+});
+
+// --- SERIES DE UN AÑO, PAGINADAS DE 42 EN 42 ---
+app.get('/tmdb/tv/year/:year/page/:page', async (req, res) => {
+  try {
+    const year = req.params.year;
+    const page = parseInt(req.params.page) || 1;
+    const apiKey = process.env.TMDB_API_KEY;
+
+    const itemsPerPage = 42;
+    const startIndex = (page - 1) * itemsPerPage;
+    const endIndex = page * itemsPerPage;
+    const startTmdbPage = Math.floor(startIndex / 20) + 1;
+    const endTmdbPage = Math.ceil(endIndex / 20);
+
+    const { anio, ...queryFiltro } = req.query;
+    const paramsFiltro = construirFiltrosDiscoverTv(queryFiltro);
+    const orden = req.query.orden === 'asc' ? 'asc' : 'desc';
+
+    let combined = [];
+    for (let i = startTmdbPage; i <= endTmdbPage; i++) {
+      const url = `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&language=${getLang(req)}&first_air_date_year=${year}&sort_by=popularity.${orden}&page=${i}${paramsFiltro}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.results) combined.push(...(await conCaratulasIngles(url, data.results)));
+    }
+
+    const offsetDentroDeCombined = startIndex - (startTmdbPage - 1) * 20;
+    const resultado = combined.slice(offsetDentroDeCombined, offsetDentroDeCombined + itemsPerPage);
+    const resultadoFinal = await mezclarCustomPosters(resultado, getUserIdOpcional(req));
+
+    res.json({ results: resultadoFinal });
+  } catch (error) {
+    res.status(500).json({ error: "Error al obtener series por año" });
+  }
+});
 
 // --- RUTAS PARA EL LOBBY ---
 app.get('/tmdb/now_playing', async (req, res) => {
@@ -3580,6 +3721,37 @@ app.get('/tmdb/year/:year', async (req, res) => {
     res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: "Error al obtener películas" });
+  }
+});
+
+// --- SERIES DEL AÑO (para el lobby de /series) ---
+app.get('/tmdb/tv/year/:year', async (req, res) => {
+  try {
+    const { year } = req.params;
+    const apiKey = process.env.TMDB_API_KEY;
+    const url = `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&language=${getLang(req)}&first_air_date_year=${year}&sort_by=popularity.desc&page=1`;
+    const response = await fetch(url);
+    const data = await response.json();
+    const conIngles = await conCaratulasIngles(url, data.results || []);
+    const resultado = await mezclarCustomPosters(conIngles, getUserIdOpcional(req));
+    res.json(resultado);
+  } catch (error) {
+    res.status(500).json({ error: "Error al obtener series" });
+  }
+});
+
+// --- SERIES MÁS POPULARES DE LA HISTORIA (por número de votos) ---
+app.get('/tmdb/tv/popular-historico', async (req, res) => {
+  try {
+    const apiKey = process.env.TMDB_API_KEY;
+    const url = `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&language=${getLang(req)}&sort_by=vote_count.desc&page=1`;
+    const response = await fetch(url);
+    const data = await response.json();
+    const conIngles = await conCaratulasIngles(url, data.results || []);
+    const resultado = await mezclarCustomPosters(conIngles, getUserIdOpcional(req));
+    res.json(resultado);
+  } catch (error) {
+    res.status(500).json({ error: "Error al obtener las series populares históricas" });
   }
 });
 
@@ -3783,22 +3955,52 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
   }
 });
 
+// --- UNIVERSO DE UNA SERIE (las series no tienen "Collection" propia en
+// TMDB como las películas, así que aquí solo comprobamos si esta serie ya
+// pertenece a un universo guardado — el admin la añade a mano con
+// "By series" o el buscador mixto dentro del propio universo) ---
+app.get('/tmdb/tv/:tmdbId/universe', async (req, res) => {
+  try {
+    const { tmdbId } = req.params;
+    const universo = await construirRespuestaUniverso(parseInt(tmdbId));
+    res.json({ prequel: null, sequel: null, nombreColeccion: null, collectionId: null, parts: [], universo });
+  } catch (error) {
+    console.error('Error al obtener el universo de la serie:', error);
+    res.status(500).json({ error: 'Error al obtener universo' });
+  }
+});
+
 // --- RUTA PARA DETALLES COMPLETOS: DURACIÓN, REPARTO, EQUIPO, ESTUDIO, PAÍS, PRESUPUESTO ---
 app.get('/tmdb/details/:tmdbId', async (req, res) => {
   try {
     const { tmdbId } = req.params;
     const apiKey = process.env.TMDB_API_KEY;
+    // ?tipo=SERIE viene del frontend cuando la ficha es de una serie; por
+    // defecto PELICULA para no romper las llamadas existentes que aún no lo mandan.
+    const esSerie = req.query.tipo === 'SERIE';
+    const endpointTmdb = esSerie ? 'tv' : 'movie';
     const response = await fetch(
-      `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=${getLang(req)}&append_to_response=credits`
+      `https://api.themoviedb.org/3/${endpointTmdb}/${tmdbId}?api_key=${apiKey}&language=${getLang(req)}&append_to_response=credits`
     );
     const data = await response.json();
 
-    const director = data.credits?.crew?.find(p => p.job === 'Director') || null;
+    // En pelis el director sale en credits.crew con job "Director". En
+    // series TMDB no lo pone ahí — el creador va aparte, en created_by.
+    const director = esSerie
+      ? (data.created_by?.[0]
+          ? { name: data.created_by[0].name, id: data.created_by[0].id, profile_path: data.created_by[0].profile_path }
+          : null)
+      : (data.credits?.crew?.find(p => p.job === 'Director') || null);
     const guionistas = data.credits?.crew?.filter(p => p.job === 'Screenplay' || p.job === 'Writer') || [];
+    // Series no tienen "runtime" único, sino episode_run_time (array) o el
+    // runtime de la última temporada. Cogemos el primero disponible.
+    const runtimeSerie = data.episode_run_time?.[0] || data.last_episode_to_air?.runtime || null;
 
     res.json({
-      runtime: data.runtime || null,
-      fechaEstreno: data.release_date || null,
+      runtime: esSerie ? runtimeSerie : (data.runtime || null),
+      fechaEstreno: data.release_date || data.first_air_date || null,
+      numeroTemporadas: esSerie ? (data.number_of_seasons || null) : null,
+      estadoSerie: esSerie ? (data.status || null) : null, // "Returning Series" | "Ended" | "Canceled"...
       presupuesto: data.budget || 0,
       ganancias: data.revenue || 0,
       // Antes solo el nombre (string). Ahora {id, nombre}: hace falta el id
@@ -3827,6 +4029,191 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: "Error al obtener detalles" });
+  }
+});
+
+// --- TEMPORADAS DE UNA SERIE (datos de TMDB, sin guardar nada en Media) ---
+
+// Devuelve la lista de temporadas con su carátula/episodios/fecha, tal cual
+// viene el array "seasons" en GET /tv/:id de TMDB (no hace falta pedir cada
+// temporada por separado solo para listar).
+app.get('/tmdb/tv/:tmdbId/seasons', async (req, res) => {
+  try {
+    const { tmdbId } = req.params;
+    const apiKey = process.env.TMDB_API_KEY;
+    const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${apiKey}&language=${getLang(req)}`);
+    const data = await response.json();
+    const temporadas = (data.seasons || [])
+      .filter(s => s.season_number > 0) // TMDB mete los "Specials" como temporada 0; los ocultamos por defecto
+      .map(s => ({
+        numero: s.season_number,
+        nombre: s.name,
+        episodios: s.episode_count,
+        fechaEstreno: s.air_date,
+        portada: s.poster_path ? `https://image.tmdb.org/t/p/w300${s.poster_path}` : null
+      }));
+    res.json(temporadas);
+  } catch (error) {
+    console.error('ERROR EN GET /tmdb/tv/:tmdbId/seasons:', error);
+    res.status(500).json({ error: 'Error al obtener temporadas' });
+  }
+});
+
+// --- EPISODIOS DE UNA TEMPORADA CONCRETA (ficha de temporada, solo lectura) ---
+app.get('/tmdb/tv/:tmdbId/season/:seasonNumber', async (req, res) => {
+  try {
+    const { tmdbId, seasonNumber } = req.params;
+    const apiKey = process.env.TMDB_API_KEY;
+    const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}?api_key=${apiKey}&language=${getLang(req)}`);
+    const data = await response.json();
+    res.json({
+      nombre: data.name,
+      sinopsis: data.overview,
+      fechaEstreno: data.air_date,
+      portada: data.poster_path ? `https://image.tmdb.org/t/p/w300${data.poster_path}` : null,
+      episodios: (data.episodes || []).map(e => ({
+        numero: e.episode_number,
+        titulo: e.name,
+        sinopsis: e.overview,
+        fechaEmision: e.air_date,
+        duracion: e.runtime || null,
+        imagen: e.still_path ? `https://image.tmdb.org/t/p/w300${e.still_path}` : null,
+        notaMedia: e.vote_average ? Math.round(e.vote_average * 10) / 10 : null // nota media de TMDB, escala 0-10
+      }))
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /tmdb/tv/:tmdbId/season/:seasonNumber:', error);
+    res.status(500).json({ error: 'Error al obtener la temporada' });
+  }
+});
+
+// --- PÓSTERS ALTERNATIVOS DE UNA TEMPORADA (para el selector de carátula) ---
+app.get('/tmdb/tv/:tmdbId/season/:seasonNumber/images', async (req, res) => {
+  try {
+    const { tmdbId, seasonNumber } = req.params;
+    const apiKey = process.env.TMDB_API_KEY;
+    const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}/images?api_key=${apiKey}`);
+    const data = await response.json();
+    const posters = (data.posters || []).map(p => ({
+      url: `https://image.tmdb.org/t/p/w500${p.file_path}`,
+      idioma: p.iso_639_1
+    }));
+    res.json(posters);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener pósters de la temporada' });
+  }
+});
+
+// --- MI ESTADO POR TEMPORADA DE UNA SERIE (todas de golpe, para pintar
+// estrellas/ojo en la lista de temporadas sin una petición por cada una) ---
+app.get('/media/:id/seasons/status', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id);
+    const estados = await prisma.userSeasonWatch.findMany({
+      where: { userId: req.userId, mediaId }
+    });
+    res.json(estados);
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/seasons/status:', error);
+    res.status(500).json({ error: 'Error al obtener el estado de temporadas' });
+  }
+});
+
+// --- MARCAR VISTA/NOTA UNA TEMPORADA ---
+app.patch('/media/:id/seasons/:seasonNumber', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id);
+    const seasonNumber = parseInt(req.params.seasonNumber);
+    const { watched, rating, customPoster } = req.body;
+
+    const data = {};
+    if (typeof watched === 'boolean') {
+      data.watched = watched;
+      data.fechaVisto = watched ? new Date() : null;
+    }
+    if (rating !== undefined) data.rating = rating;
+    if (customPoster !== undefined) data.customPoster = customPoster;
+
+    const estado = await prisma.userSeasonWatch.upsert({
+      where: { userId_mediaId_seasonNumber: { userId: req.userId, mediaId, seasonNumber } },
+      update: data,
+      create: { userId: req.userId, mediaId, seasonNumber, watched: watched ?? false, rating: rating ?? null, customPoster: customPoster ?? null, fechaVisto: watched ? new Date() : null }
+    });
+    res.json(estado);
+  } catch (error) {
+    console.error('ERROR EN PATCH /media/:id/seasons/:seasonNumber:', error);
+    res.status(500).json({ error: 'Error al actualizar la temporada' });
+  }
+});
+
+// --- MI ESTADO POR EPISODIO DE UNA TEMPORADA CONCRETA ---
+app.get('/media/:id/seasons/:seasonNumber/episodes/status', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id);
+    const seasonNumber = parseInt(req.params.seasonNumber);
+    const estados = await prisma.userEpisodeWatch.findMany({
+      where: { userId: req.userId, mediaId, seasonNumber }
+    });
+    res.json(estados);
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/seasons/:seasonNumber/episodes/status:', error);
+    res.status(500).json({ error: 'Error al obtener el estado de episodios' });
+  }
+});
+
+// --- MARCAR VISTO/NOTA UN EPISODIO ---
+app.patch('/media/:id/seasons/:seasonNumber/episodes/:episodeNumber', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id);
+    const seasonNumber = parseInt(req.params.seasonNumber);
+    const episodeNumber = parseInt(req.params.episodeNumber);
+    const { watched, rating } = req.body;
+
+    const data = {};
+    if (typeof watched === 'boolean') {
+      data.watched = watched;
+      data.fechaVisto = watched ? new Date() : null;
+    }
+    if (rating !== undefined) data.rating = rating;
+
+    const estado = await prisma.userEpisodeWatch.upsert({
+      where: { userId_mediaId_seasonNumber_episodeNumber: { userId: req.userId, mediaId, seasonNumber, episodeNumber } },
+      update: data,
+      create: { userId: req.userId, mediaId, seasonNumber, episodeNumber, watched: watched ?? false, rating: rating ?? null, fechaVisto: watched ? new Date() : null }
+    });
+    res.json(estado);
+  } catch (error) {
+    console.error('ERROR EN PATCH /media/:id/seasons/:seasonNumber/episodes/:episodeNumber:', error);
+    res.status(500).json({ error: 'Error al actualizar el episodio' });
+  }
+});
+
+// --- MARCAR/DESMARCAR TODOS LOS EPISODIOS DE UNA TEMPORADA DE GOLPE ---
+// El total de episodios se manda desde el frontend (ya lo tiene, viene de
+// GET /tmdb/tv/:tmdbId/seasons) para no tener que volver a pedirlo a TMDB
+// solo para saber cuántos hay.
+app.patch('/media/:id/seasons/:seasonNumber/mark-all', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id);
+    const seasonNumber = parseInt(req.params.seasonNumber);
+    const { watched, totalEpisodios } = req.body;
+    const total = parseInt(totalEpisodios) || 0;
+    if (total <= 0) return res.json({ ok: true });
+
+    const fecha = watched ? new Date() : null;
+    await Promise.all(
+      Array.from({ length: total }, (_, i) => i + 1).map((episodeNumber) =>
+        prisma.userEpisodeWatch.upsert({
+          where: { userId_mediaId_seasonNumber_episodeNumber: { userId: req.userId, mediaId, seasonNumber, episodeNumber } },
+          update: { watched, fechaVisto: fecha },
+          create: { userId: req.userId, mediaId, seasonNumber, episodeNumber, watched, fechaVisto: fecha }
+        })
+      )
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN PATCH /media/:id/seasons/:seasonNumber/mark-all:', error);
+    res.status(500).json({ error: 'Error al marcar los episodios' });
   }
 });
 
@@ -3979,8 +4366,9 @@ app.get('/tmdb/watch-providers/:tmdbId', async (req, res) => {
     const { tmdbId } = req.params;
     const apiKey = process.env.TMDB_API_KEY;
     const region = req.query.region || 'ES';
+    const endpointTmdb = req.query.tipo === 'SERIE' ? 'tv' : 'movie';
 
-    const response = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/watch/providers?api_key=${apiKey}`);
+    const response = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${tmdbId}/watch/providers?api_key=${apiKey}`);
     const data = await response.json();
 
     const paisData = data.results?.[region] || null;
@@ -4320,10 +4708,11 @@ app.get('/media/:id', async (req, res) => {
     let sinopsisMostrada = mediaItem.sinopsis;
     if (mediaItem.tmdbId) {
       try {
-        const liveRes = await fetch(`https://api.themoviedb.org/3/movie/${mediaItem.tmdbId}?api_key=${apiKey}&language=${lang}`);
+        const endpointTmdb = mediaItem.tipo === 'SERIE' ? 'tv' : 'movie';
+        const liveRes = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${mediaItem.tmdbId}?api_key=${apiKey}&language=${lang}`);
         const live = await liveRes.json();
         if (live && !live.status_code) {
-          tituloMostrado = live.title || tituloMostrado;
+          tituloMostrado = live.title || live.name || tituloMostrado;
           sinopsisMostrada = live.overview || sinopsisMostrada;
         }
       } catch (e) {
@@ -4920,7 +5309,7 @@ app.get('/users/:username', async (req, res) => {
       // "Currently Playing": juegos donde el propio dueño del perfil ha
       // puesto el desplegable "Set your played status" en Playing.
       prisma.userMedia.findMany({
-        where: { userId: usuario.id, playStatus: 'PLAYING' },
+        where: { userId: usuario.id, playStatus: { in: ['PLAYING', 'WATCHING'] } },
         orderBy: { updatedAt: 'desc' },
       }),
     ]);
@@ -5104,21 +5493,25 @@ app.patch('/media/:id/status', requireAuth, async (req, res) => {
     const { watched, liked, watchlist, rating, customPoster, playStatus } = req.body;
 
     const data = {};
-    if (watched !== undefined) data.watched = watched;
     if (liked !== undefined) data.liked = liked;
     if (watchlist !== undefined) data.watchlist = watchlist;
     if (rating !== undefined) data.rating = rating;
     if (rating !== undefined && rating !== null) data.watched = true;
     if (customPoster !== undefined) data.customPoster = customPoster;
-    // playStatus es solo para videojuegos (Playing/Completed/Retired/
-    // Shelved/Abandoned). Al elegir un estado, marcamos watched = true
-    // automáticamente (igual que ya hace rating); al pulsar "Mark as
-    // unplayed" el frontend manda playStatus = null, y aquí lo traducimos
-    // también a watched = false.
+    // playStatus: en juegos es Playing/Completed/Retired/Shelved/Abandoned;
+    // en series es Watching/Paused/Abandoned. Al elegir un estado, marcamos
+    // watched = true automáticamente; al pulsar "Mark as unplayed/unwatched"
+    // el frontend manda playStatus = null, y aquí lo traducimos también a
+    // watched = false.
     if (playStatus !== undefined) {
       data.playStatus = playStatus;
       data.watched = playStatus !== null;
     }
+    // "watched" explícito SIEMPRE pisa lo que playStatus haya derivado justo
+    // arriba — hace falta para el caso "Watched" de series, que manda
+    // {watched:true, playStatus:null} A LA VEZ (sin esto, el bloque de
+    // arriba dejaría watched en false por llevar playStatus:null).
+    if (watched !== undefined) data.watched = watched;
 
     // lastActivityAt es lo que ordena Watched/Watchlist/Currently Playing.
     // Solo se toca cuando pasa algo que de verdad cuenta como actividad —
