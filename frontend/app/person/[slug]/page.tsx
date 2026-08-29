@@ -1,8 +1,18 @@
 import PersonFilmography from '@/components/PersonFilmography';
 import { cookies } from 'next/headers';
+import { extraerIdDeSlug } from '@/lib/slug';
 
-export default async function PersonaDetail({ params }: { params: Promise<{ personId: string }> }) {
-  const { personId } = await params;
+export default async function PersonaDetail({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const personId = extraerIdDeSlug(slug);
+
+  if (!personId) {
+    return (
+      <div className="p-8 text-white text-center min-h-screen bg-gray-950 flex items-center justify-center">
+        Persona no encontrada
+      </div>
+    );
+  }
 
   const cookieStore = await cookies();
   const idioma = cookieStore.get('idioma')?.value || 'es-ES';
@@ -25,7 +35,7 @@ export default async function PersonaDetail({ params }: { params: Promise<{ pers
   const db = await resDb.json();
   const localesPorClave: Record<string, { dbId: number; portada: string | null }> = {};
   for (const m of db) {
-    if (m.tmdbId && m.tipo === 'PELICULA') {
+    if (m.tmdbId && (m.tipo === 'PELICULA' || m.tipo === 'SERIE')) {
       localesPorClave[`${m.tipo}-${m.tmdbId}`] = { dbId: m.id, portada: m.portada };
     }
   }

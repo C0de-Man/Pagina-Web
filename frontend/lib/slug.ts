@@ -13,7 +13,7 @@ export interface MediaParaSlug {
 }
 
 function limpiarParaSlug(texto: string | undefined | null): string {
-  return (texto || 'sin-titulo')
+  return (texto || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9\s-]/g, '')
@@ -33,6 +33,13 @@ function obtenerTituloOriginal(media: MediaParaSlug): string {
   );
 }
 
+// Título alternativo (localizado, normalmente en inglés/español) para
+// cuando el original no sirve de nada en un slug — típicamente porque está
+// en japonés/coreano/chino y no le queda ningún carácter tras limpiarlo.
+function obtenerTituloAlternativo(media: MediaParaSlug): string {
+  return media.titulo || media.title || media.name || 'sin-titulo';
+}
+
 function obtenerAnio(media: MediaParaSlug): number | string | null {
   if (media.anio) return media.anio;
   if (media.release_date) return media.release_date.split('-')[0];
@@ -41,7 +48,14 @@ function obtenerAnio(media: MediaParaSlug): number | string | null {
 }
 
 export function generarSlug(media: MediaParaSlug): string {
-  const textoLimpio = limpiarParaSlug(obtenerTituloOriginal(media));
+  let textoLimpio = limpiarParaSlug(obtenerTituloOriginal(media));
+  // El original puede estar en un alfabeto que la limpieza deja en blanco
+  // (japonés, coreano, chino...) — en ese caso usamos el título localizado
+  // (normalmente en inglés) en su lugar, y solo si ESE también queda vacío
+  // caemos al "sin-titulo" de siempre.
+  if (!textoLimpio) {
+    textoLimpio = limpiarParaSlug(obtenerTituloAlternativo(media)) || 'sin-titulo';
+  }
   const anio = obtenerAnio(media);
 
   const partes = [textoLimpio];
@@ -61,4 +75,19 @@ export function extraerIdDeSlug(slug: string): number | null {
 export function urlFicha(media: MediaParaSlug): string {
   const base = media.tipo === 'VIDEOJUEGO' ? '/game' : media.tipo === 'SERIE' ? '/series' : '/movie';
   return `${base}/${generarSlug(media)}`;
+}
+
+// --- ESTUDIOS Y PERSONAS: no tienen "tipo"/año como Media, solo nombre + id.
+// Mismo criterio de limpieza que generarSlug, pero más simple: nombre-en-inglés + id al final.
+function generarSlugSimple(nombre: string | undefined | null, id: number): string {
+  const limpio = limpiarParaSlug(nombre) || 'sin-nombre';
+  return [limpio, String(id)].join('-');
+}
+
+export function urlEstudio(id: number, nombre?: string | null): string {
+  return `/studio/${generarSlugSimple(nombre, id)}`;
+}
+
+export function urlPersona(id: number, nombre?: string | null): string {
+  return `/person/${generarSlugSimple(nombre, id)}`;
 }

@@ -1,17 +1,27 @@
 import MovieCard from '@/components/MovieCard';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
+import { extraerIdDeSlug, urlEstudio } from '@/lib/slug';
 
 export default async function StudioPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ companyId: string }>;
+  params: Promise<{ slug: string }>;
   searchParams: Promise<{ page?: string }>;
 }) {
-  const { companyId } = await params;
+  const { slug } = await params;
   const { page } = await searchParams;
   const currentPage = parseInt(page || '1');
+
+  const companyId = extraerIdDeSlug(slug);
+  if (!companyId) {
+    return (
+      <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+        Studio not found
+      </main>
+    );
+  }
 
   const cookieStore = await cookies();
   const idioma = cookieStore.get('idioma')?.value || 'es-ES';
@@ -32,8 +42,12 @@ export default async function StudioPage({
 
   const data = await res.json();
 
-  // Igual que en /movie/all: comprobamos qué películas ya están guardadas en
-  // TU base de datos local para que MovieCard pueda enlazar a su ficha propia.
+  // La URL "canónica" es siempre nombre-en-inglés + id, calculada a partir
+  // de lo que devuelve el backend (data.nombre) — así, aunque alguien entre
+  // con un slug desactualizado o solo el id pelado, la paginación y
+  // cualquier enlace interno siempre usan el slug correcto.
+  const slugCanonico = urlEstudio(data.id, data.nombre);
+
   const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
   const myDb = await resDb.json();
   const getLocalData = (tmdbId: number) => {
@@ -58,13 +72,13 @@ export default async function StudioPage({
         </div>
 
         {data.peliculas.length === 0 ? (
-          <p className="text-gray-500">No movies found for this studio.</p>
+          <p className="text-gray-500">Nothing found for this studio.</p>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4">
             {data.peliculas.map((pelicula: any) => {
               const { dbId, customPoster } = getLocalData(pelicula.id);
               return (
-                <div key={pelicula.id} className="w-full">
+                <div key={`${pelicula.media_type}-${pelicula.id}`} className="w-full">
                   <MovieCard pelicula={pelicula} dbId={dbId} customPoster={customPoster} />
                 </div>
               );
@@ -75,7 +89,7 @@ export default async function StudioPage({
         {data.totalPaginas > 1 && (
           <div className="border-t border-gray-800 mt-8 pt-6 flex items-center justify-between">
             {currentPage > 1 ? (
-              <Link href={`/studio/${companyId}?page=${currentPage - 1}`} className="text-sm text-gray-400 hover:text-white transition">
+              <Link href={`${slugCanonico}?page=${currentPage - 1}`} className="text-sm text-gray-400 hover:text-white transition">
                 ‹ Prev
               </Link>
             ) : (
@@ -83,7 +97,7 @@ export default async function StudioPage({
             )}
             <span className="text-sm text-gray-500">Page {currentPage} of {data.totalPaginas}</span>
             {currentPage < data.totalPaginas ? (
-              <Link href={`/studio/${companyId}?page=${currentPage + 1}`} className="text-sm text-gray-400 hover:text-white transition">
+              <Link href={`${slugCanonico}?page=${currentPage + 1}`} className="text-sm text-gray-400 hover:text-white transition">
                 Next ›
               </Link>
             ) : (

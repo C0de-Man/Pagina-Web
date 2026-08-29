@@ -4324,6 +4324,10 @@ app.get('/tmdb/person/:personId', async (req, res) => {
 
 // --- DÓNDE VER (datos de JustWatch a través de TMDB) ---
 // --- FICHA DE UN ESTUDIO: nombre/logo + filmografía (paginada de 20 en 20, como da TMDB por defecto) ---
+// --- FICHA DE UN ESTUDIO: nombre/logo + filmografía (películas Y series,
+// paginada de 20 en 20 cada una como da TMDB por defecto) ---
+// Antes solo pedía discover/movie — un estudio que hace sobre todo series
+// (Pierrot, A-1 Pictures...) se quedaba con la filmografía vacía o incompleta.
 app.get('/tmdb/company/:companyId', async (req, res) => {
   try {
     const { companyId } = req.params;
@@ -4331,20 +4335,37 @@ app.get('/tmdb/company/:companyId', async (req, res) => {
     const lang = getLang(req);
     const page = parseInt(req.query.page) || 1;
 
-    const [resCompany, resMovies] = await Promise.all([
+    const urlMovies = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${lang}&with_companies=${companyId}&sort_by=primary_release_date.desc&page=${page}`;
+    const urlSeries = `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&language=${lang}&with_companies=${companyId}&sort_by=first_air_date.desc&page=${page}`;
+
+    const [resCompany, resMovies, resSeries] = await Promise.all([
       fetch(`https://api.themoviedb.org/3/company/${companyId}?api_key=${apiKey}`),
-      fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${lang}&with_companies=${companyId}&sort_by=primary_release_date.desc&page=${page}`),
+      fetch(urlMovies),
+      fetch(urlSeries),
     ]);
     const company = await resCompany.json();
     const movies = await resMovies.json();
+    const series = await resSeries.json();
 
     if (!company || company.success === false) {
       return res.status(404).json({ error: 'Estudio no encontrado' });
     }
 
-    const urlMovies = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${lang}&with_companies=${companyId}&sort_by=primary_release_date.desc&page=${page}`;
-    const resultadosEnIngles = await conCaratulasIngles(urlMovies, movies.results || []);
-    const peliculas = await mezclarCustomPosters(resultadosEnIngles, getUserIdOpcional(req));
+    const [peliculasEnIngles, seriesEnIngles] = await Promise.all([
+      conCaratulasIngles(urlMovies, movies.results || []),
+      conCaratulasIngles(urlSeries, series.results || []),
+    ]);
+
+    // Etiquetamos cada resultado con su tipo (movies no lo trae por defecto
+    // como sí hace search/multi) para que el frontend sepa a qué ficha
+    // enlazar, y mezclamos las dos listas por fecha de estreno, más
+    // reciente primero.
+    const peliculasConTipo = peliculasEnIngles.map((p) => ({ ...p, media_type: 'movie' }));
+    const seriesConTipo = seriesEnIngles.map((s) => ({ ...s, media_type: 'tv' }));
+    const fechaDe = (item) => item.release_date || item.first_air_date || '';
+    const mezclado = [...peliculasConTipo, ...seriesConTipo].sort((a, b) => fechaDe(b).localeCompare(fechaDe(a)));
+
+    const peliculas = await mezclarCustomPosters(mezclado, getUserIdOpcional(req));
 
     res.json({
       id: company.id,
@@ -4352,7 +4373,10 @@ app.get('/tmdb/company/:companyId', async (req, res) => {
       logo: company.logo_path ? `https://image.tmdb.org/t/p/w300${company.logo_path}` : null,
       pais: company.origin_country || null,
       page,
-      totalPaginas: Math.min(movies.total_pages || 1, 500), // límite propio de TMDB
+      // Total de páginas: nos quedamos con el mayor de los dos (así el
+      // paginador no se corta antes de tiempo si una de las dos listas
+      // tiene más páginas que la otra).
+      totalPaginas: Math.min(Math.max(movies.total_pages || 1, series.total_pages || 1), 500),
       peliculas,
     });
   } catch (error) {

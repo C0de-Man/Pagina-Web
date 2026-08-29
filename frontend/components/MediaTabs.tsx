@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { urlEstudio, urlPersona } from '@/lib/slug';
 
 const API_URL = 'http://localhost:3001';
 
@@ -91,7 +92,7 @@ export default function MediaTabs({
         <div className="flex flex-wrap gap-x-6 gap-y-5">
           {detalles?.cast?.length > 0 ? (
             detalles.cast.map((actor: any) => (
-              <Link key={actor.id} href={`/person/${actor.id}`} className="w-20 text-center group">
+              <Link key={actor.id} href={urlPersona(actor.id, actor.nombre)} className="w-20 text-center group">
                 <div className="w-16 h-16 mx-auto rounded-full overflow-hidden bg-gray-800 mb-2 border border-gray-700 group-hover:border-gray-400 transition">
                   {actor.foto ? (
                     <img src={actor.foto} alt={actor.nombre} className="w-full h-full object-cover" />
@@ -113,7 +114,7 @@ export default function MediaTabs({
       {tab === 'crew' && (
         <div className="flex flex-wrap gap-x-6 gap-y-5">
           {detalles?.director && (
-            <Link href={`/person/${detalles.director.id}`} className="w-20 text-center group">
+            <Link href={urlPersona(detalles.director.id, detalles.director.nombre)} className="w-20 text-center group">
               <div className="w-16 h-16 mx-auto rounded-full overflow-hidden bg-gray-800 mb-2 border border-gray-700 group-hover:border-gray-400 transition">
                 {detalles.director.foto ? (
                   <img src={detalles.director.foto} alt={detalles.director.nombre} className="w-full h-full object-cover" />
@@ -126,7 +127,7 @@ export default function MediaTabs({
             </Link>
           )}
           {detalles?.guionistas?.map((g: any, i: number) => (
-            <Link key={i} href={`/person/${g.id}`} className="w-20 text-center group">
+            <Link key={i} href={urlPersona(g.id, g.nombre)} className="w-20 text-center group">
               <div className="w-16 h-16 mx-auto rounded-full overflow-hidden bg-gray-800 mb-2 border border-gray-700 group-hover:border-gray-400 transition">
                 {g.foto ? (
                   <img src={g.foto} alt={g.nombre} className="w-full h-full object-cover" />
@@ -154,7 +155,7 @@ export default function MediaTabs({
                 detalles.estudios.map((e: any, i: number) => (
                   <span key={e.id ?? i}>
                     {e.id ? (
-                      <Link href={`/studio/${e.id}`} className="hover:underline hover:text-white transition">
+                      <Link href={urlEstudio(e.id, e.nombre)} className="hover:underline hover:text-white transition">
                         {e.nombre}
                       </Link>
                     ) : (

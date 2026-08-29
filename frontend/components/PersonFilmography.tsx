@@ -49,13 +49,6 @@ export default function PersonFilmography({
       .catch(() => {});
   }, [localesPorClave]);
 
-  // Ocultamos series de raíz (por ahora no se muestran en ningún sitio de la
-  // app): se filtran ANTES de agrupar por rol, así ni cuentan en el número
-  // de créditos de cada pestaña ni aparecen en ninguna lista.
-  const porRolSinSeries = Object.fromEntries(
-    Object.entries(porRol).map(([rol, items]) => [rol, items.filter((i) => i.tipo !== 'SERIE')])
-  );
-
   // Pestañas ordenadas por número de créditos, de más a menos (igual que en
   // la captura de referencia: Director 13, Writer 10, Producer 9...).
   // Solo se muestran los roles de esta lista (a petición explícita) — con
@@ -63,13 +56,13 @@ export default function PersonFilmography({
   // maquillaje FX...) es más simple decir qué SÍ se ve que ir excluyendo uno
   // a uno.
   const ROLES_PERMITIDOS = ['Actor', 'Director', 'Writer'];
-  const roles = Object.entries(porRolSinSeries)
+  const roles = Object.entries(porRol)
     .filter(([rol, items]) => items.length > 0 && ROLES_PERMITIDOS.includes(rol))
     .sort((a, b) => b[1].length - a[1].length);
 
   const [rolActivo, setRolActivo] = useState(roles[0]?.[0] || '');
 
-  const items = porRolSinSeries[rolActivo] || [];
+  const items = porRol[rolActivo] || [];
 
   return (
     <div>
@@ -96,9 +89,15 @@ export default function PersonFilmography({
             miPersonalizacion?.customPoster ||
             local?.portada ||
             (item.posterPath ? `https://image.tmdb.org/t/p/w300${item.posterPath}` : null);
+          // Si ya está guardado, vamos directo a su ficha; si no, pasamos
+          // por la resolvedora correcta según sea película o serie (antes
+          // esto SIEMPRE mandaba a la resolvedora de película, aunque fuera
+          // un crédito de serie).
           const href = local
             ? urlFicha({ id: local.dbId, titulo: item.titulo, tipo: item.tipo })
-            : `/movie/tmdb/${item.tmdbId}${item.tipo === 'SERIE' ? '?tipo=SERIE' : ''}`;
+            : item.tipo === 'SERIE'
+              ? `/series/tmdb/${item.tmdbId}`
+              : `/movie/tmdb/${item.tmdbId}`;
           const anio = item.fecha ? item.fecha.split('-')[0] : '';
 
           return (
