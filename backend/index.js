@@ -1817,6 +1817,109 @@ function requireAuth(req, res, next) {
   }
 }
 
+// --- ACTIVIDAD RECIENTE DE MIS AMIGOS (para "New from friends" en la home) ---
+// Cualquier cosa que sigas (Follow ACCEPTED) haya marcado como vista/jugada,
+// tenga reseña escrita o no — a diferencia de /media/reviews, que solo
+// enseña las que SÍ tienen texto. La forma de cada item es la MISMA que ya
+// usa /media/reviews (compatible con <ReviewDetailModal>), con "actor"
+// añadido encima para saber de quién es la actividad.
+app.get('/friends/activity', requireAuth, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 30;
+
+    const siguiendo = await prisma.follow.findMany({
+      where: { followerId: req.userId, estado: 'ACCEPTED' },
+      select: { followingId: true },
+    });
+    const idsAmigos = siguiendo.map((f) => f.followingId);
+    if (idsAmigos.length === 0) return res.json([]);
+
+    const entradas = await prisma.userMedia.findMany({
+      where: { userId: { in: idsAmigos }, watched: true },
+      orderBy: { lastActivityAt: 'desc' },
+      take: limit,
+    });
+    if (entradas.length === 0) return res.json([]);
+
+    const mediaIds = [...new Set(entradas.map((e) => e.mediaId))];
+    const userIds = [...new Set(entradas.map((e) => e.userId))];
+
+    const [mediaItems, usuarios, watchLogs, gameLogs] = await Promise.all([
+      prisma.media.findMany({ where: { id: { in: mediaIds } } }),
+      prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, username: true, avatar: true } }),
+      // Todos los logs, no solo los que tienen reseña — de aquí sacamos
+      // también los detalles de "para cuándo lo viste" (rewatch) o, en
+      // juegos, plataforma/horas/etc., aunque no haya texto escrito.
+      prisma.watchLog.findMany({
+        where: { userId: { in: userIds }, mediaId: { in: mediaIds } },
+        orderBy: { fechaVisto: 'desc' },
+      }),
+      prisma.gameLog.findMany({
+        where: { userId: { in: userIds }, mediaId: { in: mediaIds } },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const mediaPorId = new Map(mediaItems.map((m) => [m.id, m]));
+    const usuarioPorId = new Map(usuarios.map((u) => [u.id, u]));
+
+    // El log MÁS RECIENTE por usuario+media (ya vienen ordenados desc, así
+    // que el primero que encontremos por esa clave es el bueno).
+    const watchLogPorClave = new Map();
+    for (const w of watchLogs) {
+      const clave = `${w.userId}-${w.mediaId}`;
+      if (!watchLogPorClave.has(clave)) watchLogPorClave.set(clave, w);
+    }
+    const gameLogPorClave = new Map();
+    for (const g of gameLogs) {
+      const clave = `${g.userId}-${g.mediaId}`;
+      if (!gameLogPorClave.has(clave)) gameLogPorClave.set(clave, g);
+    }
+
+    const resultado = entradas
+      .map((e) => {
+        const item = mediaPorId.get(e.mediaId);
+        const actor = usuarioPorId.get(e.userId);
+        if (!item || !actor) return null;
+
+        const clave = `${e.userId}-${e.mediaId}`;
+        const esJuego = item.tipo === 'VIDEOJUEGO';
+        const wLog = !esJuego ? watchLogPorClave.get(clave) : null;
+        const gLog = esJuego ? gameLogPorClave.get(clave) : null;
+
+        return {
+          actor,
+          // Misma forma que /media/reviews (para reutilizar ReviewDetailModal tal cual)
+          ...item,
+          id: item.id,
+          mediaId: item.id,
+          portada: e.customPoster || item.portada,
+          logId: wLog ? `watchlog-${wLog.id}` : gLog ? `gamelog-${gLog.id}` : null,
+          rating: esJuego ? gLog?.rating ?? null : e.rating,
+          liked: e.liked,
+          watchlist: e.watchlist,
+          rewatch: wLog?.rewatch || false,
+          review: esJuego ? gLog?.review || null : wLog?.review || null,
+          logNombre: gLog?.nombre || null,
+          plataforma: gLog?.plataforma || null,
+          jugadoEn: gLog?.jugadoEn || null,
+          propiedad: gLog?.propiedad || null,
+          edicion: gLog?.edicion || null,
+          fechaInicio: gLog?.fechaInicio || null,
+          fechaFin: gLog?.fechaFin || null,
+          minutosJugados: gLog?.minutosJugados ?? null,
+          fecha: e.lastActivityAt,
+        };
+      })
+      .filter(Boolean);
+
+    res.json(resultado);
+  } catch (error) {
+    console.error('ERROR EN GET /friends/activity:', error);
+    res.status(500).json({ error: 'Error al obtener la actividad de tus amigos' });
+  }
+});
+
 // --- HELPER: ¿puede "miUserId" ver el catálogo/listas/reseñas de "usuario"? ---
 // true si: el propio dueño, o la cuenta es pública, o (siendo privada) hay
 // un Follow con estado ACCEPTED de miUserId hacia usuario.id. Se usa en

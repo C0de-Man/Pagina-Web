@@ -286,7 +286,7 @@ export default function GameTabs({
             <div className="text-gray-200">
               {detalles?.desarrolladoras?.length > 0 ? (
                 detalles.desarrolladoras.map((d: any, i: number) => (
-                  <span key={d.id ?? i}>
+                  <span key={`${d.id ?? 'sin-id'}-${i}`}>
                     {d.id ? (
                       <Link href={`/developer/${d.id}`} className="hover:underline hover:text-white transition">
                         {d.nombre}
@@ -307,7 +307,7 @@ export default function GameTabs({
             <div className="text-gray-200">
               {detalles?.distribuidoras?.length > 0 ? (
                 detalles.distribuidoras.map((d: any, i: number) => (
-                  <span key={d.id ?? i}>
+                  <span key={`${d.id ?? 'sin-id'}-${i}`}>
                     {d.id ? (
                       <Link href={`/developer/${d.id}`} className="hover:underline hover:text-white transition">
                         {d.nombre}
