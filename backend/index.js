@@ -4148,6 +4148,16 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
     );
     const data = await response.json();
 
+    // El tagline no tiene el mismo comportamiento que overview: cuando TMDB no
+    // tiene traducción, en vez de devolverlo vacío, cae directamente al inglés
+    // sin avisar. Si nuestro idioma no es inglés, lo traducimos con MyMemory
+    // (mismo traductor que ya usamos para sinopsis de juegos/series).
+    const lang = getLang(req);
+    let taglineFinal = data.tagline || null;
+    if (taglineFinal && !lang.startsWith('en')) {
+      taglineFinal = await traducirTexto(taglineFinal, lang);
+    }
+
     // En pelis el director sale en credits.crew con job "Director". En
     // series TMDB no lo pone ahí — el creador va aparte, en created_by.
     const director = esSerie
@@ -4162,6 +4172,7 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
 
     res.json({
       runtime: esSerie ? runtimeSerie : (data.runtime || null),
+      tagline: taglineFinal,
       fechaEstreno: data.release_date || data.first_air_date || null,
       numeroTemporadas: esSerie ? (data.number_of_seasons || null) : null,
       estadoSerie: esSerie ? (data.status || null) : null, // "Returning Series" | "Ended" | "Canceled"...
@@ -4196,19 +4207,57 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
   }
 });
 
-// --- TEMPORADAS DE UNA SERIE (datos de TMDB, sin guardar nada en Media) ---
+// TMDB no deja el campo "name" vacío cuando no hay traducción real: genera
+// automáticamente un nombre "de relleno" en el idioma pedido (p.ej. "Episodio
+// 3", "Temporada 1"). Esta función detecta esos rellenos (además de los
+// vacíos de verdad) para saber cuándo hace falta ir a buscar el nombre/
+// sinopsis real en otro idioma.
+function esNombreGenerico(nombre, numero, tipo) {
+  if (!nombre || !nombre.trim()) return true;
+  const limpio = nombre.trim().toLowerCase();
+  const patrones = tipo === 'temporada'
+    ? [`temporada ${numero}`, `season ${numero}`]
+    : [`episodio ${numero}`, `episode ${numero}`];
+  return patrones.includes(limpio);
+}
 
-// Devuelve la lista de temporadas con su carátula/episodios/fecha, tal cual
-// viene el array "seasons" en GET /tv/:id de TMDB (no hace falta pedir cada
-// temporada por separado solo para listar).
 app.get('/tmdb/tv/:tmdbId/seasons', async (req, res) => {
   try {
     const { tmdbId } = req.params;
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${apiKey}&language=${getLang(req)}`);
-    const data = await response.json();
-    const temporadas = (data.seasons || [])
-      .filter(s => s.season_number > 0) // TMDB mete los "Specials" como temporada 0; los ocultamos por defecto
+    const idioma = getLang(req);
+
+    const pedirTemporadas = async (lang) => {
+      const url = lang
+        ? `https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${apiKey}&language=${lang}`
+        : `https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${apiKey}`; // sin language = TMDB devuelve el nombre original
+      const r = await fetch(url);
+      const d = await r.json();
+      return d.seasons || [];
+    };
+
+    let seasons = await pedirTemporadas(idioma);
+
+    // Si alguna temporada no tiene nombre en nuestro idioma (TMDB devuelve
+    // "" cuando no hay traducción), rellenamos con inglés y, si tampoco,
+    // con el nombre original de TMDB.
+    const faltanNombres = seasons.some(s => !s.name || !s.name.trim());
+    if (faltanNombres) {
+      const seasonsEn = await pedirTemporadas('en-US');
+      const seasonsOriginal = await pedirTemporadas(null);
+      const nombreEnPorNumero = new Map(seasonsEn.map(s => [s.season_number, s.name]));
+      const nombreOriginalPorNumero = new Map(seasonsOriginal.map(s => [s.season_number, s.name]));
+
+      seasons = seasons.map(s => {
+        if (s.name && s.name.trim()) return s;
+        const nombreEn = nombreEnPorNumero.get(s.season_number);
+        const nombreFallback = (nombreEn && nombreEn.trim()) ? nombreEn : nombreOriginalPorNumero.get(s.season_number);
+        return { ...s, name: nombreFallback || s.name };
+      });
+    }
+
+    const temporadas = seasons
+      .filter(s => s.season_number > 0)
       .map(s => ({
         numero: s.season_number,
         nombre: s.name,
@@ -4223,27 +4272,113 @@ app.get('/tmdb/tv/:tmdbId/seasons', async (req, res) => {
   }
 });
 
-// --- EPISODIOS DE UNA TEMPORADA CONCRETA (ficha de temporada, solo lectura) ---
 app.get('/tmdb/tv/:tmdbId/season/:seasonNumber', async (req, res) => {
   try {
     const { tmdbId, seasonNumber } = req.params;
     const apiKey = process.env.TMDB_API_KEY;
-    const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}?api_key=${apiKey}&language=${getLang(req)}`);
-    const data = await response.json();
-    res.json({
-      nombre: data.name,
-      sinopsis: data.overview,
-      fechaEstreno: data.air_date,
-      portada: data.poster_path ? `https://image.tmdb.org/t/p/w300${data.poster_path}` : null,
-      episodios: (data.episodes || []).map(e => ({
+    const idioma = getLang(req);
+
+    const pedirTemporada = async (lang) => {
+      const url = lang
+        ? `https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}?api_key=${apiKey}&language=${lang}`
+        : `https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}?api_key=${apiKey}`; // sin language = original de TMDB
+      const r = await fetch(url);
+      return r.json();
+    };
+
+    const data = await pedirTemporada(idioma);
+    const episodiosIdioma = data.episodes || [];
+
+    // ¿Falta algo de verdad en nuestro idioma? (sinopsis vacía, nombre "de
+    // relleno" de la temporada, o cualquier episodio sin título/sinopsis reales)
+    const faltaTemporada = !data.overview?.trim() || esNombreGenerico(data.name, seasonNumber, 'temporada');
+    const faltaEpisodio = episodiosIdioma.some(
+      (e) => !e.overview?.trim() || esNombreGenerico(e.name, e.episode_number, 'episodio')
+    );
+
+    let dataEn = null;
+    let dataOriginal = null;
+
+    if (faltaTemporada || faltaEpisodio) {
+      dataEn = await pedirTemporada('en-US');
+      const episodiosEn = dataEn.episodes || [];
+
+      const siguenFaltando = () => {
+        const ft = !data.overview?.trim() && !dataEn.overview?.trim();
+        const ftNombre = esNombreGenerico(data.name, seasonNumber, 'temporada') && esNombreGenerico(dataEn.name, seasonNumber, 'temporada');
+        const fe = episodiosIdioma.some((e) => {
+          const eEn = episodiosEn.find((x) => x.episode_number === e.episode_number);
+          const hayOverview = e.overview?.trim() || eEn?.overview?.trim();
+          const hayNombre = !esNombreGenerico(e.name, e.episode_number, 'episodio') || (eEn && !esNombreGenerico(eEn.name, e.episode_number, 'episodio'));
+          return !hayOverview || !hayNombre;
+        });
+        return ft || ftNombre || fe;
+      };
+
+      if (siguenFaltando()) {
+        dataOriginal = await pedirTemporada(null);
+      }
+    }
+
+    const episodiosEnMap = new Map((dataEn?.episodes || []).map((e) => [e.episode_number, e]));
+    const episodiosOriginalMap = new Map((dataOriginal?.episodes || []).map((e) => [e.episode_number, e]));
+
+    const nombreTemporadaFinal = !esNombreGenerico(data.name, seasonNumber, 'temporada')
+      ? data.name
+      : (dataEn && !esNombreGenerico(dataEn.name, seasonNumber, 'temporada')
+        ? dataEn.name
+        : (dataOriginal?.name || data.name));
+
+    // Sinopsis de temporada: si la nuestra existe, se queda tal cual (ya
+    // está en nuestro idioma, no hace falta traducir nada). Si viene del
+    // fallback de inglés/original, y nuestro idioma no es inglés, se
+    // traduce con MyMemory antes de devolverla.
+    let sinopsisTemporadaFinal = data.overview?.trim() || '';
+    if (!sinopsisTemporadaFinal) {
+      const candidata = dataEn?.overview?.trim() || dataOriginal?.overview || '';
+      sinopsisTemporadaFinal = (candidata && !idioma.startsWith('en'))
+        ? await traducirTexto(candidata, idioma)
+        : candidata;
+    }
+
+    const episodiosFinal = await Promise.all(episodiosIdioma.map(async (e) => {
+      const eEn = episodiosEnMap.get(e.episode_number);
+      const eOriginal = episodiosOriginalMap.get(e.episode_number);
+
+      const titulo = !esNombreGenerico(e.name, e.episode_number, 'episodio')
+        ? e.name
+        : (eEn && !esNombreGenerico(eEn.name, e.episode_number, 'episodio')
+          ? eEn.name
+          : (eOriginal?.name || e.name));
+
+      // Mismo criterio que con la sinopsis de temporada: solo se traduce
+      // cuando de verdad viene del fallback (no había sinopsis en nuestro
+      // idioma) y nuestro idioma no es ya inglés.
+      let sinopsis = e.overview?.trim() || '';
+      if (!sinopsis) {
+        const candidata = eEn?.overview?.trim() || eOriginal?.overview || '';
+        sinopsis = (candidata && !idioma.startsWith('en'))
+          ? await traducirTexto(candidata, idioma)
+          : candidata;
+      }
+
+      return {
         numero: e.episode_number,
-        titulo: e.name,
-        sinopsis: e.overview,
+        titulo,
+        sinopsis,
         fechaEmision: e.air_date,
         duracion: e.runtime || null,
         imagen: e.still_path ? `https://image.tmdb.org/t/p/w300${e.still_path}` : null,
-        notaMedia: e.vote_average ? Math.round(e.vote_average * 10) / 10 : null // nota media de TMDB, escala 0-10
-      }))
+        notaMedia: e.vote_average ? Math.round(e.vote_average * 10) / 10 : null
+      };
+    }));
+
+    res.json({
+      nombre: nombreTemporadaFinal,
+      sinopsis: sinopsisTemporadaFinal,
+      fechaEstreno: data.air_date,
+      portada: data.poster_path ? `https://image.tmdb.org/t/p/w300${data.poster_path}` : null,
+      episodios: episodiosFinal
     });
   } catch (error) {
     console.error('ERROR EN GET /tmdb/tv/:tmdbId/season/:seasonNumber:', error);
@@ -4897,11 +5032,38 @@ app.get('/media/:id', async (req, res) => {
     if (mediaItem.tmdbId) {
       try {
         const endpointTmdb = mediaItem.tipo === 'SERIE' ? 'tv' : 'movie';
-        const liveRes = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${mediaItem.tmdbId}?api_key=${apiKey}&language=${lang}`);
-        const live = await liveRes.json();
+
+        const pedirDetalle = async (langPedido) => {
+          const url = langPedido
+            ? `https://api.themoviedb.org/3/${endpointTmdb}/${mediaItem.tmdbId}?api_key=${apiKey}&language=${langPedido}`
+            : `https://api.themoviedb.org/3/${endpointTmdb}/${mediaItem.tmdbId}?api_key=${apiKey}`; // sin language = original de TMDB
+          const r = await fetch(url);
+          return r.json();
+        };
+
+        const live = await pedirDetalle(lang);
         if (live && !live.status_code) {
           tituloMostrado = live.title || live.name || tituloMostrado;
-          sinopsisMostrada = live.overview || sinopsisMostrada;
+
+          if (live.overview && live.overview.trim()) {
+            sinopsisMostrada = live.overview;
+          } else {
+            // No hay sinopsis en nuestro idioma: caemos a inglés y, si tampoco,
+            // al idioma original de TMDB — mismo criterio que ya usamos en las
+            // temporadas/episodios. Si conseguimos una candidata y nuestro
+            // idioma no es inglés, la traducimos con MyMemory antes de usarla.
+            const liveEn = await pedirDetalle('en-US');
+            let candidata = liveEn?.overview?.trim() || '';
+            if (!candidata) {
+              const liveOriginal = await pedirDetalle(null);
+              candidata = liveOriginal?.overview?.trim() || '';
+            }
+            if (candidata) {
+              sinopsisMostrada = lang.startsWith('en') ? candidata : await traducirTexto(candidata, lang);
+            }
+            // si no hay candidata en ningún idioma, se queda con lo que hubiera
+            // guardado localmente (mediaItem.sinopsis), sin tocar nada
+          }
         }
       } catch (e) {
         // si TMDB falla, nos quedamos con lo que había en caché local

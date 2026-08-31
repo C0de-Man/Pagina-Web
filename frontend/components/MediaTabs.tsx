@@ -84,7 +84,12 @@ export default function MediaTabs({
 
       {/* DESCRIPCIÓN */}
       {tab === 'descripcion' && (
-        <p className="text-gray-300 leading-relaxed text-base">{sinopsis}</p>
+        <div>
+          {detalles?.tagline && (
+            <p className="text-gray-400 italic text-base mb-3">{detalles.tagline}</p>
+          )}
+          <p className="text-gray-300 leading-relaxed text-base">{sinopsis}</p>
+        </div>
       )}
 
       {/* CAST */}

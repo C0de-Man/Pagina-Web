@@ -9,6 +9,7 @@ export default function Navbar() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [peliculasOpen, setPeliculasOpen] = useState(false);
   const [juegosOpen, setJuegosOpen] = useState(false);
+  const [seriesOpen, setSeriesOpen] = useState(false);
   const [user, setUser] = useState<{ username: string } | null>(null);
   const [notificaciones, setNotificaciones] = useState<any[]>([]);
   const [noLeidas, setNoLeidas] = useState(0);
@@ -31,7 +32,7 @@ export default function Navbar() {
     })
       .then((res) => res.json())
       .then((data) => setNoLeidas(data.count || 0))
-      .catch(() => {});
+      .catch(() => { });
   };
 
   const abrirPanelNotis = () => {
@@ -49,7 +50,7 @@ export default function Navbar() {
       })
         .then((res) => res.json())
         .then((data) => setNotificaciones(Array.isArray(data) ? data : []))
-        .catch(() => {});
+        .catch(() => { });
 
       // Se marcan como leídas nada más abrir, y el contador baja a 0 al
       // instante — no hace falta esperar a la respuesta del servidor para
@@ -59,7 +60,7 @@ export default function Navbar() {
         fetch('http://localhost:3001/notifications/mark-read', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
+        }).catch(() => { });
       }
     }
   };
@@ -154,15 +155,15 @@ export default function Navbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-const menuLinks = [
-  { label: 'Home', href: '/' },
-  { label: 'Profile', href: '/perfil' },
-  { label: 'Films', href: '/perfil/movies' },
-  { label: 'Watchlist', href: '/perfil/watchlist' },
-  { label: 'Lists', href: '/perfil/lists' },
-  { label: 'Likes', href: '/perfil/likes' },
-  { label: 'Friends', href: '/perfil/friends' },
-];
+  const menuLinks = [
+    { label: 'Home', href: '/' },
+    { label: 'Profile', href: '/perfil' },
+    { label: 'Films', href: '/perfil/movies' },
+    { label: 'Watchlist', href: '/perfil/watchlist' },
+    { label: 'Lists', href: '/perfil/lists' },
+    { label: 'Likes', href: '/perfil/likes' },
+    { label: 'Friends', href: '/perfil/friends' },
+  ];
 
   return (
     <nav className="bg-[#14181c] text-gray-300 font-sans border-b border-gray-800 sticky top-0 z-50">
@@ -205,7 +206,24 @@ const menuLinks = [
                     </div>
                   )}
                 </div>
-                <Link href="/series" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Series</Link>
+                <div
+                  className="relative group"
+                  onMouseEnter={() => setSeriesOpen(true)}
+                  onMouseLeave={() => setSeriesOpen(false)}
+                >
+                  <Link href="/series" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">
+                    Series
+                  </Link>
+                  {seriesOpen && (
+                    <div className="absolute left-0 top-full pt-2 w-40 z-50">
+                      <div className="bg-[#2c3440] rounded-md shadow-2xl border border-gray-700 py-2">
+                        <Link href="/perfil/series" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Watched</Link>
+                        <Link href="/perfil/watchlist" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Watchlist</Link>
+                        <Link href="/perfil/likes" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Likes</Link>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <Link href="/books" className="text-sm font-semibold hover:text-white uppercase tracking-wider transition">Books</Link>
                 <div
                   className="relative group"
