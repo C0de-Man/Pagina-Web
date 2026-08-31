@@ -440,7 +440,9 @@ app.get('/igdb/popular', async (req, res) => {
       body
     });
     const data = await response.json();
-    res.json((data || []).map(arreglarCoverIgdb));
+    const arreglados = (data || []).map(arreglarCoverIgdb);
+    const final = await mezclarCaratulasJuegos(arreglados, getUserIdOpcional(req));
+    res.json(final);
   } catch (error) {
     console.error('ERROR EN GET /igdb/popular:', error);
     res.status(500).json({ error: 'Error al obtener juegos populares' });
@@ -467,7 +469,9 @@ app.get('/igdb/popular/page/:page', async (req, res) => {
       body
     });
     const data = await response.json();
-    res.json({ results: (data || []).map(arreglarCoverIgdb) });
+    const arreglados = (data || []).map(arreglarCoverIgdb);
+    const final = await mezclarCaratulasJuegos(arreglados, getUserIdOpcional(req));
+    res.json({ results: final });
   } catch (error) {
     console.error('ERROR EN GET /igdb/popular/page:', error);
     res.status(500).json({ error: 'Error al obtener juegos populares' });
@@ -482,9 +486,6 @@ app.get('/igdb/year/:year', async (req, res) => {
     const hasta = Math.floor(new Date(Date.UTC(year, 11, 31, 23, 59, 59)).getTime() / 1000);
 
     const token = await getIgdbToken();
-    // Igual que en /igdb/catalogo: ordenamos por popularidad (total_rating_count),
-    // no por fecha de lanzamiento, para que el carrusel muestre primero los
-    // más populares de ese año.
     const body = `fields name,cover.url,first_release_date,summary; where first_release_date >= ${desde} & first_release_date <= ${hasta}; sort total_rating_count desc; limit 20;`;
     const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
@@ -497,7 +498,9 @@ app.get('/igdb/year/:year', async (req, res) => {
       body
     });
     const data = await response.json();
-    res.json((data || []).map(arreglarCoverIgdb));
+    const arreglados = (data || []).map(arreglarCoverIgdb);
+    const final = await mezclarCaratulasJuegos(arreglados, getUserIdOpcional(req));
+    res.json(final);
   } catch (error) {
     console.error('ERROR EN GET /igdb/year:', error);
     res.status(500).json({ error: 'Error al obtener juegos del año' });
@@ -756,17 +759,17 @@ async function getIgdbGameCollection(igdbId) {
   const [respColecciones, respFranquicias] = await Promise.all([
     collectionIds.length > 0
       ? fetchIgdb('https://api.igdb.com/v4/games', {
-          method: 'POST',
-          headers,
-          body: `fields ${camposJuego}; where collections = (${collectionIds.join(',')}); limit 500;`,
-        })
+        method: 'POST',
+        headers,
+        body: `fields ${camposJuego}; where collections = (${collectionIds.join(',')}); limit 500;`,
+      })
       : Promise.resolve(null),
     franchiseIds.length > 0
       ? fetchIgdb('https://api.igdb.com/v4/games', {
-          method: 'POST',
-          headers,
-          body: `fields ${camposJuego}; where franchises = (${franchiseIds.join(',')}); limit 500;`,
-        })
+        method: 'POST',
+        headers,
+        body: `fields ${camposJuego}; where franchises = (${franchiseIds.join(',')}); limit 500;`,
+      })
       : Promise.resolve(null),
   ]);
 
@@ -2003,44 +2006,102 @@ function getUserIdOpcional(req) {
   }
 }
 
-// --- HELPER: mezclar customPoster/customBackdrop en resultados EN CRUDO de TMDB ---
+// --- HELPER: mezclar portada/backdrop en resultados EN CRUDO de TMDB ---
 // A diferencia de GET /media/:id (que ya trabaja sobre TU base de datos),
 // estas rutas (/tmdb/popular, /tmdb/buscar, etc.) devuelven objetos tal cual
 // los da TMDB — no saben si ese título ya está guardado en tu base de datos
-// ni si lo has personalizado. Aquí se cruza por tmdbId y, si hay sesión y
-// personalización, se inyecta en el mismo campo "portada"/"backdrop" que ya
-// usa MovieCard como fallback (pelicula.portada), sin tocar poster_path.
+// ni qué portada tiene fijada. Antes esta función SOLO aplicaba tu
+// personalización manual (UserMedia.customPoster) y, si no habías
+// personalizado nada, se quedaba con lo que TMDB diera en ESA petición
+// concreta — que puede no coincidir con lo que TMDB dio la vez que se
+// guardó el título (Media.portada), haciendo que la misma película se vea
+// con una carátula distinta en el catálogo que en su propia ficha.
+// Ahora se aplican los DOS niveles, en orden: tu personalización (si
+// existe) > la portada compartida ya guardada (si el título existe en tu
+// base de datos) > lo que traiga TMDB en crudo (si no está guardado todavía).
 async function mezclarCustomPosters(items, userId) {
-  if (!userId || !items || items.length === 0) return items;
+  if (!items || items.length === 0) return items;
 
   const tmdbIds = items.map((i) => i.id).filter(Boolean);
   if (tmdbIds.length === 0) return items;
 
   const mediaLocal = await prisma.media.findMany({
     where: { tmdbId: { in: tmdbIds } },
-    select: { id: true, tmdbId: true }
+    select: { id: true, tmdbId: true, portada: true, backdrop: true }
   });
   if (mediaLocal.length === 0) return items;
 
-  const mediaIds = mediaLocal.map((m) => m.id);
-  const personalizaciones = await prisma.userMedia.findMany({
-    where: { userId, mediaId: { in: mediaIds } },
-    select: { mediaId: true, customPoster: true, customBackdrop: true }
-  });
-  if (personalizaciones.length === 0) return items;
-
   const mediaIdPorTmdbId = new Map(mediaLocal.map((m) => [m.tmdbId, m.id]));
-  const personalizacionPorMediaId = new Map(personalizaciones.map((p) => [p.mediaId, p]));
+  const compartidaPorTmdbId = new Map(mediaLocal.map((m) => [m.tmdbId, { portada: m.portada, backdrop: m.backdrop }]));
+
+  let personalizacionPorMediaId = new Map();
+  if (userId) {
+    const mediaIds = mediaLocal.map((m) => m.id);
+    const personalizaciones = await prisma.userMedia.findMany({
+      where: { userId, mediaId: { in: mediaIds } },
+      select: { mediaId: true, customPoster: true, customBackdrop: true }
+    });
+    personalizacionPorMediaId = new Map(personalizaciones.map((p) => [p.mediaId, p]));
+  }
 
   return items.map((item) => {
     const mediaId = mediaIdPorTmdbId.get(item.id);
+    const compartida = compartidaPorTmdbId.get(item.id);
     const mia = mediaId ? personalizacionPorMediaId.get(mediaId) : null;
-    if (!mia || (!mia.customPoster && !mia.customBackdrop)) return item;
+
+    const portadaFinal = mia?.customPoster || compartida?.portada || null;
+    const backdropFinal = mia?.customBackdrop || compartida?.backdrop || null;
+
+    if (!portadaFinal && !backdropFinal) return item;
     return {
       ...item,
-      ...(mia.customPoster ? { portada: mia.customPoster } : {}),
-      ...(mia.customBackdrop ? { backdrop: mia.customBackdrop } : {})
+      ...(portadaFinal ? { portada: portadaFinal } : {}),
+      ...(backdropFinal ? { backdrop: backdropFinal } : {})
     };
+  });
+}
+
+// --- HELPER: mezclar portada compartida/personalizada en resultados EN
+// CRUDO de IGDB (equivalente a mezclarCustomPosters, pero para juegos,
+// cruzando por igdbId en vez de tmdbId). Mismo motivo: /igdb/popular,
+// /igdb/year/:year, /igdb/catalogo/page/:page... devuelven la carátula que
+// IGDB dé en ESE momento, que puede no coincidir con la que se guardó la
+// vez que el juego se añadió (Media.portada) ni con la que hayas elegido a
+// mano (UserMedia.customPoster).
+async function mezclarCaratulasJuegos(juegos, userId) {
+  if (!juegos || juegos.length === 0) return juegos;
+
+  const igdbIds = juegos.map((j) => j.id).filter(Boolean);
+  if (igdbIds.length === 0) return juegos;
+
+  const mediaLocal = await prisma.media.findMany({
+    where: { igdbId: { in: igdbIds } },
+    select: { id: true, igdbId: true, portada: true }
+  });
+  if (mediaLocal.length === 0) return juegos;
+
+  const mediaIdPorIgdbId = new Map(mediaLocal.map((m) => [m.igdbId, m.id]));
+  const portadaCompartidaPorIgdbId = new Map(mediaLocal.map((m) => [m.igdbId, m.portada]));
+
+  let personalizacionPorMediaId = new Map();
+  if (userId) {
+    const mediaIds = mediaLocal.map((m) => m.id);
+    const personalizaciones = await prisma.userMedia.findMany({
+      where: { userId, mediaId: { in: mediaIds } },
+      select: { mediaId: true, customPoster: true }
+    });
+    personalizacionPorMediaId = new Map(personalizaciones.map((p) => [p.mediaId, p]));
+  }
+
+  return juegos.map((juego) => {
+    const mediaId = mediaIdPorIgdbId.get(juego.id);
+    const mia = mediaId ? personalizacionPorMediaId.get(mediaId) : null;
+    const portadaFinal = mia?.customPoster || portadaCompartidaPorIgdbId.get(juego.id) || null;
+
+    if (!portadaFinal) return juego;
+    // El resto de la app (GameCard y similares) lee la carátula desde
+    // juego.cover.url — mismo campo que arreglarCoverIgdb ya deja listo.
+    return { ...juego, cover: { ...(juego.cover || {}), url: portadaFinal } };
   });
 }
 
@@ -2233,8 +2294,8 @@ app.post('/admin/media/refresh-covers-english', requireAuth, requireAdmin, async
         const data = await resp.json();
         if (!data || data.status_code) { fallidos++; continue; }
 
-        const nuevaPortada = data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null;
-        const nuevoBackdrop = data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null;
+        const nuevaPortada = data.poster_path ? `https://image.tmdb.org/t/p/w780${data.poster_path}` : null;
+        const nuevoBackdrop = data.backdrop_path ? `https://image.tmdb.org/t/p/original${data.backdrop_path}` : null;
 
         if (!nuevaPortada && !nuevoBackdrop) { sinCambios++; continue; }
 
@@ -2366,7 +2427,7 @@ app.post('/admin/cinematic-universes/:universeId/collections', requireAuth, requ
           titulo: p.title,
           anio: p.release_date ? new Date(p.release_date).getFullYear() : null,
           fechaEstreno: p.release_date ? new Date(p.release_date) : null,
-          portada: p.poster_path ? `https://image.tmdb.org/t/p/w500${p.poster_path}` : null,
+          portada: p.poster_path ? `https://image.tmdb.org/t/p/w780${p.poster_path}` : null,
           pestaña,
           orden: orden++,
         },
@@ -2453,7 +2514,7 @@ app.post('/admin/cinematic-universes/:universeId/import-by-company', requireAuth
           titulo: p.title,
           anio: p.release_date ? new Date(p.release_date).getFullYear() : null,
           fechaEstreno: p.release_date ? new Date(p.release_date) : null,
-          portada: p.poster_path ? `https://image.tmdb.org/t/p/w500${p.poster_path}` : null,
+          portada: p.poster_path ? `https://image.tmdb.org/t/p/w780${p.poster_path}` : null,
           pestaña,
           orden: ordenPorPestaña[pestaña]++,
         },
@@ -2556,7 +2617,7 @@ app.post('/admin/cinematic-universes/:universeId/import-by-keyword', requireAuth
           titulo: p.title,
           anio: p.release_date ? new Date(p.release_date).getFullYear() : null,
           fechaEstreno: p.release_date ? new Date(p.release_date) : null,
-          portada: p.poster_path ? `https://image.tmdb.org/t/p/w500${p.poster_path}` : null,
+          portada: p.poster_path ? `https://image.tmdb.org/t/p/w780${p.poster_path}` : null,
           pestaña,
           orden: ordenPorPestaña[pestaña]++,
         },
@@ -2629,7 +2690,7 @@ app.post('/admin/cinematic-universes/:universeId/refresh', requireAuth, requireA
             const detR = await fetch(`https://api.themoviedb.org/3/movie/${p.id}?api_key=${apiKey}`);
             const det = await detR.json();
             if (det.belongs_to_collection?.name) pestaña = det.belongs_to_collection.name;
-          } catch (e) {}
+          } catch (e) { }
         }
 
         if (ordenPorPestaña[pestaña] === undefined) {
@@ -2647,7 +2708,7 @@ app.post('/admin/cinematic-universes/:universeId/refresh', requireAuth, requireA
             titulo: p.title,
             anio: p.release_date ? new Date(p.release_date).getFullYear() : null,
             fechaEstreno: p.release_date ? new Date(p.release_date) : null,
-            portada: p.poster_path ? `https://image.tmdb.org/t/p/w500${p.poster_path}` : null,
+            portada: p.poster_path ? `https://image.tmdb.org/t/p/w780${p.poster_path}` : null,
             pestaña,
             orden: ordenPorPestaña[pestaña]++,
           },
@@ -2696,7 +2757,7 @@ app.post('/admin/cinematic-universes/:universeId/add-movie', requireAuth, requir
         titulo: d.title,
         anio: d.release_date ? new Date(d.release_date).getFullYear() : null,
         fechaEstreno: d.release_date ? new Date(d.release_date) : null,
-        portada: d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : null,
+        portada: d.poster_path ? `https://image.tmdb.org/t/p/w780${d.poster_path}` : null,
         pestaña: pestañaLimpia,
         orden: (maxOrden._max.orden ?? -1) + 1,
       },
@@ -2739,7 +2800,7 @@ app.post('/admin/cinematic-universes/:universeId/add-series', requireAuth, requi
         titulo: d.name,
         anio: d.first_air_date ? new Date(d.first_air_date).getFullYear() : null,
         fechaEstreno: d.first_air_date ? new Date(d.first_air_date) : null,
-        portada: d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : null,
+        portada: d.poster_path ? `https://image.tmdb.org/t/p/w780${d.poster_path}` : null,
         pestaña: pestañaLimpia,
         orden: (maxOrden._max.orden ?? -1) + 1,
       },
@@ -3157,11 +3218,11 @@ app.post('/media/tmdb', async (req, res) => {
     }
 
     const backdropUrl = dataImagenes.backdrop_path
-      ? `https://image.tmdb.org/t/p/w1280${dataImagenes.backdrop_path}`
-      : (data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null);
+      ? `https://image.tmdb.org/t/p/original${dataImagenes.backdrop_path}`
+      : (data.backdrop_path ? `https://image.tmdb.org/t/p/original${data.backdrop_path}` : null);
     const posterUrl = dataImagenes.poster_path
-      ? `https://image.tmdb.org/t/p/w500${dataImagenes.poster_path}`
-      : (data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null);
+      ? `https://image.tmdb.org/t/p/w780${dataImagenes.poster_path}`
+      : (data.poster_path ? `https://image.tmdb.org/t/p/w780${data.poster_path}` : null);
     // Las series usan name/first_air_date en vez de title/release_date.
     const fechaLanzamiento = data.release_date || data.first_air_date || null;
 
@@ -4091,8 +4152,8 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
     // series TMDB no lo pone ahí — el creador va aparte, en created_by.
     const director = esSerie
       ? (data.created_by?.[0]
-          ? { name: data.created_by[0].name, id: data.created_by[0].id, profile_path: data.created_by[0].profile_path }
-          : null)
+        ? { name: data.created_by[0].name, id: data.created_by[0].id, profile_path: data.created_by[0].profile_path }
+        : null)
       : (data.credits?.crew?.find(p => p.job === 'Director') || null);
     const guionistas = data.credits?.crew?.filter(p => p.job === 'Screenplay' || p.job === 'Writer') || [];
     // Series no tienen "runtime" único, sino episode_run_time (array) o el
@@ -4119,10 +4180,10 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
       })) || [],
       director: director
         ? {
-            nombre: director.name,
-            id: director.id,
-            foto: director.profile_path ? `https://image.tmdb.org/t/p/w185${director.profile_path}` : null
-          }
+          nombre: director.name,
+          id: director.id,
+          foto: director.profile_path ? `https://image.tmdb.org/t/p/w185${director.profile_path}` : null
+        }
         : null,
       guionistas: guionistas.map(g => ({
         nombre: g.name,
@@ -4198,7 +4259,7 @@ app.get('/tmdb/tv/:tmdbId/season/:seasonNumber/images', async (req, res) => {
     const response = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${seasonNumber}/images?api_key=${apiKey}`);
     const data = await response.json();
     const posters = (data.posters || []).map(p => ({
-      url: `https://image.tmdb.org/t/p/w500${p.file_path}`,
+      url: `https://image.tmdb.org/t/p/w780${p.file_path}`,
       idioma: p.iso_639_1
     }));
     res.json(posters);
@@ -5150,10 +5211,10 @@ app.post('/auth/me/set-covers-english', requireAuth, async (req, res) => {
         // habías cambiado la carátula pero no el banner, esto no le añade un
         // banner personalizado nuevo que nunca elegiste.
         const nuevoCustomPoster = personalizacion.customPoster && data.poster_path
-          ? `https://image.tmdb.org/t/p/w500${data.poster_path}`
+          ? `https://image.tmdb.org/t/p/w780${data.poster_path}`
           : null;
         const nuevoCustomBackdrop = personalizacion.customBackdrop && data.backdrop_path
-          ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}`
+          ? `https://image.tmdb.org/t/p/original${data.backdrop_path}`
           : null;
 
         if (!nuevoCustomPoster && !nuevoCustomBackdrop) { sinCambios++; continue; }
@@ -5395,8 +5456,8 @@ app.get('/users/:username', async (req, res) => {
       prisma.follow.count({ where: { followerId: usuario.id, estado: 'ACCEPTED' } }),
       miUserId
         ? prisma.follow.findUnique({
-            where: { followerId_followingId: { followerId: miUserId, followingId: usuario.id } },
-          })
+          where: { followerId_followingId: { followerId: miUserId, followingId: usuario.id } },
+        })
         : null,
     ]);
 
@@ -5455,9 +5516,9 @@ app.get('/users/:username', async (req, res) => {
     // "actividad" ya vienen con la suya propia en el objeto "vistas").
     const personalizacionesFavoritos = mediaIdsFavoritos.length > 0
       ? await prisma.userMedia.findMany({
-          where: { userId: usuario.id, mediaId: { in: mediaIdsFavoritos } },
-          select: { mediaId: true, customPoster: true, customBackdrop: true },
-        })
+        where: { userId: usuario.id, mediaId: { in: mediaIdsFavoritos } },
+        select: { mediaId: true, customPoster: true, customBackdrop: true },
+      })
       : [];
     const personalizacionPorMediaId = new Map(personalizacionesFavoritos.map((p) => [p.mediaId, p]));
 

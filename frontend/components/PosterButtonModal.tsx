@@ -64,7 +64,7 @@ export default function PosterButtonModal({ tmdbId, mediaId, tipo }: { tmdbId: n
             setCargandoParaRecortar(false);
             return;
         }
-        const url = `https://image.tmdb.org/t/p/w500${path}`;
+        const url = `https://image.tmdb.org/t/p/w780${path}`;
         const token = localStorage.getItem('token');
         if (!token) {
             alert('Tienes que iniciar sesión para guardar tu carátula.');

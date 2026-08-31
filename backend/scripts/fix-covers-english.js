@@ -58,8 +58,8 @@ async function main() {
         continue;
       }
 
-      const portada = data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null;
-      const backdrop = data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null;
+      const portada = data.poster_path ? `https://image.tmdb.org/t/p/w780${data.poster_path}` : null;
+      const backdrop = data.backdrop_path ? `https://image.tmdb.org/t/p/original${data.backdrop_path}` : null;
 
       if (!portada && !backdrop) {
         console.log(`[${i + 1}/${items.length}] – ${item.titulo} — sin carátula/banner en inglés, se deja como estaba`);

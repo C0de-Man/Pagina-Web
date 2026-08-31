@@ -441,11 +441,21 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   function agruparPorFase(items: UniverseItem[], fases: FaseUniverso[]) {
+    // Dentro de cada fase, siempre de más antiguo a más reciente por fecha
+    // de estreno — automático, sin depender del orden manual (que solo
+    // aplica a la pestaña "universo" en conjunto, no a cómo se ven dentro
+    // de una fase concreta).
+    const porAnioAsc = (a: UniverseItem, b: UniverseItem) => {
+      const fechaA = a.fechaEstreno ? new Date(a.fechaEstreno).getTime() : a.anio ? new Date(a.anio, 0, 1).getTime() : Infinity;
+      const fechaB = b.fechaEstreno ? new Date(b.fechaEstreno).getTime() : b.anio ? new Date(b.anio, 0, 1).getTime() : Infinity;
+      return fechaA - fechaB;
+    };
+
     const grupos: { fase: FaseUniverso | null; items: UniverseItem[] }[] = fases.map((fase) => ({
       fase,
-      items: items.filter((it) => it.faseId === fase.id),
+      items: items.filter((it) => it.faseId === fase.id).sort(porAnioAsc),
     }));
-    grupos.push({ fase: null, items: items.filter((it) => it.faseId == null) });
+    grupos.push({ fase: null, items: items.filter((it) => it.faseId == null).sort(porAnioAsc) });
     return grupos;
   }
 
@@ -556,7 +566,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
           titulo: tituloResultado,
           anio: fechaResultado ? new Date(fechaResultado).getFullYear() : null,
           fechaEstreno: fechaResultado,
-          portada: resultado.poster_path ? `https://image.tmdb.org/t/p/w500${resultado.poster_path}` : null,
+          portada: resultado.poster_path ? `https://image.tmdb.org/t/p/w780${resultado.poster_path}` : null,
           pestaña: tabActiva.pestañaOrigen,
         }),
       });
@@ -1255,8 +1265,27 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
                 tabActiva?.tipo === 'universo' ? (
                   agruparPorFase(listaDeLaPestañaActual(), collection.universo.fases).map((grupo) => {
                     if (!grupo.fase && grupo.items.length === 0) return null;
+                    const idDeEsteGrupo = grupo.fase?.id ?? 'sin-fase';
                     return (
-                      <div key={grupo.fase?.id ?? 'sin-fase'} className="mb-8 last:mb-0">
+                      <div
+                        key={idDeEsteGrupo}
+                        onDragOver={(e) => {
+                          if (!esAdmin || arrastrandoId === null) return;
+                          e.preventDefault();
+                          setSobreFaseId(idDeEsteGrupo);
+                        }}
+                        onDragLeave={() => setSobreFaseId((prev) => (prev === idDeEsteGrupo ? null : prev))}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (!esAdmin || arrastrandoId === null) return;
+                          asignarFase(arrastrandoId, grupo.fase?.id ?? null);
+                          setArrastrandoId(null);
+                          setSobreFaseId(null);
+                        }}
+                        className={`mb-8 last:mb-0 rounded-lg transition ${
+                          sobreFaseId === idDeEsteGrupo ? 'ring-2 ring-blue-400 bg-blue-500/5 -m-2 p-2' : ''
+                        }`}
+                      >
                         <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
                           {grupo.fase ? grupo.fase.nombre : 'Unsorted'}
                         </h3>

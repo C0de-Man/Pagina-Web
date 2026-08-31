@@ -49,7 +49,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       : myDb.find((m: any) => m.tmdbId === item.id);
     return {
       dbId: local ? local.id : null,
-      customPoster: null
+      customPoster: local?.portada || null
     };
   };
 

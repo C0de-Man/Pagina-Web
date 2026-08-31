@@ -19,7 +19,7 @@ export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number;
     };
 
     const selectPoster = async (path: string) => {
-        const newUrl = `https://image.tmdb.org/t/p/w500${path}`;
+        const newUrl = `https://image.tmdb.org/t/p/w780${path}`;
         await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
             method: 'PATCH',
             headers: { 'Type': 'Client', 'Content-Type': 'application/json' },

@@ -36,7 +36,7 @@ export default function MovieCard({ pelicula, dbId, customPoster }: { pelicula: 
   // Magia: Si tienes un póster personalizado (customPoster), usa ese. Si no, usa el
   // ya guardado (item.portada, para items que vienen de tu propia base de datos como
   // listas/perfil) o el de TMDB (poster_path, para resultados de búsqueda en crudo).
-  const posterUrl = miCustomPoster || pelicula.portada || (pelicula.poster_path ? `https://image.tmdb.org/t/p/w500${pelicula.poster_path}` : null);
+  const posterUrl = miCustomPoster || pelicula.portada || (pelicula.poster_path ? `https://image.tmdb.org/t/p/w780${pelicula.poster_path}` : null);
   const titulo = pelicula.title || pelicula.name || pelicula.titulo;
   const anio = pelicula.anio || (pelicula.release_date ? pelicula.release_date.split('-')[0] : (pelicula.first_air_date ? pelicula.first_air_date.split('-')[0] : ''));
 

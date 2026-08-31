@@ -52,7 +52,7 @@ export default async function StudioPage({
   const myDb = await resDb.json();
   const getLocalData = (tmdbId: number) => {
     const local = myDb.find((m: any) => m.tmdbId === tmdbId);
-    return { dbId: local ? local.id : null, customPoster: null };
+    return { dbId: local ? local.id : null, customPoster: local?.portada || null };
   };
 
   return (

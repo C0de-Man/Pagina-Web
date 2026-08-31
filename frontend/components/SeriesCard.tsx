@@ -27,7 +27,7 @@ export default function SeriesCard({ serie, dbId, customPoster }: { serie: any, 
   // en crudo de TMDB y no trae ese campo)
   const href = dbId ? urlFicha({ ...serie, id: dbId, tipo: 'SERIE' }) : `/series/tmdb/${serie.id}`;
 
-  const posterUrl = miCustomPoster || serie.portada || (serie.poster_path ? `https://image.tmdb.org/t/p/w500${serie.poster_path}` : null);
+  const posterUrl = miCustomPoster || serie.portada || (serie.poster_path ? `https://image.tmdb.org/t/p/w780${serie.poster_path}` : null);
   const titulo = serie.name || serie.title || serie.titulo;
   const anio = serie.anio || (serie.first_air_date ? serie.first_air_date.split('-')[0] : (serie.release_date ? serie.release_date.split('-')[0] : ''));
 
