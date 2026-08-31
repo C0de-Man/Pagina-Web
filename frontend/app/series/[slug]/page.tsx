@@ -48,6 +48,21 @@ export default async function SeriesDetail({ params }: { params: Promise<{ slug:
         redirect(urlFicha(media));
     }
 
+    // Emparejamiento con MyAnimeList (complementario, no crea ninguna ficha
+    // aparte): si esta serie todavía no tiene malId, intentamos encontrarlo
+    // solos por título+año. Si hay coincidencia de confianza, el propio
+    // endpoint lo guarda en la base de datos — a partir de ahí CollectionLinks
+    // (más abajo, ya en el navegador) pedirá los relacionados de MAL y ya los
+    // encontrará. Si no hay coincidencia, no pasa nada: la mayoría de series
+    // no son anime y esto simplemente no hace nada.
+    if (!media.malId) {
+        try {
+            await fetch(`http://localhost:3001/media/${media.id}/mal-match`, { cache: 'no-store' });
+        } catch (e) {
+            // si MAL falla o tarda, la ficha sigue funcionando igual sin esto
+        }
+    }
+
     let detalles: any = null;
     if (media.tmdbId) {
         const resDetalles = await fetch(
@@ -75,16 +90,24 @@ export default async function SeriesDetail({ params }: { params: Promise<{ slug:
 
                     <div className="flex-grow pt-24 md:pt-32">
                         <h1 className="text-4xl md:text-5xl font-extrabold text-white mb-2">{media.titulo}</h1>
-                        <div className="flex items-center gap-2 text-gray-400 mb-6">
-                            <span className="text-lg">{fechaCompleta || media.anio}</span>
-                            {duracion && <span className="text-lg text-gray-500">({duracion}/ep)</span>}
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-gray-400 mb-6">
+                            <span className="text-lg text-gray-200">{fechaCompleta || media.anio}</span>
+                            {duracion && (
+                                <span className="text-lg text-gray-500 flex items-center gap-3">
+                                    <span className="w-1 h-1 rounded-full bg-gray-600" />
+                                    {duracion}/ep
+                                </span>
+                            )}
                             {detalles?.numeroTemporadas && (
-                                <span className="text-lg text-gray-500">
-                                    · {detalles.numeroTemporadas} season{detalles.numeroTemporadas > 1 ? 's' : ''}
+                                <span className="text-lg text-gray-500 flex items-center gap-3">
+                                    <span className="w-1 h-1 rounded-full bg-gray-600" />
+                                    {detalles.numeroTemporadas} season{detalles.numeroTemporadas > 1 ? 's' : ''}
                                 </span>
                             )}
                             {detalles?.estadoSerie && (
-                                <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{detalles.estadoSerie}</span>
+                                <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold text-gray-300 flex-shrink-0">
+                                    {detalles.estadoSerie}
+                                </span>
                             )}
                         </div>
 

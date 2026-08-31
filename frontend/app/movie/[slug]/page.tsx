@@ -14,6 +14,17 @@ import { formatFechaEstrenoTmdb } from '@/lib/fecha';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
+// Mismo mapa que ya usan MediaTabs.tsx / ReviewDetailModal.tsx: el tipo se
+// guarda en español en la base de datos, pero la interfaz es en inglés.
+const ETIQUETA_TIPO: Record<string, string> = {
+  PELICULA: 'Film',
+  SERIE: 'Series',
+  VIDEOJUEGO: 'Game',
+  ANIME: 'Anime',
+  MANGA: 'Manga',
+  COMIC: 'Comic',
+};
+
 function formatRuntime(minutes: number | null) {
   if (!minutes) return null;
   const h = Math.floor(minutes / 60);
@@ -74,7 +85,7 @@ if (!media || media.error) {
             <div className="flex items-center gap-2 text-gray-400 mb-6">
               <span className="text-lg">{fechaCompleta || media.anio}</span>
               {duracion && <span className="text-lg text-gray-500">({duracion})</span>}
-              <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{media.tipo}</span>
+              <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{ETIQUETA_TIPO[media.tipo] || media.tipo}</span>
             </div>
 
             <RemakeOfBadge remakeOf={media.remakeOf} />
