@@ -187,7 +187,7 @@ export default function Perfil() {
             <Link href="/perfil/settings" className="text-xs text-gray-400 hover:text-white transition">Edit</Link>
           </div>
           {favoritos.length > 0 ? (
-            <div className="flex flex-wrap gap-4 pb-2">
+            <div className="flex flex-wrap justify-center gap-4 pb-2">
               {favoritos.map((item) => renderCard(item, false))}
             </div>
           ) : (
@@ -215,7 +215,7 @@ export default function Perfil() {
                 ‹
               </button>
 
-              <div className="flex gap-4 flex-1">
+              <div className="flex justify-center gap-4 flex-1">
                 {jugandoAhora
                   .slice(jugandoAhoraInicio, jugandoAhoraInicio + JUGANDO_AHORA_VISIBLES)
                   .map((item) => renderCard(item, false))}
@@ -243,7 +243,7 @@ export default function Perfil() {
             </Link>
           </div>
           {vistas.length > 0 ? (
-            <div className="flex flex-wrap gap-4 pb-2">
+            <div className="flex flex-wrap justify-center gap-4 pb-2">
               {vistas.slice(0, 7).map((item) => renderCard(item, true))}
             </div>
           ) : (
