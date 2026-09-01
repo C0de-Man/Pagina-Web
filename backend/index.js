@@ -757,14 +757,6 @@ async function getIgdbGameCollection(igdbId) {
   const franchises = juegoActual.franchises || [];
   if (collections.length === 0 && franchises.length === 0) return null;
 
-  // Nombre para mostrar: preferimos la primera collection (suele ser más
-  // específica, p. ej. "Resident Evil" en vez de "Capcom Survival Horror");
-  // si no hay ninguna, usamos la primera franchise.
-  // LOG TEMPORAL DE DIAGNÓSTICO — bórralo en cuanto tengas el id que necesitas
-  if (collections.length === 0 && franchises[0]) {
-    console.log('[DEBUG franchise id]', franchises[0].name, '->', franchises[0].id);
-  }
-
   // Si no hay Collection propia, miramos si la Franchise tiene una
   // palabra clave manual configurada arriba — así una franquicia genérica
   // no arrastra TODO lo que lleve ese nombre, solo la sub-saga concreta
@@ -1337,44 +1329,18 @@ async function obtenerFranquiciaAmplia(igdbId) {
   const franchise = dataBase[0]?.franchises?.[0];
   if (!franchise) return null;
 
-  // game_type se pide para poder filtrar igual que en calcularColeccionDesdeIgdb:
-  // solo juegos base, nada de DLCs (1), expansiones (2), bundles (3),
-  // expansiones independientes (4), mods (5), episodios/temporadas (6/7),
-  // remasters (9), edición ampliada (10), ports (11), packs (13) ni updates
-  // (14). Se queda "remake" (8) y lo que no tenga game_type puesto (null =
-  // se trata como juego base, igual que en el resto del proyecto).
-  // platforms.name se pide para poder descartar los "juguetes LCD"
-  // standalone (Tiger Electronics, Game & Watch...): son una consola física
-  // dedicada con un único juego integrado, no software independiente — no
-  // tiene sentido que aparezcan junto a videojuegos reales en la franquicia.
-  // version_parent se pide para descartar ediciones/SKUs concretos (Launch
-  // Edition, Collector's Edition, Digital Deluxe Edition...): esas son
-  // presentaciones distintas del MISMO juego, que ya aparece por su cuenta
-  // en la lista — las ediciones tienen su sitio en "Version played" dentro
-  // del log, no como entradas propias de la franquicia.
   const body = `fields name, cover.url, first_release_date, status, game_type, platforms.name, version_parent; where franchises = (${franchise.id}); sort first_release_date asc; limit 500;`;
   const resp = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body });
   if (!resp.ok) throw new Error(`IGDB respondió ${resp.status}`);
   const data = await resp.json();
 
-
-
   const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14];
   const PLATAFORMAS_EXCLUIDAS = ['Handheld Electronic LCD', 'Plug & Play', 'V.Smile', 'LeapTV'];
   const juegos = (data || [])
-    .filter((g) => g.status !== 6) // sin cancelados aquí, esta pestaña es solo lo publicado
-    .filter((g) => !TIPOS_EXCLUIDOS.includes(g.game_type)) // sin DLCs/ports/versiones/updates...
-    // LOG TEMPORAL DE DIAGNÓSTICO — bórralo en cuanto tengas los nombres exactos
-    .map((g) => {
-      const nombresPlataformas = (g.platforms || []).map((p) => p.name);
-      const pareceJuguete = /spider-man rescue|tv games|web shot|plug/i.test(g.name) || nombresPlataformas.some(n => /handheld|plug|tv game/i.test(n));
-      if (pareceJuguete) console.log('[DEBUG plataforma juguete]', g.name, '->', nombresPlataformas);
-      return g;
-    })
-    .filter((g) => !(g.platforms || []).some((p) => PLATAFORMAS_EXCLUIDAS.includes(p.name))) // sin juguetes LCD standalone
-    .filter((g) => !(g.platforms || []).some((p) => PLATAFORMAS_EXCLUIDAS.includes(p.name))) // sin juguetes LCD standalone
-    .filter((g) => !g.version_parent) // sin ediciones/SKUs concretos de otro juego ya listado
-    .filter((g) => !EXCLUSIONES_FRANQUICIA_MANUAL.has(g.id)) // basura marcada a mano
+    .filter((g) => g.status !== 6)
+    .filter((g) => !TIPOS_EXCLUIDOS.includes(g.game_type))
+    .filter((g) => !g.version_parent)
+    .filter((g) => !(g.platforms || []).some((p) => PLATAFORMAS_EXCLUIDAS.includes(p.name)))
     .map((g) => ({
       igdbId: g.id,
       titulo: g.name,
@@ -1383,6 +1349,59 @@ async function obtenerFranquiciaAmplia(igdbId) {
     }));
 
   return { nombre: franchise.name, juegos };
+}
+
+// --- OTRAS COLECCIONES OFICIALES A LAS QUE PERTENECE ESTE JUEGO (aparte de
+// la saga curada principal) ---
+// Un juego puede estar en más de una Collection de IGDB a la vez (su propia
+// saga + una colección "crossover"/"team-up" más amplia, p. ej.). Esto
+// devuelve cada una de esas Collections EXTRA como grupo de solo lectura,
+// sin tocar ni guardar nada en CuratedCollection — igual que la franquicia,
+// se recalcula en cada visita.
+async function obtenerOtrasColecciones(igdbId, nombrePrincipal) {
+  const token = await getIgdbToken();
+  const headers = {
+    'Client-ID': process.env.IGDB_CLIENT_ID,
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'text/plain',
+  };
+
+  const queryBase = `fields collections.id, collections.name; where id = ${igdbId};`;
+  const respBase = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryBase });
+  if (!respBase.ok) throw new Error(`IGDB respondió ${respBase.status}`);
+  const dataBase = await respBase.json();
+  const collections = dataBase[0]?.collections || [];
+
+  const nombrePrincipalNormalizado = (nombrePrincipal || '').toLowerCase();
+  const otras = collections.filter((c) => c.name.toLowerCase() !== nombrePrincipalNormalizado);
+  if (otras.length === 0) return [];
+
+  const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14];
+  const PLATAFORMAS_EXCLUIDAS = ['Handheld Electronic LCD', 'Plug & Play', 'V.Smile', 'LeapTV'];
+  const camposJuego = 'name, cover.url, first_release_date, status, game_type, platforms.name, version_parent';
+
+  const resultados = [];
+  for (const col of otras) {
+    const resp = await fetchIgdb('https://api.igdb.com/v4/games', {
+      method: 'POST', headers,
+      body: `fields ${camposJuego}; where collections = (${col.id}); sort first_release_date asc; limit 500;`,
+    });
+    if (!resp.ok) continue;
+    const data = await resp.json();
+    const juegos = (data || [])
+      .filter((g) => g.status !== 6)
+      .filter((g) => !TIPOS_EXCLUIDOS.includes(g.game_type))
+      .filter((g) => !g.version_parent)
+      .filter((g) => !(g.platforms || []).some((p) => PLATAFORMAS_EXCLUIDAS.includes(p.name)))
+      .map((g) => ({
+        igdbId: g.id,
+        titulo: g.name,
+        anio: g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null,
+        portada: g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null,
+      }));
+    if (juegos.length > 1) resultados.push({ nombre: col.name, juegos });
+  }
+  return resultados;
 }
 
 // --- Construye la respuesta de /igdb/collection a partir de lo GUARDADO en
@@ -1591,16 +1610,6 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
       return res.status(400).json({ error: 'igdbId inválido' });
     }
 
-    // La franquicia amplia (solo lectura) se calcula siempre, da igual si la
-    // saga estricta ya está guardada a mano o no — nunca se guarda en la
-    // base de datos, se recalcula en cada visita.
-    let franquicia = null;
-    try {
-      franquicia = await obtenerFranquiciaAmplia(igdbId);
-    } catch (e) {
-      console.error('Error obteniendo franquicia amplia:', e.message);
-    }
-
     // Si esta saga ya está guardada a mano en la base de datos (porque ya se
     // vio antes, o porque un admin ya la editó), servimos desde ahí y no
     // volvemos a tocar IGDB para nada — así lo que el admin edite no se
@@ -1611,12 +1620,29 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
     });
     if (itemExistente) {
       const respuesta = await construirRespuestaDesdeCurated(itemExistente.collectionId, igdbId);
-      return res.json({ ...respuesta, franquicia });
+
+      let franquicia = null;
+      let otrasColecciones = [];
+      try {
+        franquicia = await obtenerFranquiciaAmplia(igdbId);
+        otrasColecciones = await obtenerOtrasColecciones(igdbId, respuesta.collection?.nombre);
+      } catch (e) {
+        console.error('Error obteniendo agrupaciones adicionales:', e.message);
+      }
+
+      return res.json({ ...respuesta, franquicia, otrasColecciones });
+    }
+
+    let franquicia = null;
+    try {
+      franquicia = await obtenerFranquiciaAmplia(igdbId);
+    } catch (e) {
+      console.error('Error obteniendo franquicia amplia:', e.message);
     }
 
     const calculada = await calcularColeccionDesdeIgdb(igdbId);
     if (!calculada) {
-      return res.json({ collection: null, games: [], cancelados: [], otros: [], prequel: null, sequel: null, franquicia });
+      return res.json({ collection: null, games: [], cancelados: [], otros: [], prequel: null, sequel: null, franquicia, otrasColecciones: [] });
     }
 
     // Primera vez que se ve esta saga: la guardamos como semilla editable en
@@ -1639,7 +1665,13 @@ app.get('/igdb/collection/:igdbId', async (req, res) => {
     });
 
     const respuesta = await construirRespuestaDesdeCurated(nuevaCollection.id, igdbId);
-    return res.json({ ...respuesta, franquicia });
+    let otrasColecciones = [];
+    try {
+      otrasColecciones = await obtenerOtrasColecciones(igdbId, respuesta.collection?.nombre);
+    } catch (e) {
+      console.error('Error obteniendo otras colecciones:', e.message);
+    }
+    return res.json({ ...respuesta, franquicia, otrasColecciones });
 
   } catch (err) {
     console.error('ERROR EN GET /igdb/collection/:igdbId:', err);
