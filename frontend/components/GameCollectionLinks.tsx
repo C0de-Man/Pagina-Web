@@ -13,6 +13,15 @@ interface JuegoSaga {
     portada: string | null;
 }
 
+// La franquicia amplia (solo lectura, no editable) no viene de
+// CuratedCollectionItem — no tiene "id" de fila que borrar/reordenar.
+interface JuegoFranquicia {
+    igdbId: number;
+    titulo: string;
+    anio: number | null;
+    portada: string | null;
+}
+
 interface CollectionResponse {
     collection: { id: number; nombre: string } | null;
     games: JuegoSaga[];
@@ -21,6 +30,7 @@ interface CollectionResponse {
     indiceActual: number;
     prequel: JuegoSaga | null;
     sequel: JuegoSaga | null;
+    franquicia: { nombre: string; juegos: JuegoFranquicia[] } | null;
 }
 
 interface ResultadoIgdb {
@@ -57,7 +67,7 @@ export default function GameCollectionLinks({
     const esAdmin = useEsAdmin();
     const [data, setData] = useState<CollectionResponse | null>(null);
     const [modalAbierto, setModalAbierto] = useState(false);
-    const [tabModal, setTabModal] = useState<'juegos' | 'cancelados' | 'otros'>('juegos');
+    const [tabModal, setTabModal] = useState<'juegos' | 'cancelados' | 'otros' | 'franquicia'>('juegos');
     const [juegoABorrar, setJuegoABorrar] = useState<JuegoSaga | null>(null);
     const [borrando, setBorrando] = useState(false);
     const [arrastrandoId, setArrastrandoId] = useState<number | null>(null);
@@ -100,7 +110,7 @@ export default function GameCollectionLinks({
         fetch(`${API_URL}/media`, { cache: 'no-store' })
             .then((r) => r.json())
             .then(setMyDb)
-            .catch(() => {});
+            .catch(() => { });
     }, []);
 
     useEffect(() => {
@@ -126,7 +136,7 @@ export default function GameCollectionLinks({
         })
             .then((res) => res.json())
             .then(setPersonalizaciones)
-            .catch(() => {});
+            .catch(() => { });
     }, [myDb, data]);
 
     // Portada real de un juego de la saga: tu personalización si existe,
@@ -260,7 +270,7 @@ export default function GameCollectionLinks({
         }
     }
 
-    function cambiarTab(nuevaTab: 'juegos' | 'cancelados' | 'otros') {
+    function cambiarTab(nuevaTab: 'juegos' | 'cancelados' | 'otros' | 'franquicia') {
         setTabModal(nuevaTab);
         setBusquedaTexto('');
         setResultadosBusqueda([]);
@@ -466,9 +476,20 @@ export default function GameCollectionLinks({
                                     Other
                                 </button>
                             )}
+                            {data.franquicia && data.franquicia.juegos.length > 0 && (
+                                <button
+                                    onClick={() => cambiarTab('franquicia')}
+                                    className={`pb-3 text-sm font-semibold transition cursor-pointer ${tabModal === 'franquicia'
+                                        ? 'text-white border-b-2 border-white'
+                                        : 'text-gray-500 hover:text-gray-300'
+                                        }`}
+                                >
+                                    Franchise
+                                </button>
+                            )}
                         </div>
 
-                        {esAdmin && (
+                        {esAdmin && tabModal !== 'franquicia' && (
                             <div className="relative mb-6">
                                 <input
                                     type="text"
@@ -529,60 +550,99 @@ export default function GameCollectionLinks({
                             </div>
                         )}
 
-                        <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-5">
-                            {(tabModal === 'juegos' ? data.games : tabModal === 'cancelados' ? data.cancelados : data.otros).map((g) => {
-                                const esActual = g.igdbId === currentMediaIgdbId;
-                                const portadaReal = getPortadaReal(g);
-                                const imagen = portadaReal && (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                        src={portadaReal}
-                                        alt={g.titulo}
-                                        // Solo la carátula es arrastrable (no toda la tarjeta): así el
-                                        // título sigue siendo texto normal, seleccionable/copiable —
-                                        // un elemento "draggable" bloquea la selección de texto dentro
-                                        // de él, y antes eso incluía el nombre del juego sin querer.
-                                        draggable={esAdmin}
-                                        className={`w-full aspect-[2/3] object-cover rounded transition ${esActual
-                                            ? 'ring-2 ring-blue-500'
-                                            : 'group-hover:opacity-80 group-hover:scale-[1.02]'
-                                            } ${esAdmin ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                                    />
-                                );
-                                const textoTarjeta = (
-                                    <>
-                                        <p className="mt-2 text-sm font-semibold text-white select-text">{g.titulo}</p>
-                                        <p className="text-xs text-gray-400">
-                                            {g.anio}
-                                            {esActual ? " · You're viewing this" : ''}
-                                        </p>
-                                    </>
-                                );
-                                return (
-                                    <div
-                                        key={g.id}
-                                        className={`group relative ${arrastrandoId === g.id ? 'opacity-40' : ''}`}
-                                        onDragStart={() => handleDragStart(g.id)}
-                                        onDragOver={(e) => handleDragOver(e, g.id)}
-                                        onDrop={handleDrop}
-                                        onDragEnd={() => setArrastrandoId(null)}
-                                    >
-                                        <BotonBorrar juego={g} />
-                                        {esActual ? (
-                                            <span className="block w-full rounded text-left">
-                                                {imagen}
-                                                {textoTarjeta}
-                                            </span>
-                                        ) : (
-                                            <Link href={hrefDeJuego(g)} className="block w-full rounded text-left cursor-pointer">
-                                                {imagen}
-                                                {textoTarjeta}
-                                            </Link>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
+                        {tabModal === 'franquicia' ? (
+                            <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-5">
+                                {data.franquicia?.juegos.map((g) => {
+                                    const esActual = g.igdbId === currentMediaIgdbId;
+                                    return (
+                                        <div key={g.igdbId} className="group relative">
+                                            {esActual ? (
+                                                <span className="block w-full rounded text-left">
+                                                    {g.portada && (
+                                                        // eslint-disable-next-line @next/next/no-img-element
+                                                        <img
+                                                            src={g.portada}
+                                                            alt={g.titulo}
+                                                            className="w-full aspect-[2/3] object-cover rounded ring-2 ring-blue-500 transition"
+                                                        />
+                                                    )}
+                                                    <p className="mt-2 text-sm font-semibold text-white select-text">{g.titulo}</p>
+                                                    <p className="text-xs text-gray-400">{g.anio}{" · You're viewing this"}</p>
+                                                </span>
+                                            ) : (
+                                                <Link href={`/game/igdb/${g.igdbId}`} className="block w-full rounded text-left cursor-pointer">
+                                                    {g.portada && (
+                                                        // eslint-disable-next-line @next/next/no-img-element
+                                                        <img
+                                                            src={g.portada}
+                                                            alt={g.titulo}
+                                                            className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80 group-hover:scale-[1.02]"
+                                                        />
+                                                    )}
+                                                    <p className="mt-2 text-sm font-semibold text-white select-text">{g.titulo}</p>
+                                                    <p className="text-xs text-gray-400">{g.anio}</p>
+                                                </Link>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-5">
+                                {(tabModal === 'juegos' ? data.games : tabModal === 'cancelados' ? data.cancelados : data.otros).map((g) => {
+                                    const esActual = g.igdbId === currentMediaIgdbId;
+                                    const portadaReal = getPortadaReal(g);
+                                    const imagen = portadaReal && (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img
+                                            src={portadaReal}
+                                            alt={g.titulo}
+                                            // Solo la carátula es arrastrable (no toda la tarjeta): así el
+                                            // título sigue siendo texto normal, seleccionable/copiable —
+                                            // un elemento "draggable" bloquea la selección de texto dentro
+                                            // de él, y antes eso incluía el nombre del juego sin querer.
+                                            draggable={esAdmin}
+                                            className={`w-full aspect-[2/3] object-cover rounded transition ${esActual
+                                                ? 'ring-2 ring-blue-500'
+                                                : 'group-hover:opacity-80 group-hover:scale-[1.02]'
+                                                } ${esAdmin ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                        />
+                                    );
+                                    const textoTarjeta = (
+                                        <>
+                                            <p className="mt-2 text-sm font-semibold text-white select-text">{g.titulo}</p>
+                                            <p className="text-xs text-gray-400">
+                                                {g.anio}
+                                                {esActual ? " · You're viewing this" : ''}
+                                            </p>
+                                        </>
+                                    );
+                                    return (
+                                        <div
+                                            key={g.id}
+                                            className={`group relative ${arrastrandoId === g.id ? 'opacity-40' : ''}`}
+                                            onDragStart={() => handleDragStart(g.id)}
+                                            onDragOver={(e) => handleDragOver(e, g.id)}
+                                            onDrop={handleDrop}
+                                            onDragEnd={() => setArrastrandoId(null)}
+                                        >
+                                            <BotonBorrar juego={g} />
+                                            {esActual ? (
+                                                <span className="block w-full rounded text-left">
+                                                    {imagen}
+                                                    {textoTarjeta}
+                                                </span>
+                                            ) : (
+                                                <Link href={hrefDeJuego(g)} className="block w-full rounded text-left cursor-pointer">
+                                                    {imagen}
+                                                    {textoTarjeta}
+                                                </Link>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
