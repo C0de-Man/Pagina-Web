@@ -3096,6 +3096,36 @@ app.post('/admin/cinematic-universes/:universeId/refresh', requireAuth, requireA
       }
     }
 
+    // Tras añadir lo nuevo, reordenamos TODO el universo por fecha de
+    // estreno (dentro de cada pestaña por separado) — así lo recién
+    // encontrado no se queda pegado al final sin más, sino en su sitio
+    // cronológico correcto junto al resto. Esto sustituye cualquier orden
+    // manual que hubiera antes del refresh.
+    const todosLosItems = await prisma.cinematicUniverseItem.findMany({
+      where: { universeId },
+      orderBy: [{ pestaña: 'asc' }, { fechaEstreno: 'asc' }],
+    });
+
+    const porPestaña = new Map();
+    for (const item of todosLosItems) {
+      if (!porPestaña.has(item.pestaña)) porPestaña.set(item.pestaña, []);
+      porPestaña.get(item.pestaña).push(item);
+    }
+
+    const actualizaciones = [];
+    for (const items of porPestaña.values()) {
+      items.forEach((item, index) => {
+        if (item.orden !== index) {
+          actualizaciones.push(
+            prisma.cinematicUniverseItem.update({ where: { id: item.id }, data: { orden: index } })
+          );
+        }
+      });
+    }
+    if (actualizaciones.length > 0) {
+      await prisma.$transaction(actualizaciones);
+    }
+
     res.json({ ok: true, fuentesRevisadas: fuentes.length, añadidos: totalAñadidos });
   } catch (error) {
     console.error('ERROR EN POST /admin/cinematic-universes/:universeId/refresh:', error);
@@ -4437,91 +4467,263 @@ async function construirRespuestaUniverso(tmdbId, idioma) {
   };
 }
 
+// --- COLECCIONES DE PELÍCULAS/SERIES CURADAS A MANO ---
+
+// Trae las partes en crudo de una Collection de TMDB, en el mismo formato
+// que ya usa el resto del proyecto para sembrar CuratedMovieCollection.
+async function calcularColeccionMovieDesdeTmdb(tmdbCollectionId, idioma) {
+  const apiKey = process.env.TMDB_API_KEY;
+  const r = await fetch(`https://api.themoviedb.org/3/collection/${tmdbCollectionId}?api_key=${apiKey}&language=${idioma || 'en-US'}`);
+  const d = await r.json();
+  if (!d.parts) return null;
+  const items = d.parts
+    .map((p) => ({
+      tmdbId: p.id,
+      tipo: 'PELICULA',
+      titulo: p.title,
+      anio: p.release_date ? new Date(p.release_date).getFullYear() : null,
+      portada: p.poster_path ? `https://image.tmdb.org/t/p/w780${p.poster_path}` : null,
+      fechaEstreno: p.release_date || null,
+    }))
+    .sort((a, b) => (a.fechaEstreno || '9999').localeCompare(b.fechaEstreno || '9999'));
+  return { nombre: d.name || 'Collection', items };
+}
+
+// Construye la respuesta que consume el frontend a partir de lo guardado en
+// CuratedMovieCollection/CuratedMovieCollectionItem — no vuelve a tocar TMDB
+// para nada salvo prequel/sequel, que sigue calculándose por posición.
+async function construirRespuestaMovieCollection(collectionId, tmdbIdActual) {
+  const collection = await prisma.curatedMovieCollection.findUnique({
+    where: { id: collectionId },
+    include: { items: { orderBy: { orden: 'asc' } } },
+  });
+  if (!collection) return null;
+
+  const items = collection.items;
+  const indiceActual = items.findIndex((it) => it.tmdbId === tmdbIdActual);
+  const prequelItem = indiceActual > 0 ? items[indiceActual - 1] : null;
+  const sequelItem = indiceActual >= 0 && indiceActual < items.length - 1 ? items[indiceActual + 1] : null;
+
+  return {
+    collection: { id: collection.id, nombre: collection.nombre, tmdbCollectionId: collection.tmdbCollectionId },
+    items: items.map((it) => ({
+      id: it.id,
+      tmdbId: it.tmdbId,
+      tipo: it.tipo,
+      titulo: it.titulo,
+      anio: it.anio,
+      portada: it.portada,
+    })),
+    prequel: prequelItem
+      ? { id: prequelItem.id, tmdbId: prequelItem.tmdbId, tipo: prequelItem.tipo, titulo: prequelItem.titulo, anio: prequelItem.anio, portada: prequelItem.portada }
+      : null,
+    sequel: sequelItem
+      ? { id: sequelItem.id, tmdbId: sequelItem.tmdbId, tipo: sequelItem.tipo, titulo: sequelItem.titulo, anio: sequelItem.anio, portada: sequelItem.portada }
+      : null,
+  };
+}
+
+// --- CREAR/OBTENER una CuratedMovieCollection para una Collection de TMDB
+// concreta (películas) o para una serie suelta sin Collection real. Si ya
+// existe, la devuelve tal cual (nunca la recalcula/sobrescribe). Si no
+// existe y hay tmdbCollectionId, la siembra desde TMDB. Si no existe y es
+// una serie suelta (sin Collection), la crea vacía con solo esa serie. ---
+async function obtenerOCrearMovieCollection({ tmdbCollectionId, tmdbSeriesId, nombreSerie, idioma }) {
+  if (tmdbCollectionId) {
+    const existente = await prisma.curatedMovieCollection.findUnique({ where: { tmdbCollectionId } });
+    if (existente) return existente;
+
+    const calculada = await calcularColeccionMovieDesdeTmdb(tmdbCollectionId, idioma);
+    if (!calculada) return null;
+
+    return prisma.curatedMovieCollection.create({
+      data: {
+        tmdbCollectionId,
+        nombre: calculada.nombre,
+        items: {
+          create: calculada.items.map((it, index) => ({
+            tmdbId: it.tmdbId,
+            tipo: it.tipo,
+            titulo: it.titulo,
+            anio: it.anio,
+            portada: it.portada,
+            orden: index,
+          })),
+        },
+      },
+    });
+  }
+
+  if (tmdbSeriesId) {
+    const existente = await prisma.curatedMovieCollection.findUnique({ where: { tmdbSeriesId } });
+    if (existente) return existente;
+
+    const apiKey = process.env.TMDB_API_KEY;
+    const r = await fetch(`https://api.themoviedb.org/3/tv/${tmdbSeriesId}?api_key=${apiKey}&language=${idioma || 'en-US'}`);
+    const d = await r.json();
+
+    return prisma.curatedMovieCollection.create({
+      data: {
+        tmdbSeriesId,
+        nombre: nombreSerie || d.name || 'Collection',
+        items: {
+          create: [{
+            tmdbId: tmdbSeriesId,
+            tipo: 'SERIE',
+            titulo: d.name || nombreSerie || '',
+            anio: d.first_air_date ? new Date(d.first_air_date).getFullYear() : null,
+            portada: d.poster_path ? `https://image.tmdb.org/t/p/w780${d.poster_path}` : null,
+            orden: 0,
+          }],
+        },
+      },
+    });
+  }
+
+  return null;
+}
+
+// --- AÑADIR MANUALMENTE una película/serie a una CuratedMovieCollection ---
+app.post('/admin/movie-collections/:collectionId/items', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const collectionId = parseInt(req.params.collectionId, 10);
+    const { tmdbId, tipo, titulo, anio, portada } = req.body;
+    if (!tmdbId || !titulo) return res.status(400).json({ error: 'Faltan datos: tmdbId y titulo son obligatorios' });
+
+    const coleccion = await prisma.curatedMovieCollection.findUnique({ where: { id: collectionId } });
+    if (!coleccion) return res.status(404).json({ error: 'Colección no encontrada' });
+
+    const totalActual = await prisma.curatedMovieCollectionItem.count({ where: { collectionId } });
+
+    const item = await prisma.curatedMovieCollectionItem.create({
+      data: {
+        collectionId,
+        tmdbId: parseInt(tmdbId, 10),
+        tipo: tipo === 'SERIE' ? 'SERIE' : 'PELICULA',
+        titulo,
+        anio: anio || null,
+        portada: portada || null,
+        orden: totalActual,
+      },
+    });
+    res.json(item);
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'Este título ya está en la colección' });
+    }
+    console.error('ERROR EN POST /admin/movie-collections/:collectionId/items:', error);
+    res.status(500).json({ error: 'Error al añadir el título' });
+  }
+});
+
+// --- QUITAR una película/serie de una CuratedMovieCollection ---
+app.delete('/admin/movie-collections/items/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await prisma.curatedMovieCollectionItem.delete({ where: { id: parseInt(req.params.id, 10) } });
+    res.json({ ok: true });
+  } catch (error) {
+    if (error.code === 'P2025') return res.json({ ok: true });
+    console.error('ERROR EN DELETE /admin/movie-collections/items/:id:', error);
+    res.status(500).json({ error: 'Error al eliminar' });
+  }
+});
+
+// --- REORDENAR (arrastrar y soltar) dentro de una CuratedMovieCollection ---
+app.patch('/admin/movie-collections/items/reorder', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids)) return res.status(400).json({ error: 'Falta el array de ids' });
+    await prisma.$transaction(
+      ids.map((id, index) =>
+        prisma.curatedMovieCollectionItem.update({ where: { id: parseInt(id, 10) }, data: { orden: index } })
+      )
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN PATCH /admin/movie-collections/items/reorder:', error);
+    res.status(500).json({ error: 'Error al reordenar' });
+  }
+});
+
+// --- REINICIAR una CuratedMovieCollection: borra lo editado a mano y la
+// recalcula desde cero desde TMDB (solo tiene sentido si tiene
+// tmdbCollectionId; una saga de serie suelta no tiene de dónde recalcular). ---
+app.post('/admin/movie-collections/:collectionId/reset', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const collectionId = parseInt(req.params.collectionId, 10);
+    const coleccion = await prisma.curatedMovieCollection.findUnique({ where: { id: collectionId } });
+    if (!coleccion) return res.status(404).json({ error: 'Colección no encontrada' });
+    if (!coleccion.tmdbCollectionId) {
+      return res.status(422).json({ error: 'Esta colección no tiene una Collection de TMDB de la que recalcular' });
+    }
+
+    const calculada = await calcularColeccionMovieDesdeTmdb(coleccion.tmdbCollectionId, getLang(req));
+    if (!calculada) return res.status(422).json({ error: 'TMDB ya no reconoce esta colección' });
+
+    await prisma.curatedMovieCollectionItem.deleteMany({ where: { collectionId } });
+    await prisma.curatedMovieCollection.update({
+      where: { id: collectionId },
+      data: {
+        nombre: calculada.nombre,
+        items: {
+          create: calculada.items.map((it, index) => ({
+            tmdbId: it.tmdbId,
+            tipo: it.tipo,
+            titulo: it.titulo,
+            anio: it.anio,
+            portada: it.portada,
+            orden: index,
+          })),
+        },
+      },
+    });
+
+    res.json(await construirRespuestaMovieCollection(collectionId, req.body.tmdbIdActual || coleccion.tmdbCollectionId));
+  } catch (error) {
+    console.error('ERROR EN POST /admin/movie-collections/:collectionId/reset:', error);
+    res.status(500).json({ error: 'Error al reiniciar la colección' });
+  }
+});
+
 app.get('/tmdb/collection/:tmdbId', async (req, res) => {
   try {
-    const { tmdbId } = req.params;
+    const tmdbIdNum = parseInt(req.params.tmdbId, 10);
     const apiKey = process.env.TMDB_API_KEY;
+    const idioma = getLang(req);
 
-    const movieRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}&language=${getLang(req)}`);
-    const movieData = await movieRes.json();
+    const itemExistente = await prisma.curatedMovieCollectionItem.findFirst({
+      where: { tmdbId: tmdbIdNum, tipo: 'PELICULA' },
+      select: { collectionId: true },
+    });
 
-    if (!movieData.belongs_to_collection) {
-      const universoSuelto = await construirRespuestaUniverso(parseInt(tmdbId), getLang(req))
-      return res.json({ prequel: null, sequel: null, nombreColeccion: null, collectionId: null, parts: [], universo: universoSuelto });
-    }
+    let respuestaColeccion;
+    if (itemExistente) {
+      respuestaColeccion = await construirRespuestaMovieCollection(itemExistente.collectionId, tmdbIdNum);
+    } else {
+      const movieRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbIdNum}?api_key=${apiKey}&language=${idioma}`);
+      const movieData = await movieRes.json();
 
-    const collectionId = movieData.belongs_to_collection.id;
-
-    // ¿Esta PELÍCULA (no la colección) ya está guardada como parte de un
-    // universo? Se mira por tmdbId directo, no por collectionId — así
-    // también funcionan películas sueltas añadidas a mano a "Other" que no
-    // pertenecen a ninguna Collection real de TMDB.
-    const universo = await construirRespuestaUniverso(parseInt(tmdbId), getLang(req));
-
-    const colRes = await fetch(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${apiKey}&language=${getLang(req)}`);
-    const colData = await colRes.json();
-
-    // Igual que en /tmdb/company/:companyId: si tu idioma no es inglés, se
-    // pide también en inglés y se superponen esas carátulas — si no, el
-    // modal mostraba en inglés solo las películas que ya habías abierto
-    // antes (guardadas en tu base de datos con el arreglo aplicado), y en
-    // el idioma pedido las que todavía no habías visitado. No se reutiliza
-    // conCaratulasIngles porque ese helper espera un array bajo "results"
-    // (discover/search), y /collection/:id devuelve un objeto con "parts".
-    if (getLang(req) !== 'en-US' && colData.parts?.length > 0) {
-      try {
-        const colResIngles = await fetch(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${apiKey}&language=en-US`);
-        const colDataIngles = await colResIngles.json();
-        const partesInglesPorId = new Map((colDataIngles.parts || []).map((p) => [p.id, p]));
-        colData.parts = colData.parts.map((p) => {
-          const ingles = partesInglesPorId.get(p.id);
-          if (!ingles) return p;
-          return { ...p, poster_path: ingles.poster_path || p.poster_path, backdrop_path: ingles.backdrop_path || p.backdrop_path };
+      if (movieData.belongs_to_collection) {
+        const coleccion = await obtenerOCrearMovieCollection({
+          tmdbCollectionId: movieData.belongs_to_collection.id,
+          idioma,
         });
-      } catch (e) {
-        console.error('No se pudieron obtener carátulas en inglés de la colección, se dejan las del idioma pedido:', e.message);
+        respuestaColeccion = coleccion ? await construirRespuestaMovieCollection(coleccion.id, tmdbIdNum) : null;
+      } else {
+        respuestaColeccion = null;
       }
     }
 
-    const parts = colData.parts.sort((a, b) => new Date(a.release_date) - new Date(b.release_date));
+    const universo = await construirRespuestaUniverso(tmdbIdNum, idioma);
 
-    const currentIndex = parts.findIndex(p => p.id === parseInt(tmdbId));
-
-    // Por defecto: orden por fecha de estreno (como hasta ahora)
-    let prequel = currentIndex > 0 ? parts[currentIndex - 1] : null;
-    let sequel = currentIndex < parts.length - 1 ? parts[currentIndex + 1] : null;
-
-    // Afinamos con el orden NARRATIVO real de Wikidata, si lo tiene documentado
-    try {
-      const extRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/external_ids?api_key=${apiKey}`);
-      const extData = await extRes.json();
-
-      if (extData.imdb_id) {
-        const { followsImdb, followedByImdb } = await buscarOrdenNarrativoWikidata(extData.imdb_id);
-
-        const buscarPeliculaPorImdb = async (imdb) => {
-          const findRes = await fetch(`https://api.themoviedb.org/3/find/${imdb}?api_key=${apiKey}&external_source=imdb_id&language=${getLang(req)}`);
-          const findData = await findRes.json();
-          return findData.movie_results?.[0] || null;
-        };
-
-        if (followsImdb) {
-          const encontrada = await buscarPeliculaPorImdb(followsImdb);
-          if (encontrada) prequel = parts.find(p => p.id === encontrada.id) || encontrada;
-        }
-        if (followedByImdb) {
-          const encontrada = await buscarPeliculaPorImdb(followedByImdb);
-          if (encontrada) sequel = parts.find(p => p.id === encontrada.id) || encontrada;
-        }
-      }
-    } catch (e) {
-      // si Wikidata falla, nos quedamos con el orden por fecha de estreno
+    if (!respuestaColeccion) {
+      return res.json({ collection: null, items: [], prequel: null, sequel: null, universo });
     }
 
-    res.json({ prequel, sequel, nombreColeccion: colData.name || null, collectionId, parts, universo });
+    res.json({ ...respuestaColeccion, universo });
   } catch (error) {
-    console.error("Error al obtener la colección:", error);
-    res.status(500).json({ error: "Error al obtener colección" });
+    console.error('Error al obtener la colección:', error);
+    res.status(500).json({ error: 'Error al obtener colección' });
   }
 });
 

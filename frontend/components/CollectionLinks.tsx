@@ -35,12 +35,22 @@ interface Universo {
   pestañas: UniverseTab[];
 }
 
+// Item de una saga normal (CuratedMovieCollection) — id es la fila de
+// CuratedMovieCollectionItem, tmdbId es el id real en TMDB.
+interface ItemSaga {
+  id: number;
+  tmdbId: number;
+  tipo: string; // "PELICULA" | "SERIE"
+  titulo: string;
+  anio: number | null;
+  portada: string | null;
+}
+
 interface CollectionResponse {
-  prequel: any;
-  sequel: any;
-  nombreColeccion: string | null;
-  collectionId: number | null;
-  parts: any[];
+  collection: { id: number; nombre: string; tmdbCollectionId: number | null } | null;
+  items: ItemSaga[];
+  prequel: ItemSaga | null;
+  sequel: ItemSaga | null;
   universo: Universo | null;
 }
 
@@ -118,6 +128,9 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   // --- Buscador para añadir películas sueltas a la pestaña actual (solo admin) ---
+  // Se usa tanto para la pestaña "propia" de un universo como para una saga
+  // normal (CuratedMovieCollection) — añadirEnPestañaActual decide a cuál
+  // de los dos sistemas llamar según el modo activo.
   const [busquedaTexto, setBusquedaTexto] = useState('');
   const [resultadosBusqueda, setResultadosBusqueda] = useState<ResultadoTmdb[]>([]);
   const [buscando, setBuscando] = useState(false);
@@ -147,6 +160,11 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   const [añadiendoColeccion, setAñadiendoColeccion] = useState(false);
   const [errorAñadirColeccion, setErrorAñadirColeccion] = useState<string | null>(null);
   const [resultadoImportacion, setResultadoImportacion] = useState<string | null>(null);
+
+  // --- Saga normal (CuratedMovieCollection): drag&drop, borrado, reset ---
+  const [arrastrandoSagaId, setArrastrandoSagaId] = useState<number | null>(null);
+  const [borrandoSagaId, setBorrandoSagaId] = useState<number | null>(null);
+  const [reiniciandoSaga, setReiniciandoSaga] = useState(false);
 
   function cargarColeccion() {
     const miId = ++idPeticionRef.current;
@@ -179,11 +197,12 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     const idsUniverso = collection.universo
       ? collection.universo.pestañas.flatMap((p) => p.items.map((it) => it.tmdbId))
       : [];
+    const idsSaga = (collection.items || []).map((it) => it.tmdbId);
 
     const idsTmdb = [
-      collection.prequel?.id,
-      collection.sequel?.id,
-      ...(collection.parts || []).map((p) => p.id),
+      collection.prequel?.tmdbId,
+      collection.sequel?.tmdbId,
+      ...idsSaga,
       ...idsUniverso,
     ].filter(Boolean);
 
@@ -210,7 +229,8 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isModalOpen]);
 
-  // Buscador de películas para añadir a la pestaña actual (con debounce)
+  // Buscador de películas/series para añadir (con debounce). Sirve tanto
+  // para la pestaña "propia" de un universo como para una saga normal.
   useEffect(() => {
     if (!esAdmin || busquedaTexto.trim().length < 2) {
       setResultadosBusqueda([]);
@@ -232,7 +252,13 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }, [busquedaTexto, esAdmin]);
 
   const puedeArrancarUniversoSerie = esAdmin && tipo === 'SERIE';
-  if (!collection || (!collection.universo && !collection.prequel && !collection.sequel && !puedeArrancarUniversoSerie)) return null;
+  const hayItemsSaga = (collection?.items?.length || 0) > 0;
+  if (
+    !collection ||
+    (!collection.universo && !hayItemsSaga && !collection.prequel && !collection.sequel && !puedeArrancarUniversoSerie)
+  ) {
+    return null;
+  }
 
   // SIEMPRE dos pestañas de cara al usuario, aunque el universo tenga más
   // de dos sub-colecciones guardadas en el backend: la saga PROPIA de esta
@@ -278,6 +304,10 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   const tabsVisuales = collection.universo ? calcularTabsVisuales(collection.universo) : [];
   const tabActiva = tabsVisuales[pestañaActiva];
 
+  // Si no hay universo, la pestaña activa "conceptual" es siempre la saga
+  // normal — no hay más pestañas entre las que elegir.
+  const modoSaga = !collection.universo && !!collection.collection;
+
   const getLocalData = (id: number) => {
     const local = myDb.find((m: any) => m.tmdbId === id);
     const dbId = local?.id || null;
@@ -288,17 +318,19 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     };
   };
 
-  const handleClick = async (item: any, dbId: number | null) => {
+  const handleClick = async (item: { tmdbId: number; tipo?: string; titulo?: string }, dbId: number | null) => {
     if (loadingId) return;
-    setLoadingId(item.id);
+    setLoadingId(item.tmdbId);
     if (dbId) {
-      router.push(urlFicha({ ...item, id: dbId }));
+      router.push(urlFicha({ tipo: item.tipo || 'PELICULA', titulo: item.titulo, id: dbId } as any));
     } else {
       try {
-        const res = await fetch(`${API_URL}/media/tmdb`, {
+        const esSerie = item.tipo === 'SERIE';
+        const endpoint = esSerie ? `${API_URL}/media/tmdb?tipo=SERIE` : `${API_URL}/media/tmdb`;
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tmdbId: item.id, tipo: 'PELICULA' }),
+          body: JSON.stringify({ tmdbId: item.tmdbId, tipo: esSerie ? 'SERIE' : 'PELICULA' }),
         });
         const nueva = await res.json();
         router.push(urlFicha(nueva));
@@ -308,20 +340,21 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     }
   };
 
-  const renderItem = (item: any, label: string) => {
+  // Tarjeta pequeña de Prequel/Sequel (arriba del todo, siempre visible).
+  const renderItem = (item: ItemSaga | null, label: string) => {
     if (!item) return null;
-    const { dbId, customPoster } = getLocalData(item.id);
-    const posterUrl = customPoster || (item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : null);
+    const { dbId, customPoster } = getLocalData(item.tmdbId);
+    const posterUrl = customPoster || item.portada;
 
     return (
       <div onClick={() => handleClick(item, dbId)} className="flex flex-col items-center gap-1.5 cursor-pointer group w-24">
         <div className="relative w-full aspect-[2/3] rounded border border-gray-700 group-hover:border-gray-400 transition shadow-lg overflow-hidden bg-gray-800">
           {posterUrl ? (
-            <img src={posterUrl} alt={item.title} className={`w-full h-full object-cover ${loadingId === item.id ? 'opacity-50 blur-sm' : ''}`} />
+            <img src={posterUrl} alt={item.titulo} className={`w-full h-full object-cover ${loadingId === item.tmdbId ? 'opacity-50 blur-sm' : ''}`} />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-[10px] text-center p-1">{item.title}</div>
+            <div className="w-full h-full flex items-center justify-center text-[10px] text-center p-1">{item.titulo}</div>
           )}
-          {loadingId === item.id && (
+          {loadingId === item.tmdbId && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50">
               <span className="text-white text-[10px] font-bold">...</span>
             </div>
@@ -332,42 +365,197 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     );
   };
 
-  // Tarjeta de la colección "plana" (sin universo) — igual que antes.
-  const renderFullCard = (item: any) => {
-    const { dbId, customPoster } = getLocalData(item.id);
-    const posterUrl = customPoster || (item.poster_path ? `https://image.tmdb.org/t/p/w300${item.poster_path}` : null);
-    const anio = item.release_date ? item.release_date.split('-')[0] : '—';
-    const esActual = item.id === tmdbId;
+  // Tarjeta de la saga (modo NO universo): con drag&drop y borrado si esAdmin.
+  const renderSagaCard = (item: ItemSaga) => {
+    const { dbId, customPoster } = getLocalData(item.tmdbId);
+    const posterUrl = customPoster || item.portada;
+    const esActual = item.tmdbId === tmdbId;
 
     return (
       <div
         key={item.id}
-        onClick={() => handleClick(item, dbId)}
-        className={`flex flex-col items-center gap-2 p-2 rounded-lg cursor-pointer transition ${
-          esActual ? 'bg-gray-800/80 ring-1 ring-blue-500' : 'hover:bg-gray-800/50'
-        }`}
+        className={`group relative ${arrastrandoSagaId === item.id ? 'opacity-40' : ''}`}
+        draggable={esAdmin}
+        onDragStart={() => esAdmin && setArrastrandoSagaId(item.id)}
+        onDragOver={(e) => {
+          if (!esAdmin || arrastrandoSagaId === null) return;
+          e.preventDefault();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          if (!esAdmin || arrastrandoSagaId === null) return;
+          handleDropSaga(item.id);
+        }}
+        onDragEnd={() => setArrastrandoSagaId(null)}
       >
-        <div className="w-full aspect-[2/3] rounded overflow-hidden border border-gray-700 bg-gray-800">
-          {posterUrl ? (
-            <img src={posterUrl} alt={item.title} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-[10px] text-center p-1 text-gray-400">{item.title}</div>
-          )}
-        </div>
-        <div className="text-center">
-          <p className="font-semibold text-white text-sm leading-tight">{item.title}</p>
-          <p className="text-xs text-gray-400">{anio}{esActual ? " · You're viewing this" : ''}</p>
+        {esAdmin && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              borrarDeSaga(item);
+            }}
+            disabled={borrandoSagaId !== null}
+            title="Remove from saga"
+            className="absolute top-1 left-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/80 text-sm font-bold text-white opacity-0 transition hover:bg-red-600 group-hover:opacity-100 cursor-pointer disabled:cursor-default"
+          >
+            ×
+          </button>
+        )}
+        <div
+          onClick={() => handleClick(item, dbId)}
+          className={`flex flex-col items-center gap-2 p-2 rounded-lg cursor-pointer transition ${
+            esActual ? 'bg-gray-800/80 ring-1 ring-blue-500' : 'hover:bg-gray-800/50'
+          }`}
+        >
+          <div className="w-full aspect-[2/3] rounded overflow-hidden border border-gray-700 bg-gray-800">
+            {posterUrl ? (
+              <img src={posterUrl} alt={item.titulo} className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-[10px] text-center p-1 text-gray-400">{item.titulo}</div>
+            )}
+          </div>
+          <div className="text-center">
+            <p className="font-semibold text-white text-sm leading-tight">{item.titulo}</p>
+            <p className="text-xs text-gray-400">{item.anio ?? '—'}{esActual ? " · You're viewing this" : ''}</p>
+          </div>
         </div>
       </div>
     );
   };
 
-  // Portada real de un item de universo: tu personalización si existe, si no
-  // la guardada en tu base de datos, si no la que trae el propio universo.
-  function getPortadaUniverso(item: UniverseItem): string | null {
-    const local = myDb.find((m: any) => m.tmdbId === item.tmdbId);
-    const miPersonalizacion = local ? personalizaciones[local.id] : undefined;
-    return miPersonalizacion?.customPoster || local?.portada || item.portada;
+  function handleDropSaga(idDebajo: number) {
+    if (arrastrandoSagaId === null || !collection?.items) return;
+    const lista = [...collection.items];
+    const idxOrigen = lista.findIndex((it) => it.id === arrastrandoSagaId);
+    const idxDestino = lista.findIndex((it) => it.id === idDebajo);
+    if (idxOrigen === -1 || idxDestino === -1) return;
+    const [movido] = lista.splice(idxOrigen, 1);
+    lista.splice(idxDestino, 0, movido);
+
+    setCollection((prev) => (prev ? { ...prev, items: lista } : prev));
+    setArrastrandoSagaId(null);
+
+    const token = localStorage.getItem('token');
+    fetch(`${API_URL}/admin/movie-collections/items/reorder`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ ids: lista.map((it) => it.id) }),
+    }).catch((err) => console.error('Error al guardar el nuevo orden de la saga', err));
+  }
+
+  async function borrarDeSaga(item: ItemSaga) {
+    if (borrandoSagaId !== null) return;
+    setBorrandoSagaId(item.id);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/admin/movie-collections/items/${item.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('No se pudo eliminar');
+      setCollection((prev) => (prev ? { ...prev, items: prev.items.filter((it) => it.id !== item.id) } : prev));
+    } catch (err) {
+      console.error('Error al borrar de la saga', err);
+    }
+    setBorrandoSagaId(null);
+  }
+
+  async function reiniciarSaga() {
+    if (!collection?.collection) return;
+    if (!collection.collection.tmdbCollectionId) {
+      alert("This saga doesn't have a TMDB collection to recalculate from.");
+      return;
+    }
+    if (!window.confirm(`Delete ALL edits from "${collection.collection.nombre}" and recalculate from TMDB? This can't be undone.`)) {
+      return;
+    }
+    setReiniciandoSaga(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/admin/movie-collections/${collection.collection.id}/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ tmdbIdActual: tmdbId }),
+      });
+      if (!res.ok) throw new Error('No se pudo reiniciar la saga');
+      cargarColeccion();
+    } catch (err) {
+      console.error('Error al reiniciar la saga', err);
+    }
+    setReiniciandoSaga(false);
+  }
+
+  // --- Añadir un resultado de búsqueda: a la saga normal, o a la pestaña
+  // "propia" de un universo, según cuál de los dos modos esté activo. ---
+  async function añadirPelicula(resultado: ResultadoTmdb) {
+    setAnadiendoId(resultado.id);
+    setErrorAnadir(null);
+    try {
+      const token = localStorage.getItem('token');
+
+      if (modoSaga && collection?.collection) {
+        const esSerieResultado = resultado.media_type === 'tv';
+        const tituloResultado = resultado.title || resultado.name || '';
+        const posterUrl = resultado.poster_path ? `https://image.tmdb.org/t/p/w780${resultado.poster_path}` : null;
+        const fechaResultado = resultado.release_date || resultado.first_air_date || null;
+
+        const res = await fetch(`${API_URL}/admin/movie-collections/${collection.collection.id}/items`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            tmdbId: resultado.id,
+            tipo: esSerieResultado ? 'SERIE' : 'PELICULA',
+            titulo: tituloResultado,
+            anio: fechaResultado ? new Date(fechaResultado).getFullYear() : null,
+            portada: posterUrl,
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          setErrorAnadir(body.error || 'No se pudo añadir el título');
+          return;
+        }
+        setBusquedaTexto('');
+        setResultadosBusqueda([]);
+        cargarColeccion();
+        return;
+      }
+
+      // Modo universo (pestaña "propia"): solo funciona si el universo ya
+      // existe — no se crea ninguno automáticamente aquí.
+      if (!collection?.universo || !tabActiva?.pestañaOrigen) return;
+
+      const esSerieResultado = resultado.media_type === 'tv';
+      const tituloResultado = resultado.title || resultado.name || '';
+      const fechaResultado = resultado.release_date || resultado.first_air_date || null;
+      const res = await fetch(`${API_URL}/admin/cinematic-universe-items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          universeId: collection.universo.id,
+          tmdbId: resultado.id,
+          tipo: esSerieResultado ? 'SERIE' : 'PELICULA',
+          titulo: tituloResultado,
+          anio: fechaResultado ? new Date(fechaResultado).getFullYear() : null,
+          fechaEstreno: fechaResultado,
+          portada: resultado.poster_path ? `https://image.tmdb.org/t/p/w780${resultado.poster_path}` : null,
+          pestaña: tabActiva.pestañaOrigen,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setErrorAnadir(body.error || 'No se pudo añadir el título');
+        return;
+      }
+      setBusquedaTexto('');
+      setResultadosBusqueda([]);
+      cargarColeccion();
+    } catch (err: any) {
+      console.error('Error al añadir el título', err);
+      setErrorAnadir(err.message || 'No se pudo añadir el título');
+    } finally {
+      setAnadiendoId(null);
+    }
   }
 
   const hrefDeItemUniverso = (item: UniverseItem) =>
@@ -441,10 +629,6 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   function agruparPorFase(items: UniverseItem[], fases: FaseUniverso[]) {
-    // Dentro de cada fase, siempre de más antiguo a más reciente por fecha
-    // de estreno — automático, sin depender del orden manual (que solo
-    // aplica a la pestaña "universo" en conjunto, no a cómo se ven dentro
-    // de una fase concreta).
     const porAnioAsc = (a: UniverseItem, b: UniverseItem) => {
       const fechaA = a.fechaEstreno ? new Date(a.fechaEstreno).getTime() : a.anio ? new Date(a.anio, 0, 1).getTime() : Infinity;
       const fechaB = b.fechaEstreno ? new Date(b.fechaEstreno).getTime() : b.anio ? new Date(b.anio, 0, 1).getTime() : Infinity;
@@ -547,49 +731,10 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     setBorrandoId(null);
   }
 
-  async function añadirPelicula(resultado: ResultadoTmdb) {
-    if (!collection?.universo || !tabActiva?.pestañaOrigen) return;
-    setAnadiendoId(resultado.id);
-    setErrorAnadir(null);
-    try {
-      const token = localStorage.getItem('token');
-      const esSerieResultado = resultado.media_type === 'tv';
-      const tituloResultado = resultado.title || resultado.name || '';
-      const fechaResultado = resultado.release_date || resultado.first_air_date || null;
-      const res = await fetch(`${API_URL}/admin/cinematic-universe-items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          universeId: collection.universo.id,
-          tmdbId: resultado.id,
-          tipo: esSerieResultado ? 'SERIE' : 'PELICULA',
-          titulo: tituloResultado,
-          anio: fechaResultado ? new Date(fechaResultado).getFullYear() : null,
-          fechaEstreno: fechaResultado,
-          portada: resultado.poster_path ? `https://image.tmdb.org/t/p/w780${resultado.poster_path}` : null,
-          pestaña: tabActiva.pestañaOrigen,
-        }),
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        setErrorAnadir(body.error || 'No se pudo añadir el título');
-        return;
-      }
-      setBusquedaTexto('');
-      setResultadosBusqueda([]);
-      cargarColeccion();
-    } catch (err) {
-      console.error('Error al añadir el título al universo', err);
-      setErrorAnadir('No se pudo añadir el título');
-    } finally {
-      setAnadiendoId(null);
-    }
-  }
-
   // Abre el formulario de "convertir en universo" y precarga el nombre de
   // pestaña con el de esta propia colección (se puede editar).
   function abrirFormUniverso() {
-    setNombrePestañaNueva(collection?.nombreColeccion || '');
+    setNombrePestañaNueva(collection?.collection?.nombre || '');
     setErrorUniverso(null);
     setMostrarFormUniverso(true);
     const token = localStorage.getItem('token');
@@ -645,7 +790,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   async function guardarUniverso() {
-    if (!collection?.collectionId) return;
+    if (!collection?.collection?.tmdbCollectionId) return;
     setGuardandoUniverso(true);
     setErrorUniverso(null);
     try {
@@ -674,7 +819,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          tmdbCollectionId: collection.collectionId,
+          tmdbCollectionId: collection.collection.tmdbCollectionId,
           nombrePestaña: nombrePestañaNueva.trim() || undefined,
         }),
       });
@@ -866,7 +1011,9 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
 
   function renderTarjetaUniverso(it: UniverseItem) {
     const esActual = it.tmdbId === tmdbId;
-    const portadaReal = getPortadaUniverso(it);
+    const local = myDb.find((m: any) => m.tmdbId === it.tmdbId);
+    const miPersonalizacion = local ? personalizaciones[local.id] : undefined;
+    const portadaReal = miPersonalizacion?.customPoster || local?.portada || it.portada;
     return (
       <div
         key={it.id}
@@ -916,6 +1063,11 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     );
   }
 
+  const nombreSagaOUniverso = collection.universo?.nombre || collection.collection?.nombre || 'Full saga';
+  const nombrePestañaActivaMostrar = collection.universo ? tabActiva?.nombre : collection.collection?.nombre;
+  const yaEnLaListaDeSaga = (r: ResultadoTmdb, tipoResultado: string) =>
+    modoSaga ? (collection.items || []).some((it) => it.tmdbId === r.id && it.tipo === tipoResultado) : false;
+
   return (
     <>
       <div className="mt-4 bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl">
@@ -932,7 +1084,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
           )}
         </div>
 
-        {((collection.parts && collection.parts.length > 1) || collection.universo) && (
+        {((collection.items && collection.items.length > 1) || collection.universo) && (
           <button
             onClick={() => setIsModalOpen(true)}
             className="w-full mt-4 text-xs text-gray-400 hover:text-white text-center underline cursor-pointer bg-gray-900/80 py-2 rounded border border-gray-800 transition"
@@ -942,9 +1094,9 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
         )}
 
         {/* Puerta de entrada para series sin universo todavía: "See full
-            saga" no sirve aquí (las series nunca tienen collection.parts),
-            así que este botón es la única forma de abrir el modal y poder
-            crear/añadirse a un universo desde la propia serie. */}
+            saga" no sirve aquí (las series nunca tienen una Collection real
+            de TMDB), así que este botón es la única forma de abrir el modal
+            y poder crear/añadirse a un universo desde la propia serie. */}
         {esAdmin && !collection.universo && tipo === 'SERIE' && (
           <button
             onClick={() => setIsModalOpen(true)}
@@ -962,9 +1114,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
             className="bg-gray-900 border border-gray-700 rounded-lg max-w-5xl w-full max-h-[85vh] text-white shadow-2xl flex flex-col overflow-hidden"
           >
             <div className="flex justify-between items-center px-6 py-4 border-b border-gray-700 flex-shrink-0">
-              <h2 className="text-xl font-bold">
-                {collection.universo?.nombre || collection.nombreColeccion || 'Full saga'}
-              </h2>
+              <h2 className="text-xl font-bold">{nombreSagaOUniverso}</h2>
               <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white text-2xl font-bold cursor-pointer">✕</button>
             </div>
 
@@ -1010,17 +1160,34 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
                 )}
               </div>
             )}
+
+            {/* Cabecera de la saga NORMAL (no universo): solo el botón Reset,
+                si tiene una Collection de TMDB real de la que recalcular. */}
+            {modoSaga && esAdmin && collection.collection?.tmdbCollectionId && (
+              <div className="flex items-center justify-end px-6 pt-3 border-b border-gray-800 flex-shrink-0 pb-2">
+                <button
+                  onClick={reiniciarSaga}
+                  disabled={reiniciandoSaga}
+                  className="text-xs font-semibold text-amber-400 hover:text-amber-300 underline cursor-pointer transition whitespace-nowrap disabled:opacity-50"
+                >
+                  {reiniciandoSaga ? 'Resetting...' : 'Reset'}
+                </button>
+              </div>
+            )}
+
             {resultadoRefresco && (
               <p className="px-6 pt-1 text-xs text-gray-500">{resultadoRefresco}</p>
             )}
 
-            {esAdmin && collection.universo && tabActiva?.tipo === 'propia' && (
+            {/* Buscador para añadir — visible tanto en la pestaña "propia" de
+                un universo como en una saga normal (modoSaga). */}
+            {esAdmin && (tabActiva?.tipo === 'propia' || modoSaga) && (
               <div className="relative px-6 pt-4">
                 <input
                   type="text"
                   value={busquedaTexto}
                   onChange={(e) => setBusquedaTexto(e.target.value)}
-                  placeholder={`Add a movie or series to "${tabActiva.nombre}"...`}
+                  placeholder={`Add a movie or series to "${nombrePestañaActivaMostrar || 'this saga'}"...`}
                   className="w-full max-w-md bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
                 />
                 {errorAnadir && <p className="mt-1 text-xs text-red-400">{errorAnadir}</p>}
@@ -1036,7 +1203,11 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
                         const fechaResultado = r.release_date || r.first_air_date;
                         const anioResultado = fechaResultado ? new Date(fechaResultado).getFullYear() : null;
                         const tipoResultado = esSerieResultado ? 'SERIE' : 'PELICULA';
-                        const yaEnLaLista = collection.universo!.pestañas.some((p) => p.items.some((it) => it.tmdbId === r.id && it.tipo === tipoResultado));
+                        const yaEnLaLista = modoSaga
+                          ? yaEnLaListaDeSaga(r, tipoResultado)
+                          : collection.universo
+                          ? collection.universo.pestañas.some((p) => p.items.some((it) => it.tmdbId === r.id && it.tipo === tipoResultado))
+                          : false;
                         return (
                           <button
                             key={`${r.media_type}-${r.id}`}
@@ -1061,7 +1232,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
               </div>
             )}
 
-            {esAdmin && !collection.universo && collection.collectionId && (
+            {esAdmin && !collection.universo && !modoSaga && collection.collection?.tmdbCollectionId && (
               <div className="px-6 pt-4">
                 {!mostrarFormUniverso ? (
                   <button
@@ -1306,7 +1477,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
                 )
               ) : (
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-4">
-                  {collection.parts.map(renderFullCard)}
+                  {(collection.items || []).map((it) => renderSagaCard(it))}
                 </div>
               )}
             </div>

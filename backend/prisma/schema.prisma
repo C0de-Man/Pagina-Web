@@ -205,6 +205,43 @@ model CuratedCollectionItem {
   @@unique([collectionId, igdbId]) // un juego no puede estar repetido dentro de la misma saga
 }
 
+// --- COLECCIONES DE PELÍCULAS/SERIES CURADAS A MANO (sagas sueltas, tipo
+// "Regreso al futuro" o "Terminator") ---
+// Mismo concepto que CuratedCollection para juegos, pero para las Collections
+// crudas de TMDB (belongs_to_collection) y para sagas de series sin
+// Collection propia en TMDB. La primera vez que se pide una Collection
+// (GET /tmdb/collection/:tmdbId) y no existe todavía ninguna
+// CuratedMovieCollection para ella, se calcula desde TMDB tal cual siempre
+// se hizo, y el resultado se guarda aquí como semilla. A partir de ese
+// momento se sirve y se edita desde esta tabla — nunca se vuelve a
+// recalcular sola desde TMDB. Deliberadamente SEPARADA de CinematicUniverse:
+// esto es para sagas normales de precuela/secuela, no para agrupar varias
+// sagas bajo un paraguas más grande (eso sigue siendo cosa de Universos).
+model CuratedMovieCollection {
+  id               Int      @id @default(autoincrement())
+  tmdbCollectionId Int?     @unique // null si es una saga de SERIES sin Collection de TMDB (usa tmdbSeriesId en su lugar)
+  tmdbSeriesId     Int?     @unique // solo relleno para sagas de series ancladas a una serie concreta, sin Collection real de TMDB
+  nombre           String
+  createdAt        DateTime @default(now())
+  items            CuratedMovieCollectionItem[]
+}
+
+model CuratedMovieCollectionItem {
+  id           Int      @id @default(autoincrement())
+  collectionId Int
+  tmdbId       Int      // id de la película/serie en TMDB (no siempre estará ya guardado en Media)
+  tipo         String   @default("PELICULA") // "PELICULA" | "SERIE"
+  titulo       String
+  anio         Int?
+  portada      String?
+  orden        Int      @default(0) // controla el orden dentro de la saga (arrastrar y soltar)
+  createdAt    DateTime @default(now())
+
+  collection CuratedMovieCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, tmdbId, tipo]) // un título no puede estar repetido dentro de la misma saga
+}
+
 // Agrupa varias Collections de TMDB (que por separado son sagas sueltas,
 // ej. "Iron Man Collection", "Thor Collection") bajo un universo más
 // grande (ej. "Marvel Cinematic Universe"). Curado a mano, igual que

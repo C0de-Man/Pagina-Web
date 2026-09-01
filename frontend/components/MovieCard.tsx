@@ -22,7 +22,7 @@ export default function MovieCard({ pelicula, dbId, customPoster }: { pelicula: 
       .then((data) => {
         if (data.customPoster) setMiCustomPoster(data.customPoster);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [dbId, customPoster]);
 
   // Href real, siempre resoluble sin JS:
@@ -31,8 +31,14 @@ export default function MovieCard({ pelicula, dbId, customPoster }: { pelicula: 
   //   redirige a su ficha — así el click central / Ctrl+click / "abrir en
   //   pestaña nueva" funcionan como en cualquier enlace normal, sin
   //   necesidad de interceptar el click con JS.
-  const href = dbId ? urlFicha({ ...pelicula, id: dbId }) : `/movie/tmdb/${pelicula.id}`;
-
+  // TMDB marca cada resultado con media_type ('movie' | 'tv') — sin esto,
+  // el enlace siempre apuntaba a la resolvedora de PELÍCULAS aunque fuera
+  // una serie, y como los ids de TMDB para películas y series son espacios
+  // numéricos totalmente distintos, acababa cargando una película random
+  // que compartía ese número (o nada, si no existía ninguna).
+  const tipo = pelicula.media_type === 'tv' ? 'SERIE' : (pelicula.tipo || 'PELICULA');
+  const resolvedorTmdb = tipo === 'SERIE' ? 'series' : 'movie';
+  const href = dbId ? urlFicha({ ...pelicula, tipo, id: dbId }) : `/${resolvedorTmdb}/tmdb/${pelicula.id}`;
   // Magia: Si tienes un póster personalizado (customPoster), usa ese. Si no, usa el
   // ya guardado (item.portada, para items que vienen de tu propia base de datos como
   // listas/perfil) o el de TMDB (poster_path, para resultados de búsqueda en crudo).
@@ -43,9 +49,9 @@ export default function MovieCard({ pelicula, dbId, customPoster }: { pelicula: 
   return (
     <Link href={href} className="flex-shrink-0 w-32 md:w-40 group cursor-pointer relative block">
       {posterUrl ? (
-        <img 
-          src={posterUrl} 
-          alt={titulo} 
+        <img
+          src={posterUrl}
+          alt={titulo}
           className="w-full aspect-[2/3] object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition duration-300 shadow-lg"
         />
       ) : (
