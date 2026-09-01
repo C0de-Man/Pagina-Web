@@ -18,7 +18,11 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
         setLoading(true);
         setErrorMsg('');
         try {
-            const res = await fetch(`http://localhost:3001/steamgriddb/images/${mediaId}`);
+            // "Hide adult content" en Ajustes → Account, activado por
+            // defecto: si no hay nada guardado (null) o vale "true", se
+            // oculta; solo se manda "false" si el usuario lo desactivó a mano.
+            const ocultarNsfw = localStorage.getItem('ocultarNsfw') !== 'false';
+            const res = await fetch(`http://localhost:3001/steamgriddb/images/${mediaId}?ocultarNsfw=${ocultarNsfw}`);
             const data = await res.json();
             setCovers(data.covers || []);
             setHeroes(data.heroes || []);

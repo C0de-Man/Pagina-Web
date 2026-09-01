@@ -763,7 +763,32 @@ async function getIgdbGameCollection(igdbId) {
   // definida a mano.
   const overrideFranquicia = collections.length === 0 ? PALABRA_CLAVE_FRANQUICIA_MANUAL[franchises[0]?.id] : null;
 
-  const nombre = collections[0]?.name || overrideFranquicia?.nombre || franchises[0]?.name || null;
+  // Si el juego pertenece a VARIAS collections de IGDB a la vez, no todas
+  // representan una saga real: algunas son agrupaciones amplias tipo
+  // "Marvel" (todo lo que comparte editorial/universo, sin relación de
+  // precuela/secuela real) que mezclarían títulos sin relación entre sí.
+  // Como saga ESTRICTA elegimos siempre la collection más PEQUEÑA (menos
+  // juegos) de las que tenga este juego — cuanto más concreta es una
+  // collection, menos juegos agrupa; las amplias tipo "Marvel" tienen decenas.
+  let collectionElegida = collections[0] || null;
+  if (collections.length > 1) {
+    const conteos = await Promise.all(
+      collections.map((c) =>
+        fetchIgdb('https://api.igdb.com/v4/games/count', {
+          method: 'POST',
+          headers,
+          body: `where collections = (${c.id});`,
+        }).then((r) => r.json()).catch(() => ({ count: Infinity }))
+      )
+    );
+    let mejorIdx = 0;
+    for (let i = 1; i < collections.length; i++) {
+      if ((conteos[i]?.count ?? Infinity) < (conteos[mejorIdx]?.count ?? Infinity)) mejorIdx = i;
+    }
+    collectionElegida = collections[mejorIdx];
+  }
+
+  const nombre = collectionElegida?.name || overrideFranquicia?.nombre || franchises[0]?.name || null;
   if (!nombre) return null;
 
   // Paso 2: pedimos los juegos de esas collections/franchises con consultas
@@ -794,7 +819,7 @@ async function getIgdbGameCollection(igdbId) {
   // Franchise solo se usa como red de seguridad cuando el juego NO tiene
   // ninguna Collection propia — así sagas curadas por IGDB (Collection) se
   // mantienen separadas de franquicias genéricas por marca (Franchise).
-  const collectionIds = collections.map((c) => c.id);
+  const collectionIds = collectionElegida ? [collectionElegida.id] : [];
   const franchiseIds = collectionIds.length === 0 ? franchises.map((f) => f.id) : [];
 
   const [respColecciones, respFranquicias] = await Promise.all([
@@ -869,8 +894,9 @@ const VINCULACIONES_MANUALES = {
 // hay forma automática de detectar esto, se añade a mano el igdbId de lo
 // que se vaya viendo que no pinta nada en la franquicia.
 const EXCLUSIONES_FRANQUICIA_MANUAL = new Set([
-  123456, // Marvel Heroes: 007 - Character: Iron Man
-  789012, // Super Smash Bros. Ultimate: Iron Man Moveset
+  123456, // Marvel: Ultimate Alliance
+  789012, // Marvel: Ultimate Alliance 2
+  345678, // LEGO Marvel Super Heroes
 ]);
 
 async function getIgdbDlcsUpdates(igdbId) {
@@ -1836,20 +1862,12 @@ async function buscarJuegoEnSteamGridDBFlexible(nombre) {
 // devolviendo siempre 50 resultados sin parar nunca — en la práctica, para
 // cualquier juego real, esto siempre se para solo mucho antes de llegar ahí.
 const SGDB_MAX_PAGINAS_SEGURIDAD = 60;
-async function obtenerTodasLasGridsSteamGridDB(sgdbId, headers) {
+async function obtenerTodasLasGridsSteamGridDB(sgdbId, headers, ocultarNsfw) {
   let todas = [];
+  const nsfwParam = ocultarNsfw ? 'false' : 'any';
   for (let pagina = 0; pagina < SGDB_MAX_PAGINAS_SEGURIDAD; pagina++) {
     const resp = await fetch(
-      // Sin restricción de dimensiones ni de tipo (se piden también todas
-      // las animadas), y nsfw/humor/epilepsy en "any" para no filtrar nada.
-      // nsfw=any&humor=any&epilepsy=any: por defecto SteamGridDB filtra estas
-      // etiquetas; aquí se piden todas, sin descartar ninguna por su tag.
-      // Sin filtro de dimensiones (antes solo 600x900/342x482/660x930,
-      // descartando carátulas en otros tamaños válidos como 920x430 o
-      // 1024x1024) ni de tipo (incluye animadas) — nsfw/humor/epilepsy en
-      // "any" para no descartar tampoco por etiqueta. Se pide literalmente
-      // todo lo que haya, a petición explícita.
-      `https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?types=static,animated&nsfw=any&humor=any&epilepsy=any&page=${pagina}`,
+      `https://www.steamgriddb.com/api/v2/grids/game/${sgdbId}?types=static,animated&nsfw=${nsfwParam}&humor=any&epilepsy=any&page=${pagina}`,
       { headers }
     );
     const data = await resp.json();
@@ -1873,6 +1891,11 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
     const media = await prisma.media.findUnique({ where: { id: mediaId } });
     if (!media) return res.status(404).json({ error: 'No encontrado' });
 
+    // El frontend manda ?ocultarNsfw=true/false según la preferencia
+    // guardada del usuario (activada por defecto). Cualquier valor que no
+    // sea explícitamente "false" se trata como "sí, ocultar".
+    const ocultarNsfw = req.query.ocultarNsfw !== 'false';
+
     // Si hay una vinculación manual para este juego, nos la saltamos y
     // usamos ese ID directamente — si no, buscamos por nombre como siempre.
     const sgdbId = SGDB_MANUAL[media.igdbId] || (await buscarJuegoEnSteamGridDB(media.tituloOriginal || media.titulo, media.anio));
@@ -1887,10 +1910,11 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
       // la comunidad en otros tamaños verticales habituales (342x482,
       // 660x930) y ninguna en 600x900 concretamente, lo que dejaba la
       // pestaña "Carátula" vacía aunque SÍ hubiera opciones disponibles.
-      covers = await obtenerTodasLasGridsSteamGridDB(sgdbId, headers);
+      covers = await obtenerTodasLasGridsSteamGridDB(sgdbId, headers, ocultarNsfw);
 
       // "heroes" = imagen ancha tipo banner (mismos filtros que las carátulas)
-      const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}?types=static,animated&nsfw=any&humor=any&epilepsy=any`, { headers });
+      const nsfwParamHeroes = ocultarNsfw ? 'false' : 'any';
+      const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}?types=static,animated&nsfw=${nsfwParamHeroes}&humor=any&epilepsy=any`, { headers });
       const dataHeroes = await resHeroes.json();
       // LOG TEMPORAL DE DIAGNÓSTICO — quitar cuando encontremos la causa.
       const heroesData = dataHeroes?.data || [];
@@ -1908,7 +1932,7 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
     if (covers.length === 0) {
       const sgdbIdAlternativo = await buscarJuegoEnSteamGridDBFlexible(media.tituloOriginal || media.titulo);
       if (sgdbIdAlternativo && sgdbIdAlternativo !== sgdbId) {
-        covers = await obtenerTodasLasGridsSteamGridDB(sgdbIdAlternativo, headers);
+        covers = await obtenerTodasLasGridsSteamGridDB(sgdbIdAlternativo, headers, ocultarNsfw);
       }
     }
 
@@ -1957,19 +1981,15 @@ app.post('/media/igdb', async (req, res) => {
     const { igdbId } = req.body;
 
     // Si este juego ya está guardado, devolvemos la fila que ya existe tal
-    // cual — sin volver a preguntarle nada a IGDB/SteamGridDB. Esto es
-    // importante: sin esta comprobación, cada vez que se navegaba a un juego
-    // (p. ej. desde precuela/secuela en la saga) se creaba una fila NUEVA en
-    // la base de datos con la carátula/banner por defecto de IGDB, en vez de
-    // reutilizar la que ya tenías — así que cualquier carátula personalizada
-    // que hubieras elegido a mano se "perdía" (en realidad no se borraba,
-    // pero acababas viendo una fila duplicada distinta, con la de IGDB).
+    // cual — sin volver a preguntarle nada a IGDB/SteamGridDB.
     const existente = await prisma.media.findFirst({ where: { igdbId: parseInt(igdbId, 10) } });
     if (existente) return res.json(existente);
 
     const token = await getIgdbToken();
 
-    const body = `fields name,cover.url,first_release_date,summary; where id = ${igdbId};`;
+    // parent_game se pide para poder heredar el banner del juego base
+    // cuando esto sea un DLC/update/expansión sin banner propio disponible.
+    const body = `fields name,cover.url,first_release_date,summary,parent_game.id,parent_game.name; where id = ${igdbId};`;
     const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
@@ -2008,6 +2028,38 @@ app.post('/media/igdb', async (req, res) => {
       }
     } catch (e) {
       console.error('No se pudo obtener banner de SteamGridDB para', juego.name, e);
+    }
+
+    // Si sigue sin banner y esto es un DLC/update/expansión (tiene
+    // parent_game), heredamos el banner del juego base: primero miramos si
+    // ya está guardado en nuestra base de datos (más rápido, sin más
+    // peticiones), y si no, lo buscamos igual que arriba pero con el
+    // nombre/id del juego base.
+    if (!backdropUrl && juego.parent_game) {
+      try {
+        const baseGuardado = await prisma.media.findFirst({
+          where: { igdbId: juego.parent_game.id },
+          select: { backdrop: true },
+        });
+        if (baseGuardado?.backdrop) {
+          backdropUrl = baseGuardado.backdrop;
+        } else {
+          const sgdbIdBase = await buscarJuegoEnSteamGridDB(juego.parent_game.name);
+          if (sgdbIdBase) {
+            const resHeroesBase = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbIdBase}`, {
+              headers: { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` }
+            });
+            const dataHeroesBase = await resHeroesBase.json();
+            backdropUrl = dataHeroesBase?.data?.[0]?.url || null;
+          }
+          if (!backdropUrl) {
+            const artworksBase = await obtenerArtworksIgdb(juego.parent_game.id);
+            backdropUrl = artworksBase[0] || null;
+          }
+        }
+      } catch (e) {
+        console.error('No se pudo heredar banner del juego base para', juego.name, e);
+      }
     }
 
     const nuevoMedia = await prisma.media.create({
@@ -2853,6 +2905,19 @@ app.post('/admin/cinematic-universes/:universeId/reset', requireAuth, requireAdm
 // (Ghost Rider, Spider-Man 3, Fantastic Four de Sony/Fox, etc.). Encuentras
 // el id del keyword en la URL de la página, tipo:
 // themoviedb.org/keyword/180547-marvel-cinematic-universe-mcu/movie
+// --- IMPORTAR UN UNIVERSO ENTERO POR KEYWORD DE TMDB (siembra masiva, más precisa que por productora) ---
+// TMDB tiene "keywords" curadas a mano por la comunidad, como "marvel
+// cinematic universe (mcu)" (id 180547, 82 películas exactas) — mucho más
+// preciso que filtrar por productora, que arrastra películas de otros
+// estudios que casualmente tienen "Marvel" en el nombre de la productora
+// (Ghost Rider, Spider-Man 3, Fantastic Four de Sony/Fox, etc.). Encuentras
+// el id del keyword en la URL de la página, tipo:
+// themoviedb.org/keyword/180547-marvel-cinematic-universe-mcu/movie
+//
+// Se consulta tanto discover/movie como discover/tv con el mismo keyword id
+// (TMDB usa el mismo id de keyword para ambos): un universo como el MCU
+// tiene tanto películas como series (Loki, Agents of S.H.I.E.L.D....) bajo
+// el mismo keyword, y antes solo se traían las películas.
 app.post('/admin/cinematic-universes/:universeId/import-by-keyword', requireAuth, requireAdmin, async (req, res) => {
   try {
     const universeId = parseInt(req.params.universeId);
@@ -2861,18 +2926,30 @@ app.post('/admin/cinematic-universes/:universeId/import-by-keyword', requireAuth
 
     const apiKey = process.env.TMDB_API_KEY;
 
-    let peliculas = [];
-    let pagina = 1;
-    let totalPaginas = 1;
-    do {
-      const r = await fetch(
-        `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&with_keywords=${tmdbKeywordId}&sort_by=primary_release_date.asc&page=${pagina}`
-      );
-      const d = await r.json();
-      peliculas.push(...(d.results || []));
-      totalPaginas = d.total_pages || 1;
-      pagina++;
-    } while (pagina <= totalPaginas && pagina <= 10);
+    // Trae todas las páginas de un tipo (movie o tv) para un keyword dado.
+    // Tope de seguridad en 10 páginas (200 resultados), igual que ya se
+    // hacía antes para películas.
+    const traerTodasLasPaginas = async (tipoTmdb) => {
+      let items = [];
+      let pagina = 1;
+      let totalPaginas = 1;
+      do {
+        const r = await fetch(
+          `https://api.themoviedb.org/3/discover/${tipoTmdb}?api_key=${apiKey}&with_keywords=${tmdbKeywordId}&sort_by=${tipoTmdb === 'movie' ? 'primary_release_date.asc' : 'first_air_date.asc'}&page=${pagina}`
+        );
+        const d = await r.json();
+        items.push(...(d.results || []).map((item) => ({ ...item, __tipoTmdb: tipoTmdb })));
+        totalPaginas = d.total_pages || 1;
+        pagina++;
+      } while (pagina <= totalPaginas && pagina <= 10);
+      return items;
+    };
+
+    const [peliculas, series] = await Promise.all([
+      traerTodasLasPaginas('movie'),
+      traerTodasLasPaginas('tv'),
+    ]);
+    const todosLosItems = [...peliculas, ...series];
 
     const existentes = await prisma.cinematicUniverseItem.findMany({
       where: { universeId },
@@ -2883,14 +2960,19 @@ app.post('/admin/cinematic-universes/:universeId/import-by-keyword', requireAuth
     const ordenPorPestaña = {};
     let añadidos = 0;
 
-    for (const p of peliculas) {
+    for (const p of todosLosItems) {
       if (idsExistentes.has(p.id)) continue;
 
       let pestaña = 'Other';
       try {
-        const detR = await fetch(`https://api.themoviedb.org/3/movie/${p.id}?api_key=${apiKey}`);
-        const det = await detR.json();
-        if (det.belongs_to_collection?.name) pestaña = det.belongs_to_collection.name;
+        // belongs_to_collection solo existe en el endpoint de detalle de
+        // PELÍCULAS de TMDB — las series no tienen ese concepto, así que se
+        // quedan directamente en "Other" salvo que se reasignen a mano.
+        if (p.__tipoTmdb === 'movie') {
+          const detR = await fetch(`https://api.themoviedb.org/3/movie/${p.id}?api_key=${apiKey}`);
+          const det = await detR.json();
+          if (det.belongs_to_collection?.name) pestaña = det.belongs_to_collection.name;
+        }
       } catch (e) {
         // si falla la consulta de detalle, se queda en "Other"
       }
@@ -2903,13 +2985,17 @@ app.post('/admin/cinematic-universes/:universeId/import-by-keyword', requireAuth
         ordenPorPestaña[pestaña] = (max._max.orden ?? -1) + 1;
       }
 
+      const titulo = p.__tipoTmdb === 'movie' ? p.title : p.name;
+      const fechaTexto = p.__tipoTmdb === 'movie' ? p.release_date : p.first_air_date;
+
       await prisma.cinematicUniverseItem.create({
         data: {
           universeId,
           tmdbId: p.id,
-          titulo: p.title,
-          anio: p.release_date ? new Date(p.release_date).getFullYear() : null,
-          fechaEstreno: p.release_date ? new Date(p.release_date) : null,
+          tipo: p.__tipoTmdb === 'movie' ? 'PELICULA' : 'SERIE',
+          titulo,
+          anio: fechaTexto ? new Date(fechaTexto).getFullYear() : null,
+          fechaEstreno: fechaTexto ? new Date(fechaTexto) : null,
           portada: p.poster_path ? `https://image.tmdb.org/t/p/w780${p.poster_path}` : null,
           pestaña,
           orden: ordenPorPestaña[pestaña]++,
@@ -2925,13 +3011,12 @@ app.post('/admin/cinematic-universes/:universeId/import-by-keyword', requireAuth
       create: { universeId, tipo: 'keyword', tmdbId: parseInt(tmdbKeywordId) },
     });
 
-    res.json({ añadidos, total: peliculas.length });
+    res.json({ añadidos, total: todosLosItems.length });
   } catch (error) {
     console.error('ERROR EN POST /admin/cinematic-universes/:universeId/import-by-keyword:', error);
     res.status(500).json({ error: 'Error al importar por keyword' });
   }
 });
-
 // --- REFRESCAR UN UNIVERSO A MANO (vuelve a comprobar TODAS sus fuentes guardadas) ---
 // Revisa cada colección/productora/keyword que se usó alguna vez para
 // sembrar este universo y añade lo que sea nuevo. Nunca borra ni reordena
@@ -4294,7 +4379,7 @@ async function buscarOrdenNarrativoWikidata(imdbId) {
 // Igual que construirRespuestaDesdeCurated para juegos: agrupa los items ya
 // guardados de un universo por su "pestaña" (nombre de la sub-colección de
 // TMDB, o "Other" para añadidos sueltos a mano).
-async function construirRespuestaUniverso(tmdbId) {
+async function construirRespuestaUniverso(tmdbId, idioma) {
   const itemExistente = await prisma.cinematicUniverseItem.findFirst({
     where: { tmdbId },
     select: { universeId: true },
@@ -4310,8 +4395,36 @@ async function construirRespuestaUniverso(tmdbId) {
   });
   if (!universe) return null;
 
+  // Los títulos se GUARDAN siempre en inglés a propósito al importar (igual
+  // que las carátulas, para que las fases se vean consistentes entre sí sin
+  // importar en qué idioma se sembró el universo) — pero al MOSTRARLOS sí
+  // deben respetar tu idioma, como en el resto de la app. Se pide el título
+  // real en tu idioma para cada item, sin tocar lo guardado en la base de
+  // datos. Si tu idioma ya es inglés, nos ahorramos todas estas peticiones.
+  let items = universe.items;
+  if (idioma && !idioma.startsWith('en')) {
+    const apiKey = process.env.TMDB_API_KEY;
+    const traducidos = await Promise.all(
+      items.map(async (item) => {
+        try {
+          const endpointTmdb = item.tipo === 'SERIE' ? 'tv' : 'movie';
+          const r = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${item.tmdbId}?api_key=${apiKey}&language=${idioma}`);
+          const d = await r.json();
+          const tituloTraducido = d.title || d.name;
+          if (tituloTraducido && tituloTraducido.trim()) {
+            return { ...item, titulo: tituloTraducido };
+          }
+          return item;
+        } catch (e) {
+          return item; // si falla para uno solo, se queda con el título en inglés
+        }
+      })
+    );
+    items = traducidos;
+  }
+
   const pestañasMap = new Map();
-  for (const item of universe.items) {
+  for (const item of items) {
     if (!pestañasMap.has(item.pestaña)) pestañasMap.set(item.pestaña, []);
     pestañasMap.get(item.pestaña).push(item);
   }
@@ -4333,7 +4446,7 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
     const movieData = await movieRes.json();
 
     if (!movieData.belongs_to_collection) {
-      const universoSuelto = await construirRespuestaUniverso(parseInt(tmdbId));
+      const universoSuelto = await construirRespuestaUniverso(parseInt(tmdbId), getLang(req))
       return res.json({ prequel: null, sequel: null, nombreColeccion: null, collectionId: null, parts: [], universo: universoSuelto });
     }
 
@@ -4343,7 +4456,7 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
     // universo? Se mira por tmdbId directo, no por collectionId — así
     // también funcionan películas sueltas añadidas a mano a "Other" que no
     // pertenecen a ninguna Collection real de TMDB.
-    const universo = await construirRespuestaUniverso(parseInt(tmdbId));
+    const universo = await construirRespuestaUniverso(parseInt(tmdbId), getLang(req));
 
     const colRes = await fetch(`https://api.themoviedb.org/3/collection/${collectionId}?api_key=${apiKey}&language=${getLang(req)}`);
     const colData = await colRes.json();
@@ -4419,7 +4532,7 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
 app.get('/tmdb/tv/:tmdbId/universe', async (req, res) => {
   try {
     const { tmdbId } = req.params;
-    const universo = await construirRespuestaUniverso(parseInt(tmdbId));
+    const universo = await construirRespuestaUniverso(parseInt(tmdbId), getLang(req));
     res.json({ prequel: null, sequel: null, nombreColeccion: null, collectionId: null, parts: [], universo });
   } catch (error) {
     console.error('Error al obtener el universo de la serie:', error);
@@ -5574,6 +5687,93 @@ app.patch('/auth/me/avatar', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('ERROR EN PATCH /auth/me/avatar:', error);
     res.status(500).json({ error: 'Error al actualizar el avatar' });
+  }
+});
+
+// --- CAMBIAR MI USERNAME ---
+app.patch('/auth/me/username', requireAuth, async (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username || !username.trim()) {
+      return res.status(400).json({ error: 'El nombre de usuario no puede estar vacío' });
+    }
+    const user = await prisma.user.update({
+      where: { id: req.userId },
+      data: { username: username.trim() },
+    });
+    const { password: _, ...userSinPassword } = user;
+    res.json(userSinPassword);
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'Ese nombre de usuario ya está en uso' });
+    }
+    console.error('ERROR EN PATCH /auth/me/username:', error);
+    res.status(500).json({ error: 'Error al actualizar el nombre de usuario' });
+  }
+});
+
+// --- CAMBIAR MI EMAIL Y/O CONTRASEÑA ---
+// Exige la contraseña ACTUAL como confirmación, aunque solo se vaya a
+// cambiar el email — evita que alguien con la sesión abierta (pero sin
+// saber la contraseña real) pueda secuestrar la cuenta cambiando el email
+// de recuperación.
+app.patch('/auth/me/credentials', requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newEmail, newPassword } = req.body;
+    if (!currentPassword) {
+      return res.status(400).json({ error: 'Introduce tu contraseña actual' });
+    }
+    if (!newEmail && !newPassword) {
+      return res.status(400).json({ error: 'No hay nada que cambiar' });
+    }
+    if (newPassword && newPassword.length < 6) {
+      return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: req.userId } });
+    const passwordValida = await bcrypt.compare(currentPassword, user.password);
+    if (!passwordValida) {
+      return res.status(401).json({ error: 'Tu contraseña actual no es correcta' });
+    }
+
+    const data = {};
+    if (newEmail) data.email = newEmail.trim();
+    if (newPassword) data.password = await bcrypt.hash(newPassword, 10);
+
+    const actualizado = await prisma.user.update({ where: { id: req.userId }, data });
+    const { password: _, ...userSinPassword } = actualizado;
+    res.json(userSinPassword);
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'Ese email ya está en uso' });
+    }
+    console.error('ERROR EN PATCH /auth/me/credentials:', error);
+    res.status(500).json({ error: 'Error al actualizar tus credenciales' });
+  }
+});
+
+// --- REINICIAR MI CUENTA (solo admin): borra TODA la actividad guardada
+// (visto/watchlist/likes/notas, logs, favoritos, listas, follows,
+// notificaciones) pero conserva email, username, contraseña y avatar. ---
+app.post('/auth/me/reset-account', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await prisma.$transaction([
+      prisma.gameLog.deleteMany({ where: { userId: req.userId } }),
+      prisma.watchLog.deleteMany({ where: { userId: req.userId } }),
+      prisma.userEpisodeWatch.deleteMany({ where: { userId: req.userId } }),
+      prisma.userSeasonWatch.deleteMany({ where: { userId: req.userId } }),
+      prisma.userMedia.deleteMany({ where: { userId: req.userId } }),
+      prisma.favorite.deleteMany({ where: { userId: req.userId } }),
+      prisma.listItem.deleteMany({ where: { list: { userId: req.userId } } }),
+      prisma.listLike.deleteMany({ where: { userId: req.userId } }),
+      prisma.list.deleteMany({ where: { userId: req.userId } }),
+      prisma.follow.deleteMany({ where: { OR: [{ followerId: req.userId }, { followingId: req.userId }] } }),
+      prisma.notification.deleteMany({ where: { userId: req.userId } }),
+    ]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN POST /auth/me/reset-account:', error);
+    res.status(500).json({ error: 'Error al reiniciar la cuenta' });
   }
 });
 
