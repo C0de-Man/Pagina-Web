@@ -1713,27 +1713,47 @@ async function buscarJuegoEnSteamGridDB(nombre, anio) {
   });
   const data = await res.json();
 
-  // El autocomplete de SteamGridDB es difuso: si no tiene el juego exacto
-  // (habitual en títulos muy nuevos o aún sin salir), devuelve "parecidos"
-  // en vez de nada — p. ej. "Code Violet" -> "Code of Princess". Antes
-  // aceptábamos igualmente el primer resultado; ahora exigimos que el
-  // nombre coincida EXACTAMENTE (normalizado) para no mezclar carátulas
-  // de un juego distinto.
   const normalizar = (s) =>
     (s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, ' ').trim()
       .split(' ').map(canonicalizarNumero).join(' ');
   const nombreNormalizado = normalizar(nombre);
-  const candidatos = (data?.data || [])
-    .filter((c) => normalizar(c.name) === nombreNormalizado)
-    .slice(0, 5);
+  const palabrasNombre = nombreNormalizado.split(' ').filter(Boolean);
+
+  const todos = data?.data || [];
+
+  // Candidatos con nombre EXACTO (caso normal, sin ambigüedad).
+  const exactos = todos.filter((c) => normalizar(c.name) === nombreNormalizado);
+
+  // Candidatos con SUFIJO (ediciones/subtítulos distintos, como "The
+  // Incredible Hulk: The Official Videogame" para "The Incredible Hulk") —
+  // mismo criterio de prefijo que ya usa buscarJuegoEnSteamGridDBFlexible.
+  // Antes solo se probaban como último recurso si la búsqueda exacta no
+  // encontraba NADA; ahora se incluyen desde el principio para poder
+  // compararlos por año junto con los exactos, y así no perder frente a un
+  // "exacto" que en realidad es un juego distinto con el mismo nombre.
+  const conSufijo = todos.filter((c) => {
+    const palabrasCandidato = normalizar(c.name).split(' ').filter(Boolean);
+    if (palabrasCandidato.length <= palabrasNombre.length) return false; // ya está en "exactos" o es más corto
+    const n = Math.min(4, palabrasNombre.length, palabrasCandidato.length);
+    if (n < 2) return false;
+    for (let i = 0; i < n; i++) {
+      if (palabrasNombre[i] !== palabrasCandidato[i]) return false;
+    }
+    return true;
+  });
+
+  const idsExactos = new Set(exactos.map((c) => c.id));
+  const candidatos = [...exactos, ...conSufijo.filter((c) => !idsExactos.has(c.id))].slice(0, 10);
 
   if (candidatos.length === 0) return null;
   if (candidatos.length === 1 || !anio) return candidatos[0].id;
 
-  // Cuando hay varios juegos con el mismo nombre (remakes/reboots, como
-  // "Marathon" 1994 vs "Marathon" 2026), comprobamos el año de lanzamiento de
-  // cada candidato en SteamGridDB y nos quedamos con el que coincide con el
-  // año que ya tenemos guardado para este juego.
+  // Con varios candidatos (mismo nombre exacto, o exacto + con sufijo),
+  // comprobamos el año real de cada uno en SteamGridDB y nos quedamos
+  // SIEMPRE con el más cercano al año que ya tenemos guardado — sea cual
+  // sea la diferencia, en vez de exigir un margen fijo y rendirnos si
+  // ninguno lo cumple (eso hacía caer al primero de la lista sin mirar el
+  // año en absoluto).
   const detalles = await Promise.all(
     candidatos.map((c) =>
       fetch(`https://www.steamgriddb.com/api/v2/games/id/${c.id}`, {
@@ -1742,16 +1762,22 @@ async function buscarJuegoEnSteamGridDB(nombre, anio) {
     )
   );
 
-  // Comparación con ±1 año de margen: es habitual que SteamGridDB e IGDB no
-  // coincidan exactamente en la fecha de lanzamiento de juegos muy nuevos o
-  // todavía sin fecha cerrada (uno la tiene como "anunciado 2025", el otro
-  // como "2026" tras un retraso).
-  const coincidencia = detalles.find((d) => {
-    const anioSgdb = d?.data?.release_date ? new Date(d.data.release_date * 1000).getFullYear() : null;
-    return anioSgdb !== null && Math.abs(anioSgdb - anio) <= 1;
-  });
+  const conAnio = candidatos
+    .map((c, i) => {
+      const anioSgdb = detalles[i]?.data?.release_date
+        ? new Date(detalles[i].data.release_date * 1000).getFullYear()
+        : null;
+      return { id: c.id, anioSgdb };
+    })
+    .filter((c) => c.anioSgdb !== null);
 
-  return coincidencia ? coincidencia.data.id : candidatos[0].id;
+  if (conAnio.length === 0) return candidatos[0].id;
+
+  const masCercano = conAnio.reduce((mejor, actual) =>
+    Math.abs(actual.anioSgdb - anio) < Math.abs(mejor.anioSgdb - anio) ? actual : mejor
+  );
+
+  return masCercano.id;
 }
 
 // --- BÚSQUEDA DE RESPALDO EN STEAMGRIDDB, MÁS FLEXIBLE ---
