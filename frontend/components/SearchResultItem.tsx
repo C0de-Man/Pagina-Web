@@ -3,17 +3,23 @@ import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { urlFicha } from '@/lib/slug';
 
-export default function SearchResultItem({ item, dbId, customPoster }: { item: any, dbId: number | null, customPoster: string | null }) {
+export default function SearchResultItem({ item, dbId, portadaCompartida }: { item: any, dbId: number | null, portadaCompartida: string | null }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const esJuego = item.media_type === 'juego';
-  // Mismo patrón que MovieCard/GameCard: si no nos pasan un customPoster
-  // explícito y el título ya está guardado (dbId), lo comprobamos nosotros
-  // mismos tras montarnos, en el navegador, donde sí hay acceso al token.
-  const [miCustomPoster, setMiCustomPoster] = useState<string | null>(customPoster);
+  // portadaCompartida es la carátula COMPARTIDA (Media.portada) — sirve de
+  // valor por defecto mientras no sabemos si tienes una personalización
+  // propia. miCustomPoster empieza en null (nunca la personalización real,
+  // que solo se puede saber en el navegador con tu token) y se rellena tras
+  // consultar tu estado real en el useEffect de abajo. Antes se pasaba la
+  // carátula compartida COMO SI fuera tu personalización (como "customPoster"),
+  // lo que hacía que este useEffect nunca llegara a comprobar tu carátula de
+  // verdad — por eso cambiar la carátula de un juego a mano nunca se veía
+  // reflejado en el buscador general.
+  const [miCustomPoster, setMiCustomPoster] = useState<string | null>(null);
 
   useEffect(() => {
-    if (customPoster || !dbId) return;
+    if (!dbId) return;
     const token = localStorage.getItem('token');
     if (!token) return;
     fetch(`http://localhost:3001/media/${dbId}/status`, {
@@ -24,7 +30,7 @@ export default function SearchResultItem({ item, dbId, customPoster }: { item: a
         if (data.customPoster) setMiCustomPoster(data.customPoster);
       })
       .catch(() => {});
-  }, [dbId, customPoster]);
+  }, [dbId]);
 
   const handleClick = async () => {
     if (loading) return;
@@ -60,13 +66,16 @@ export default function SearchResultItem({ item, dbId, customPoster }: { item: a
     }
   };
 
-  const posterUrl = miCustomPoster || (esJuego ? item.cover?.url : (item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : null));
+  // Orden de prioridad: 1) tu personalización real (miCustomPoster) > 2) la
+  // carátula compartida ya guardada (portadaCompartida) > 3) lo que traiga
+  // TMDB/IGDB en crudo para este resultado de búsqueda.
+  const posterUrl = miCustomPoster || portadaCompartida || (esJuego ? item.cover?.url : (item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : null));
   const title = esJuego ? item.name : (item.title || item.name);
   const year = esJuego
     ? (item.first_release_date ? new Date(item.first_release_date * 1000).getFullYear() : '')
     : (item.release_date ? item.release_date.split('-')[0] : (item.first_air_date ? item.first_air_date.split('-')[0] : ''));
   const descripcion = esJuego ? item.summary : item.overview;
-  const etiqueta = item.media_type === 'movie' ? 'PELÍCULA' : item.media_type === 'tv' ? 'SERIE' : esJuego ? 'JUEGO' : 'OTRO';
+  const etiqueta = item.media_type === 'movie' ? 'MOVIE' : item.media_type === 'tv' ? 'SERIES' : esJuego ? 'GAME' : 'OTHER';
 
   return (
     <div onClick={handleClick} className={`flex gap-4 group cursor-pointer transition ${loading ? 'opacity-50 blur-sm' : ''}`}>

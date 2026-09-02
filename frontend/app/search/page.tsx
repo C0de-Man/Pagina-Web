@@ -56,7 +56,13 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       : myDb.find((m: any) => m.tmdbId === item.id && m.tipo === tipoEsperado);
     return {
       dbId: local ? local.id : null,
-      customPoster: local?.portada || null
+      // OJO: esto es la carátula COMPARTIDA (Media.portada), NO tu
+      // personalización — antes se llamaba "customPoster" y SearchResultItem
+      // la confundía con tu personalización real, lo que le hacía saltarse
+      // por completo la comprobación de tu carátula de verdad (por eso
+      // cambiar la carátula de un juego a mano nunca se veía reflejado
+      // aquí, en el buscador general).
+      portadaCompartida: local?.portada || null
     };
   };
   const resultadosFiltrados = tipoActivo === 'all'
@@ -80,13 +86,13 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               <p className="text-gray-400">No se encontraron resultados.</p>
             ) : (
               resultadosFiltrados.map((item: any) => {
-                const { dbId, customPoster } = getLocalData(item);
+                const { dbId, portadaCompartida } = getLocalData(item);
                 return (
                   <SearchResultItem
                     key={`${item.media_type}-${item.id}`}
                     item={item}
                     dbId={dbId}
-                    customPoster={customPoster}
+                    portadaCompartida={portadaCompartida}
                   />
                 );
               })
