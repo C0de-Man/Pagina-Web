@@ -1,9 +1,14 @@
+import { cookies } from 'next/headers';
 import MovieCard from '@/components/MovieCard';
 import MovieFiltersSidebar from '@/components/MovieFiltersSidebar';
 import Link from 'next/link';
 
 export default async function TodasLasPeliculas({ searchParams }: { searchParams: Promise<{ page?: string; tipo?: string; anio?: string; ratingMin?: string; ratingMax?: string; duracion?: string; orden?: string }> }) {
   const currentYear = new Date().getFullYear();
+
+  const cookieStore = await cookies();
+  const idioma = cookieStore.get('idioma')?.value || 'es-ES';
+  const region = cookieStore.get('region')?.value || 'ES';
 
   const resolvedParams = await searchParams;
   const currentPage = parseInt(resolvedParams.page || '1');
@@ -20,17 +25,22 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
   if (resolvedParams.duracion) filtros.set('duracion', resolvedParams.duracion);
   if (resolvedParams.orden) filtros.set('orden', resolvedParams.orden);
 
-  // Los filtros que le importan al BACKEND (año/rating/duración/orden). El año
-  // también se manda aquí (aunque en modo "Movies {año}" ya va implícito en
-  // la propia URL de la ruta) porque en modo Popular es la ÚNICA forma de
-  // que el backend sepa que hay que filtrar por año.
+  // Los filtros que le importan al BACKEND (idioma/región/año/rating/duración/orden).
+  // idioma/región faltaban antes: sin ellos, getLang()/getRegion() en el backend
+  // caían siempre a su valor por defecto ('es-ES'/'ES'), así que esta página
+  // ignoraba por completo el idioma configurado en Ajustes. El año también se
+  // manda aquí (aunque en modo "Movies {año}" ya va implícito en la propia URL
+  // de la ruta) porque en modo Popular es la ÚNICA forma de que el backend sepa
+  // que hay que filtrar por año.
   const filtrosBackend = new URLSearchParams();
+  filtrosBackend.set('language', idioma);
+  filtrosBackend.set('region', region);
   if (resolvedParams.anio) filtrosBackend.set('anio', resolvedParams.anio);
   if (resolvedParams.ratingMin) filtrosBackend.set('ratingMin', resolvedParams.ratingMin);
   if (resolvedParams.ratingMax) filtrosBackend.set('ratingMax', resolvedParams.ratingMax);
   if (resolvedParams.duracion) filtrosBackend.set('duracion', resolvedParams.duracion);
   if (resolvedParams.orden) filtrosBackend.set('orden', resolvedParams.orden);
-  const sufijoBackend = filtrosBackend.toString() ? `?${filtrosBackend.toString()}` : '';
+  const sufijoBackend = `?${filtrosBackend.toString()}`;
 
   // Según de dónde vengamos, pedimos el catálogo del año (el elegido en el
   // filtro, o el actual por defecto) o el histórico de populares
