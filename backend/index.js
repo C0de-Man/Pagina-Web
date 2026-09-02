@@ -7014,12 +7014,20 @@ app.get('/media/:id/rating', async (req, res) => {
 
     let externaAvg = null;
     let externaPeso = 0; // número real de votos que respaldan esa media externa
-    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true, igdbId: true } });
+    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true, igdbId: true, tipo: true } });
 
     if (media?.tmdbId) {
       try {
         const apiKey = process.env.TMDB_API_KEY;
-        const tmdbRes = await fetch(`https://api.themoviedb.org/3/movie/${media.tmdbId}?api_key=${apiKey}`);
+        // OJO: esto siempre pedía a /movie/, aunque fuera una serie — con un
+        // tmdbId de serie eso da 404 en TMDB, así que vote_average/vote_count
+        // salían vacíos y la serie se quedaba sin nota externa con la que
+        // ponderar tu voto. Resultado: series sin nota mostrada, y al votar
+        // una, tu voto solo contaba consigo mismo (sin los miles de votos
+        // reales de TMDB detrás), haciendo que la media saltara mucho más
+        // que en una película con el mismo voto tuyo.
+        const endpointTmdb = media.tipo === 'SERIE' ? 'tv' : 'movie';
+        const tmdbRes = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${media.tmdbId}?api_key=${apiKey}`);
         const tmdbData = await tmdbRes.json();
         if (tmdbData.vote_average) {
           externaAvg = tmdbData.vote_average;
