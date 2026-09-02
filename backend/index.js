@@ -4707,18 +4707,25 @@ async function buscarOrdenNarrativoWikidata(imdbId) {
   }
 }
 
-// Igual que construirRespuestaDesdeCurated para juegos: agrupa los items ya
-// guardados de un universo por su "pestaña" (nombre de la sub-colección de
-// TMDB, o "Other" para añadidos sueltos a mano).
-async function construirRespuestaUniverso(tmdbId, idioma) {
-  const itemExistente = await prisma.cinematicUniverseItem.findFirst({
-    where: { tmdbId },
-    select: { universeId: true },
-  });
-  if (!itemExistente) return null;
+// Ahora acepta un universeId forzado opcional: cuando una película
+// pertenece a VARIOS universos a la vez (p. ej. "AVP: Alien vs. Predator"
+// metida a mano tanto en "Aliens" como en "Predator"), antes se usaba
+// findFirst y solo se mostraba el primero que la BD devolviera — el resto
+// quedaba invisible. Con el universeId forzado, construirRespuestaUniversos
+// (ver más abajo) puede pedir la respuesta de CADA universo por separado.
+async function construirRespuestaUniverso(tmdbId, idioma, universeIdForzado) {
+  let universeId = universeIdForzado;
+  if (!universeId) {
+    const itemExistente = await prisma.cinematicUniverseItem.findFirst({
+      where: { tmdbId },
+      select: { universeId: true },
+    });
+    if (!itemExistente) return null;
+    universeId = itemExistente.universeId;
+  }
 
   const universe = await prisma.cinematicUniverse.findUnique({
-    where: { id: itemExistente.universeId },
+    where: { id: universeId },
     include: {
       items: { orderBy: { orden: 'asc' } },
       fases: { orderBy: { orden: 'asc' } },
@@ -4766,6 +4773,23 @@ async function construirRespuestaUniverso(tmdbId, idioma) {
     fases: universe.fases,
     pestañas: Array.from(pestañasMap.entries()).map(([nombre, items]) => ({ nombre, items })),
   };
+}
+
+// --- TODOS los universos a los que pertenece esta película/serie (no solo
+// el primero). Devuelve un array, uno por cada CinematicUniverse distinto
+// que tenga un item con este tmdbId. Vacío si no pertenece a ninguno. ---
+async function construirRespuestaUniversos(tmdbId, idioma) {
+  const itemsExistentes = await prisma.cinematicUniverseItem.findMany({
+    where: { tmdbId },
+    select: { universeId: true },
+    distinct: ['universeId'],
+  });
+  if (itemsExistentes.length === 0) return [];
+
+  const universos = await Promise.all(
+    itemsExistentes.map((it) => construirRespuestaUniverso(tmdbId, idioma, it.universeId))
+  );
+  return universos.filter(Boolean);
 }
 
 // --- COLECCIONES DE PELÍCULAS/SERIES CURADAS A MANO ---
@@ -5085,13 +5109,14 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
       }
     }
 
-    const universo = await construirRespuestaUniverso(tmdbIdNum, idioma);
+    const universos = await construirRespuestaUniversos(tmdbIdNum, idioma);
+    const universo = universos[0] || null;
 
     if (!respuestaColeccion) {
-      return res.json({ collection: null, items: [], prequel: null, sequel: null, universo });
+      return res.json({ collection: null, items: [], prequel: null, sequel: null, universo, universos });
     }
 
-    res.json({ ...respuestaColeccion, universo });
+    res.json({ ...respuestaColeccion, universo, universos });
   } catch (error) {
     console.error('Error al obtener la colección:', error);
     res.status(500).json({ error: 'Error al obtener colección' });
@@ -5123,13 +5148,14 @@ app.get('/tmdb/tv/:tmdbId/universe', async (req, res) => {
       respuestaColeccion = await construirRespuestaMovieCollection(itemExistente.collectionId, tmdbIdNum, idioma);
     }
 
-    const universo = await construirRespuestaUniverso(tmdbIdNum, idioma);
+    const universos = await construirRespuestaUniversos(tmdbIdNum, idioma);
+    const universo = universos[0] || null;
 
     if (!respuestaColeccion) {
-      return res.json({ collection: null, items: [], prequel: null, sequel: null, universo });
+      return res.json({ collection: null, items: [], prequel: null, sequel: null, universo, universos });
     }
 
-    res.json({ ...respuestaColeccion, universo });
+    res.json({ ...respuestaColeccion, universo, universos });
   } catch (error) {
     console.error('Error al obtener el universo de la serie:', error);
     res.status(500).json({ error: 'Error al obtener universo' });

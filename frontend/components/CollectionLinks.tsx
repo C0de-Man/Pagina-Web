@@ -50,7 +50,13 @@ interface CollectionResponse {
   items: ItemSaga[];
   prequel: ItemSaga | null;
   sequel: ItemSaga | null;
+  // "universo" se mantiene solo por compatibilidad hacia atrás (el backend
+  // lo sigue mandando como el primero de "universos") — la lógica de este
+  // componente ya no lo usa directamente, usa "universos" (el array
+  // completo) para poder mostrar TODOS los universos a los que pertenece
+  // esta película/serie a la vez, no solo el primero.
   universo: Universo | null;
+  universos: Universo[];
 }
 
 interface UniversoResumen {
@@ -106,12 +112,12 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   const [sobreFaseId, setSobreFaseId] = useState<number | 'sin-fase' | null>(null);
 
   async function refrescarUniverso() {
-    if (!collection?.universo) return;
+    if (!universoActivo) return;
     setRefrescando(true);
     setResultadoRefresco(null);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/refresh`, {
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${universoActivo.id}/refresh`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -189,9 +195,9 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     const token = localStorage.getItem('token');
     if (!token || myDb.length === 0 || !collection) return;
 
-    const idsUniverso = collection.universo
-      ? collection.universo.pestañas.flatMap((p) => p.items.map((it) => it.tmdbId))
-      : [];
+    const idsUniverso = (collection.universos || []).flatMap((u) =>
+      u.pestañas.flatMap((p) => p.items.map((it) => it.tmdbId))
+    );
     const idsSaga = (collection.items || []).map((it) => it.tmdbId);
 
     const idsTmdb = [
@@ -215,14 +221,24 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
       .catch(() => { });
   }, [myDb, collection]);
 
-  const universoInicializadoRef = useRef<number | null>(null);
+  // Antes se guardaba solo el id del único universo posible. Ahora la
+  // película/serie puede pertenecer a varios universos a la vez, así que la
+  // clave que evita reinicializar en cada render es la combinación de TODOS
+  // sus ids (ordenados, para que no importe en qué orden los devuelva la API).
+  const universosInicializadosRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!collection?.universo) return;
-    if (universoInicializadoRef.current === collection.universo.id) return;
-    universoInicializadoRef.current = collection.universo.id;
-    const pestañaPropia = collection.universo.pestañas.find((p) => p.items.some((it) => it.tmdbId === tmdbId));
+    if (!collection?.universos || collection.universos.length === 0) return;
+    const clave = collection.universos.map((u) => u.id).sort((a, b) => a - b).join(',');
+    if (universosInicializadosRef.current === clave) return;
+    universosInicializadosRef.current = clave;
+    // La pestaña "propia" por defecto se calcula a partir del PRIMER universo
+    // (mismo criterio que calcularTabsVisuales más abajo) — el resto de
+    // universos siempre aparecen después, así que el índice 0/1 por defecto
+    // sigue siendo correcto aunque haya más de un universo.
+    const primerUniverso = collection.universos[0];
+    const pestañaPropia = primerUniverso.pestañas.find((p) => p.items.some((it) => it.tmdbId === tmdbId));
     setPestañaActiva(pestañaPropia?.nombre === 'Other' && !esAdmin ? 1 : 0);
-  }, [collection?.universo, tmdbId, esAdmin]);
+  }, [collection?.universos, tmdbId, esAdmin]);
 
   useEffect(() => {
     if (!esAdmin || busquedaTexto.trim().length < 2) {
@@ -246,58 +262,87 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
 
   const puedeArrancarUniverso = esAdmin && (tipo === 'SERIE' || !collection?.collection);
   const hayItemsSaga = (collection?.items?.length || 0) > 0;
+  const hayUniversos = !!(collection?.universos && collection.universos.length > 0);
   if (
     !collection ||
-    (!collection.universo && !hayItemsSaga && !collection.prequel && !collection.sequel && !puedeArrancarUniverso)
+    (!hayUniversos && !hayItemsSaga && !collection.prequel && !collection.sequel && !puedeArrancarUniverso)
   ) {
     return null;
   }
 
-  type TabVisual = { tipo: 'propia' | 'universo'; nombre: string; items: UniverseItem[]; pestañaOrigen?: string };
+  // universoId identifica de qué universo viene cada pestaña — hace falta
+  // para que las acciones de admin (Reset, Delete, Refresh, Add collection,
+  // Phases, añadir por búsqueda...) sepan sobre CUÁL de los varios universos
+  // posibles actuar, según la pestaña que esté activa en cada momento.
+  type TabVisual = { tipo: 'propia' | 'universo'; nombre: string; items: UniverseItem[]; pestañaOrigen?: string; universoId: number };
 
-  function calcularTabsVisuales(universo: Universo): TabVisual[] {
+  // Antes solo existía un universo posible. Ahora una película/serie puede
+  // pertenecer a VARIOS a la vez (p. ej. "AVP: Alien vs. Predator" en
+  // "Aliens" y en "Predator") — esta función recorre TODOS los universos
+  // recibidos y genera una pestaña por cada uno, en vez de quedarse solo con
+  // el primero.
+  function calcularTabsVisuales(universos: Universo[]): TabVisual[] {
+    if (universos.length === 0) return [];
+
+    // La pestaña "propia" (p. ej. "AVP Collection") se calcula a partir del
+    // PRIMER universo al que pertenece — si aparece en varios universos con
+    // agrupaciones propias distintas, esta pestaña muestra la del primero;
+    // cada universo aporta ADEMÁS su propia pestaña "mezclada" (ver abajo),
+    // así que ninguno queda oculto.
+    const primerUniverso = universos[0];
     const pestañaPropia =
-      universo.pestañas.find((p) => p.items.some((it) => it.tmdbId === tmdbId)) || universo.pestañas[0];
+      primerUniverso.pestañas.find((p) => p.items.some((it) => it.tmdbId === tmdbId)) || primerUniverso.pestañas[0];
 
-    const vistos = new Set<number>();
-    const todas: UniverseItem[] = [];
-    for (const p of universo.pestañas) {
-      for (const it of p.items) {
-        if (vistos.has(it.tmdbId)) continue;
-        vistos.add(it.tmdbId);
-        todas.push(it);
+    const tabPropia: TabVisual = {
+      tipo: 'propia',
+      nombre: pestañaPropia.nombre,
+      items: [...pestañaPropia.items].sort((a, b) => {
+        const fechaA = a.fechaEstreno ? new Date(a.fechaEstreno).getTime() : a.anio ? new Date(a.anio, 0, 1).getTime() : Infinity;
+        const fechaB = b.fechaEstreno ? new Date(b.fechaEstreno).getTime() : b.anio ? new Date(b.anio, 0, 1).getTime() : Infinity;
+        return fechaA - fechaB;
+      }),
+      pestañaOrigen: pestañaPropia.nombre,
+      universoId: primerUniverso.id,
+    };
+
+    // Una pestaña "mezclada" (todo el universo junto) POR CADA universo al
+    // que pertenezca este título — esto es lo que hace que ahora se vean
+    // "Aliens" Y "Predator" a la vez, en vez de solo el primero.
+    const tabsUniverso: TabVisual[] = universos.map((universo) => {
+      const vistos = new Set<number>();
+      const todas: UniverseItem[] = [];
+      for (const p of universo.pestañas) {
+        for (const it of p.items) {
+          if (vistos.has(it.tmdbId)) continue;
+          vistos.add(it.tmdbId);
+          todas.push(it);
+        }
       }
-    }
-    todas.sort((a, b) => {
-      const tieneOrdenA = a.ordenUniverso != null;
-      const tieneOrdenB = b.ordenUniverso != null;
-      if (tieneOrdenA || tieneOrdenB) {
-        return (a.ordenUniverso ?? Infinity) - (b.ordenUniverso ?? Infinity);
-      }
-      const fechaA = a.fechaEstreno ? new Date(a.fechaEstreno).getTime() : a.anio ? new Date(a.anio, 0, 1).getTime() : Infinity;
-      const fechaB = b.fechaEstreno ? new Date(b.fechaEstreno).getTime() : b.anio ? new Date(b.anio, 0, 1).getTime() : Infinity;
-      return fechaA - fechaB;
+      todas.sort((a, b) => {
+        const tieneOrdenA = a.ordenUniverso != null;
+        const tieneOrdenB = b.ordenUniverso != null;
+        if (tieneOrdenA || tieneOrdenB) {
+          return (a.ordenUniverso ?? Infinity) - (b.ordenUniverso ?? Infinity);
+        }
+        const fechaA = a.fechaEstreno ? new Date(a.fechaEstreno).getTime() : a.anio ? new Date(a.anio, 0, 1).getTime() : Infinity;
+        const fechaB = b.fechaEstreno ? new Date(b.fechaEstreno).getTime() : b.anio ? new Date(b.anio, 0, 1).getTime() : Infinity;
+        return fechaA - fechaB;
+      });
+      return { tipo: 'universo' as const, nombre: universo.nombre, items: todas, universoId: universo.id };
     });
 
-    return [
-      {
-        tipo: 'propia',
-        nombre: pestañaPropia.nombre,
-        items: [...pestañaPropia.items].sort((a, b) => {
-          const fechaA = a.fechaEstreno ? new Date(a.fechaEstreno).getTime() : a.anio ? new Date(a.anio, 0, 1).getTime() : Infinity;
-          const fechaB = b.fechaEstreno ? new Date(b.fechaEstreno).getTime() : b.anio ? new Date(b.anio, 0, 1).getTime() : Infinity;
-          return fechaA - fechaB;
-        }),
-        pestañaOrigen: pestañaPropia.nombre,
-      },
-      { tipo: 'universo', nombre: universo.nombre, items: todas },
-    ];
+    return [tabPropia, ...tabsUniverso];
   }
 
-  const tabsVisuales = collection.universo ? calcularTabsVisuales(collection.universo) : [];
+  const tabsVisuales = hayUniversos ? calcularTabsVisuales(collection.universos) : [];
   const tabActiva = tabsVisuales[pestañaActiva];
+  // El universo "activo" es el que corresponde a la pestaña que se está
+  // viendo ahora mismo — todas las acciones de admin (Reset, Delete,
+  // Refresh, Phases, añadir por búsqueda...) actúan sobre ESTE universo,
+  // no siempre sobre "el primero" como antes.
+  const universoActivo = tabActiva ? (collection.universos || []).find((u) => u.id === tabActiva.universoId) || null : null;
 
-  const modoSaga = !collection.universo && !!collection.collection;
+  const modoSaga = !hayUniversos && !!collection.collection;
 
   const getLocalData = (id: number) => {
     const local = myDb.find((m: any) => m.tmdbId === id);
@@ -472,7 +517,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
         return;
       }
 
-      if (!collection?.universo || !tabActiva?.pestañaOrigen) return;
+      if (!universoActivo || !tabActiva?.pestañaOrigen) return;
 
       const esSerieResultado = resultado.media_type === 'tv';
       const tituloResultado = resultado.title || resultado.name || '';
@@ -481,7 +526,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          universeId: collection.universo.id,
+          universeId: universoActivo.id,
           tmdbId: resultado.id,
           tipo: esSerieResultado ? 'SERIE' : 'PELICULA',
           titulo: tituloResultado,
@@ -516,20 +561,25 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
 
   function actualizarPestañaActual(nuevaLista: UniverseItem[]) {
     const origen = tabActiva?.pestañaOrigen;
-    if (!origen) return;
+    const universeId = tabActiva?.universoId;
+    if (!origen || universeId == null) return;
     setCollection((prev) => {
-      if (!prev?.universo) return prev;
-      const pestañas = prev.universo.pestañas.map((p) => (p.nombre === origen ? { ...p, items: nuevaLista } : p));
-      return { ...prev, universo: { ...prev.universo, pestañas } };
+      if (!prev?.universos) return prev;
+      const universos = prev.universos.map((u) =>
+        u.id === universeId
+          ? { ...u, pestañas: u.pestañas.map((p) => (p.nombre === origen ? { ...p, items: nuevaLista } : p)) }
+          : u
+      );
+      return { ...prev, universos };
     });
   }
 
   async function crearFase() {
-    if (!collection?.universo || !nuevaFaseNombre.trim()) return;
+    if (!universoActivo || !nuevaFaseNombre.trim()) return;
     setCreandoFase(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/phases`, {
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${universoActivo.id}/phases`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ nombre: nuevaFaseNombre.trim() }),
@@ -557,13 +607,21 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   async function asignarFase(itemId: number, faseId: number | null) {
+    const universeId = tabActiva?.universoId;
     setCollection((prev) => {
-      if (!prev?.universo) return prev;
-      const pestañas = prev.universo.pestañas.map((p) => ({
-        ...p,
-        items: p.items.map((it) => (it.id === itemId ? { ...it, faseId } : it)),
-      }));
-      return { ...prev, universo: { ...prev.universo, pestañas } };
+      if (!prev?.universos || universeId == null) return prev;
+      const universos = prev.universos.map((u) =>
+        u.id === universeId
+          ? {
+            ...u,
+            pestañas: u.pestañas.map((p) => ({
+              ...p,
+              items: p.items.map((it) => (it.id === itemId ? { ...it, faseId } : it)),
+            })),
+          }
+          : u
+      );
+      return { ...prev, universos };
     });
     try {
       const token = localStorage.getItem('token');
@@ -594,13 +652,21 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
 
   function actualizarOrdenUniversoLocal(nuevoOrdenIds: number[]) {
     const posicion = new Map(nuevoOrdenIds.map((id, i) => [id, i]));
+    const universeId = tabActiva?.universoId;
     setCollection((prev) => {
-      if (!prev?.universo) return prev;
-      const pestañas = prev.universo.pestañas.map((p) => ({
-        ...p,
-        items: p.items.map((it) => (posicion.has(it.id) ? { ...it, ordenUniverso: posicion.get(it.id)! } : it)),
-      }));
-      return { ...prev, universo: { ...prev.universo, pestañas } };
+      if (!prev?.universos || universeId == null) return prev;
+      const universos = prev.universos.map((u) =>
+        u.id === universeId
+          ? {
+            ...u,
+            pestañas: u.pestañas.map((p) => ({
+              ...p,
+              items: p.items.map((it) => (posicion.has(it.id) ? { ...it, ordenUniverso: posicion.get(it.id)! } : it)),
+            })),
+          }
+          : u
+      );
+      return { ...prev, universos };
     });
   }
 
@@ -667,12 +733,14 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
       });
       if (!res.ok) throw new Error('No se pudo eliminar');
       setCollection((prev) => {
-        if (!prev?.universo) return prev;
-        const pestañas = prev.universo.pestañas.map((p) => ({
-          ...p,
-          items: p.items.filter((it) => it.id !== item.id),
-        }));
-        return { ...prev, universo: { ...prev.universo, pestañas } };
+        const universeId = tabActiva?.universoId;
+        if (!prev?.universos || universeId == null) return prev;
+        const universos = prev.universos.map((u) =>
+          u.id === universeId
+            ? { ...u, pestañas: u.pestañas.map((p) => ({ ...p, items: p.items.filter((it) => it.id !== item.id) })) }
+            : u
+        );
+        return { ...prev, universos };
       });
     } catch (err) {
       console.error('Error al borrar de la colección', err);
@@ -806,7 +874,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   async function añadirOtraColeccion() {
-    if (!collection?.universo) return;
+    if (!universoActivo) return;
     const idNum = parseInt(nuevoTmdbCollectionId, 10);
     if (Number.isNaN(idNum)) {
       setErrorAñadirColeccion('Ese id de colección de TMDB no es válido');
@@ -816,7 +884,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     setErrorAñadirColeccion(null);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/collections`, {
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${universoActivo.id}/collections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -838,7 +906,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   async function añadirPeliculaPorId() {
-    if (!collection?.universo) return;
+    if (!universoActivo) return;
     const idNum = parseInt(tmdbMovieId, 10);
     if (Number.isNaN(idNum)) {
       setErrorAñadirColeccion('Ese id de película de TMDB no es válido');
@@ -852,7 +920,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     setErrorAñadirColeccion(null);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/add-movie`, {
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${universoActivo.id}/add-movie`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ tmdbId: idNum, pestaña: etiquetaPestañaPelicula.trim() }),
@@ -871,7 +939,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   async function añadirSeriePorId() {
-    if (!collection?.universo) return;
+    if (!universoActivo) return;
     const idNum = parseInt(tmdbSeriesId, 10);
     if (Number.isNaN(idNum)) {
       setErrorAñadirColeccion('Ese id de serie de TMDB no es válido');
@@ -885,7 +953,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     setErrorAñadirColeccion(null);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/add-series`, {
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${universoActivo.id}/add-series`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ tmdbId: idNum, pestaña: etiquetaPestañaSerie.trim() }),
@@ -904,7 +972,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   async function importarPorKeyword() {
-    if (!collection?.universo) return;
+    if (!universoActivo) return;
     const idNum = parseInt(tmdbKeywordId, 10);
     if (Number.isNaN(idNum)) {
       setErrorAñadirColeccion('Ese id de keyword de TMDB no es válido');
@@ -915,7 +983,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     setResultadoImportacion(null);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/import-by-keyword`, {
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${universoActivo.id}/import-by-keyword`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ tmdbKeywordId: idNum }),
@@ -932,7 +1000,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   async function importarPorCompañia() {
-    if (!collection?.universo) return;
+    if (!universoActivo) return;
     const idNum = parseInt(tmdbCompanyId, 10);
     if (Number.isNaN(idNum)) {
       setErrorAñadirColeccion('Ese id de productora de TMDB no es válido');
@@ -943,7 +1011,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     setResultadoImportacion(null);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/import-by-company`, {
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${universoActivo.id}/import-by-company`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ tmdbCompanyId: idNum }),
@@ -960,14 +1028,14 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   async function reiniciarUniverso() {
-    if (!collection?.universo) return;
-    if (!window.confirm(`Delete ALL movies from "${collection.universo.nombre}"? This can't be undone — you'll need to re-import afterward.`)) {
+    if (!universoActivo) return;
+    if (!window.confirm(`Delete ALL movies from "${universoActivo.nombre}"? This can't be undone — you'll need to re-import afterward.`)) {
       return;
     }
     setReiniciando(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}/reset`, {
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${universoActivo.id}/reset`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -981,14 +1049,14 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
   }
 
   async function borrarUniverso() {
-    if (!collection?.universo) return;
-    if (!window.confirm(`Permanently delete the universe "${collection.universo.nombre}"? This can't be undone.`)) {
+    if (!universoActivo) return;
+    if (!window.confirm(`Permanently delete the universe "${universoActivo.nombre}"? This can't be undone.`)) {
       return;
     }
     setBorrandoUniverso(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(`${API_URL}/admin/cinematic-universes/${collection.universo.id}`, {
+      const res = await fetch(`${API_URL}/admin/cinematic-universes/${universoActivo.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -1054,8 +1122,11 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     );
   }
 
-  const nombreSagaOUniverso = collection.universo?.nombre || collection.collection?.nombre || 'Full saga';
-  const nombrePestañaActivaMostrar = collection.universo ? tabActiva?.nombre : collection.collection?.nombre;
+  // El título del modal ahora sigue a la pestaña activa: si estás viendo
+  // "Predator" muestra "Predator", si cambias a "Aliens" muestra "Aliens" —
+  // así queda claro en cuál de los varios universos posibles estás.
+  const nombreSagaOUniverso = universoActivo?.nombre || collection.collection?.nombre || 'Full saga';
+  const nombrePestañaActivaMostrar = hayUniversos ? tabActiva?.nombre : collection.collection?.nombre;
   const yaEnLaListaDeSaga = (r: ResultadoTmdb, tipoResultado: string) =>
     modoSaga ? (collection.items || []).some((it) => it.tmdbId === r.id && it.tipo === tipoResultado) : false;
 
@@ -1075,7 +1146,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
           )}
         </div>
 
-        {((collection.items && collection.items.length > 1) || collection.universo) && (
+        {((collection.items && collection.items.length > 1) || hayUniversos) && (
           <button
             onClick={() => setIsModalOpen(true)}
             className="w-full mt-4 text-xs text-gray-400 hover:text-white text-center underline cursor-pointer bg-gray-900/80 py-2 rounded border border-gray-800 transition"
@@ -1084,7 +1155,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
           </button>
         )}
 
-        {esAdmin && !collection.collection && !collection.universo && (
+        {esAdmin && !collection.collection && !hayUniversos && (
           <>
             {!mostrarFormSaga ? (
               <button
@@ -1124,7 +1195,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
           </>
         )}
 
-        {esAdmin && !collection.universo && (tipo === 'SERIE' || !collection.collection) && (
+        {esAdmin && !hayUniversos && (tipo === 'SERIE' || !collection.collection) && (
           <button
             onClick={() => setIsModalOpen(true)}
             className="w-full mt-4 text-xs text-blue-400 hover:text-blue-300 text-center underline cursor-pointer bg-gray-900/80 py-2 rounded border border-gray-800 transition"
@@ -1145,7 +1216,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
               <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white text-2xl font-bold cursor-pointer">✕</button>
             </div>
 
-            {collection.universo && (
+            {hayUniversos && (
               <div className="flex items-center justify-between px-6 pt-3 border-b border-gray-800 flex-shrink-0">
                 <div className="flex gap-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
                   {tabsVisuales
@@ -1154,7 +1225,12 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
                       const i = tabsVisuales.indexOf(t);
                       return (
                         <button
-                          key={t.tipo}
+                          // Antes bastaba con t.tipo como key porque solo había
+                          // como mucho una pestaña 'propia' y una 'universo'.
+                          // Ahora puede haber VARIAS pestañas 'universo' (una
+                          // por cada universo al que pertenezca el título), así
+                          // que hace falta una key única por pestaña de verdad.
+                          key={`tab-${t.universoId}-${t.tipo}-${i}`}
                           onClick={() => cambiarPestaña(i)}
                           className={`px-3 py-2 text-sm font-semibold whitespace-nowrap border-b-2 transition cursor-pointer ${pestañaActiva === i ? 'border-blue-500 text-white' : 'border-transparent text-gray-400 hover:text-white'
                             }`}
@@ -1239,8 +1315,8 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
                         const tipoResultado = esSerieResultado ? 'SERIE' : 'PELICULA';
                         const yaEnLaLista = modoSaga
                           ? yaEnLaListaDeSaga(r, tipoResultado)
-                          : collection.universo
-                            ? collection.universo.pestañas.some((p) => p.items.some((it) => it.tmdbId === r.id && it.tipo === tipoResultado))
+                          : universoActivo
+                            ? universoActivo.pestañas.some((p) => p.items.some((it) => it.tmdbId === r.id && it.tipo === tipoResultado))
                             : false;
                         return (
                           <button
@@ -1265,7 +1341,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
               </div>
             )}
 
-            {esAdmin && !collection.universo && collection.collection?.tmdbCollectionId && (
+            {esAdmin && !hayUniversos && collection.collection?.tmdbCollectionId && (
               <div className="px-6 pt-4">
                 {!mostrarFormUniverso ? (
                   <button
@@ -1326,7 +1402,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
               </div>
             )}
 
-            {esAdmin && !collection.universo && (tipo === 'SERIE' || !collection.collection) && tmdbId && (
+            {esAdmin && !hayUniversos && (tipo === 'SERIE' || !collection.collection) && tmdbId && (
               <div className="px-6 pt-4">
                 {!mostrarFormUniverso ? (
                   <button
@@ -1387,11 +1463,11 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
               </div>
             )}
 
-            {esAdmin && collection.universo && tabActiva?.tipo === 'universo' && (
+            {esAdmin && universoActivo && tabActiva?.tipo === 'universo' && (
               <div className="px-6 pt-4">
                 <p className="text-xs text-gray-500 mb-2">Phases (drag a movie onto one to file it there):</p>
                 <div className="flex flex-wrap items-center gap-2">
-                  {collection.universo.fases.map((fase) => (
+                  {universoActivo.fases.map((fase) => (
                     <div
                       key={fase.id}
                       onDragOver={(e) => {
@@ -1459,9 +1535,9 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
             )}
 
             <div className="overflow-y-auto p-6">
-              {collection.universo ? (
+              {hayUniversos ? (
                 tabActiva?.tipo === 'universo' ? (
-                  agruparPorFase(listaDeLaPestañaActual(), collection.universo.fases).map((grupo) => {
+                  agruparPorFase(listaDeLaPestañaActual(), universoActivo?.fases || []).map((grupo) => {
                     if (!grupo.fase && grupo.items.length === 0) return null;
                     const idDeEsteGrupo = grupo.fase?.id ?? 'sin-fase';
                     return (
@@ -1519,7 +1595,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
           onClick={() => !añadiendoColeccion && setMostrarAñadirColeccion(false)}
         >
           <div className="w-[90vw] max-w-md rounded-lg bg-[#1c2228] border border-gray-700 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-white mb-4">Add to "{collection.universo?.nombre}"</h3>
+            <h3 className="text-lg font-bold text-white mb-4">Add to "{universoActivo?.nombre}"</h3>
 
             <div className="flex gap-1 mb-4 border-b border-gray-800">
               <button
