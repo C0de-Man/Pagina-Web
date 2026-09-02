@@ -178,24 +178,26 @@ export default function MediaTabs({
             <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Country</div>
             <div className="text-gray-200">{detalles?.paises?.length > 0 ? detalles.paises.join(', ') : 'Not available'}</div>
           </div>
-          <div className="flex flex-col gap-4">
-            <div>
-              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Budget</div>
-              <div className="text-gray-200">
-                {detalles?.presupuesto
-                  ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(detalles.presupuesto)
-                  : 'Not available'}
-              </div>
+          {!!(detalles?.presupuesto || detalles?.ganancias) && (
+            <div className="flex flex-col gap-4">
+              {detalles?.presupuesto ? (
+                <div>
+                  <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Budget</div>
+                  <div className="text-gray-200">
+                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(detalles.presupuesto)}
+                  </div>
+                </div>
+              ) : null}
+              {detalles?.ganancias ? (
+                <div>
+                  <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Revenue</div>
+                  <div className="text-gray-200">
+                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(detalles.ganancias)}
+                  </div>
+                </div>
+              ) : null}
             </div>
-            <div>
-              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Revenue</div>
-              <div className="text-gray-200">
-                {detalles?.ganancias
-                  ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(detalles.ganancias)
-                  : 'Not available'}
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       )}
       {/* ADAPTATION */}

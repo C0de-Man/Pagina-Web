@@ -1317,8 +1317,32 @@ app.get('/igdb/ediciones/:igdbId', async (req, res) => {
     // 11 port. Todos comparten el mismo espíritu: son la MISMA obra jugable
     // en distinta presentación/plataforma, no contenido nuevo — por eso
     // tienen sentido como "versión jugada" del mismo log, junto al original.
+
+    // Criterio de nombre reutilizable: exige que el título del candidato
+    // empiece literalmente por el del juego base, con un separador (o nada)
+    // justo después — nunca pegado sin más (para no colar "Devil May Cry 5"
+    // al buscar "Devil May Cry") ni seguido de otro número (para no colar
+    // una secuela). Antes solo se aplicaba al respaldo por texto; ahora
+    // también se exige en las relaciones DIRECTAS por parent_game — IGDB
+    // puede tener enlazada una entrada con el nombre mal puesto (p. ej. un
+    // port móvil llamado solo "Devil May Cry" enlazado como versión de
+    // "Devil May Cry 3: Dante's Awakening"), y sin esta comprobación se
+    // colaba igualmente solo por venir de una relación "de confianza".
+    const cumplePrefijoNombre = (nombreCandidato, nombreBaseReal) => {
+      if (!nombreCandidato || !nombreBaseReal) return false;
+      const candidatoNorm = nombreCandidato.toLowerCase();
+      const baseNorm = nombreBaseReal.toLowerCase();
+      if (!candidatoNorm.startsWith(baseNorm)) return false;
+      const resto = candidatoNorm.slice(baseNorm.length);
+      if (resto !== '' && /^[a-z0-9]/.test(resto)) return false; // pegado sin separador
+      if (/^\s*\d/.test(resto)) return false; // "... 2", "... 3"... (secuela)
+      return true;
+    };
+
     const TIPOS_VERSION = [3, 9, 10, 11];
-    let versiones = (dataVersiones || []).filter((g) => TIPOS_VERSION.includes(g.game_type));
+    let versiones = (dataVersiones || [])
+      .filter((g) => TIPOS_VERSION.includes(g.game_type))
+      .filter((g) => cumplePrefijoNombre(g.name, base?.name));
 
     // Las ediciones encontradas por version_parent se admiten TODAS, sin
     // filtrar por game_type — a diferencia de parent_game, aquí el propio
@@ -1375,12 +1399,7 @@ app.get('/igdb/ediciones/:igdbId', async (req, res) => {
             if (Math.abs(anioCandidato - anioBase) > 5) return false;
           }
 
-          const nombreNormalizado = g.name.toLowerCase();
-          if (!nombreNormalizado.startsWith(nombreBaseNormalizado)) return false;
-          const resto = nombreNormalizado.slice(nombreBaseNormalizado.length);
-          if (resto !== '' && /^[a-z0-9]/.test(resto)) return false; // pegado sin separador
-          if (/^\s*\d/.test(resto)) return false; // "... 2", "... 3"... (secuela)
-          return true;
+          return cumplePrefijoNombre(g.name, base?.name);
         });
         versiones = [...versiones, ...candidatosTexto];
       }
