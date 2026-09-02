@@ -45,7 +45,7 @@ interface PosterAlternativo {
   idioma: string | null;
 }
 
-function EstrellasVisual({ rating, onSelect, size = 'text-sm' }: { rating: number | null; onSelect?: (r: number) => void; size?: string }) {
+function EstrellasVisual({ rating, onSelect, size = 'text-sm' }: { rating: number | null; onSelect?: (r: number | null) => void; size?: string }) {
   const sobreCinco = rating ? rating / 2 : 0;
   return (
     <div className="flex items-center gap-0.5">
@@ -59,7 +59,12 @@ function EstrellasVisual({ rating, onSelect, size = 'text-sm' }: { rating: numbe
             disabled={!onSelect}
             onClick={(e) => {
               e.stopPropagation();
-              if (onSelect) onSelect(i * 2);
+              if (!onSelect) return;
+              const valor = i * 2;
+              // Volver a pulsar la MISMA estrella que ya marca tu nota actual
+              // quita la nota (null), en vez de dejarla fija para siempre —
+              // mismo gesto que ya tienes en películas/juegos.
+              onSelect(rating === valor ? null : valor);
             }}
             className={`${size} leading-none ${onSelect ? 'cursor-pointer hover:scale-110 transition' : 'cursor-default'} ${lleno || medio ? 'text-teal-400' : 'text-gray-600'}`}
           >
@@ -133,7 +138,7 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
       .finally(() => setCargando(false));
   }, [tmdbId, mediaId, idioma]);
 
-  const actualizarTemporada = async (numero: number, cambios: Partial<{ watched: boolean; rating: number; customPoster: string | null }>) => {
+  const actualizarTemporada = async (numero: number, cambios: Partial<{ watched: boolean; rating: number | null; customPoster: string | null }>) => {
     const token = localStorage.getItem('token');
     if (!token) return;
     setEstadosTemporadas((prev) => ({
@@ -155,7 +160,7 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
     } catch {}
   };
 
-  const actualizarEpisodio = async (numeroTemporada: number, numeroEpisodio: number, cambios: Partial<{ watched: boolean; rating: number }>) => {
+  const actualizarEpisodio = async (numeroTemporada: number, numeroEpisodio: number, cambios: Partial<{ watched: boolean; rating: number | null }>) => {
     const token = localStorage.getItem('token');
     if (!token) return;
     setEstadosEpisodios((prev) => ({

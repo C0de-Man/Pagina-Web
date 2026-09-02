@@ -6244,17 +6244,32 @@ app.get('/notifications/unread-count', requireAuth, async (req, res) => {
   }
 });
 
-// --- MARCAR TODAS COMO LEÍDAS (se llama al abrir el panel) ---
-app.post('/notifications/mark-read', requireAuth, async (req, res) => {
+// --- BORRAR UNA NOTIFICACIÓN CONCRETA ---
+app.delete('/notifications/:id', requireAuth, async (req, res) => {
   try {
-    await prisma.notification.updateMany({
-      where: { userId: req.userId, leida: false },
-      data: { leida: true },
-    });
+    const id = parseInt(req.params.id, 10);
+    const notificacion = await prisma.notification.findUnique({ where: { id } });
+    // Solo puedes borrar tus propias notificaciones — nunca las de otro
+    // usuario, aunque sepas el id.
+    if (!notificacion || notificacion.userId !== req.userId) {
+      return res.status(404).json({ error: 'Notificación no encontrada' });
+    }
+    await prisma.notification.delete({ where: { id } });
     res.json({ ok: true });
   } catch (error) {
-    console.error('ERROR EN POST /notifications/mark-read:', error);
-    res.status(500).json({ error: 'Error al marcar las notificaciones como leídas' });
+    console.error('ERROR EN DELETE /notifications/:id:', error);
+    res.status(500).json({ error: 'Error al borrar la notificación' });
+  }
+});
+
+// --- BORRAR TODAS MIS NOTIFICACIONES DE GOLPE ---
+app.delete('/notifications', requireAuth, async (req, res) => {
+  try {
+    await prisma.notification.deleteMany({ where: { userId: req.userId } });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN DELETE /notifications:', error);
+    res.status(500).json({ error: 'Error al borrar las notificaciones' });
   }
 });
 
@@ -6658,6 +6673,13 @@ app.post('/follow-requests/:followerId/accept', requireAuth, async (req, res) =>
       data: { userId: followerId, tipo: 'FOLLOW_ACCEPTED', actorId: req.userId },
     });
 
+    // Borramos la notificación de solicitud original que TÚ recibiste — si
+    // no, al volver a abrir la campana seguía apareciendo con los botones
+    // Accept/Decline, aunque ya la hubieras resuelto.
+    await prisma.notification.deleteMany({
+      where: { userId: req.userId, actorId: followerId, tipo: 'FOLLOW_REQUEST' },
+    });
+
     res.json({ ok: true });
   } catch (error) {
     console.error('ERROR EN POST /follow-requests/:followerId/accept:', error);
@@ -6671,6 +6693,11 @@ app.post('/follow-requests/:followerId/decline', requireAuth, async (req, res) =
     const followerId = parseInt(req.params.followerId, 10);
     await prisma.follow.deleteMany({
       where: { followerId, followingId: req.userId, estado: 'PENDING' },
+    });
+    // Mismo motivo que en accept: borramos la notificación de solicitud
+    // original para que no vuelva a aparecer como pendiente.
+    await prisma.notification.deleteMany({
+      where: { userId: req.userId, actorId: followerId, tipo: 'FOLLOW_REQUEST' },
     });
     res.json({ ok: true });
   } catch (error) {
