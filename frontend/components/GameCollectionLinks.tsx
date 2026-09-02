@@ -366,13 +366,17 @@ export default function GameCollectionLinks({
         const portadaReal = getPortadaReal(juego);
         const contenido = (
             <>
-                {portadaReal && (
+                {portadaReal ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                         src={portadaReal}
                         alt={juego.titulo}
                         className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80"
                     />
+                ) : (
+                    <div className="w-full aspect-[2/3] bg-black rounded flex items-center justify-center text-center p-2 transition group-hover:opacity-80">
+                        <p className="text-xs font-semibold text-white">{juego.titulo}</p>
+                    </div>
                 )}
                 <p className="mt-1 text-sm text-gray-400 text-center">{etiqueta}</p>
             </>
@@ -558,26 +562,34 @@ export default function GameCollectionLinks({
                                         <div key={g.igdbId} className="group relative">
                                             {esActual ? (
                                                 <span className="block w-full rounded text-left">
-                                                    {g.portada && (
+                                                    {g.portada ? (
                                                         // eslint-disable-next-line @next/next/no-img-element
                                                         <img
                                                             src={g.portada}
                                                             alt={g.titulo}
                                                             className="w-full aspect-[2/3] object-cover rounded ring-2 ring-blue-500 transition"
                                                         />
+                                                    ) : (
+                                                        <div className="w-full aspect-[2/3] bg-black rounded ring-2 ring-blue-500 flex items-center justify-center text-center p-2 transition">
+                                                            <p className="text-xs font-semibold text-white">{g.titulo}</p>
+                                                        </div>
                                                     )}
                                                     <p className="mt-2 text-sm font-semibold text-white select-text">{g.titulo}</p>
                                                     <p className="text-xs text-gray-400">{g.anio}{" · You're viewing this"}</p>
                                                 </span>
                                             ) : (
                                                 <Link href={`/game/igdb/${g.igdbId}`} className="block w-full rounded text-left cursor-pointer">
-                                                    {g.portada && (
+                                                    {g.portada ? (
                                                         // eslint-disable-next-line @next/next/no-img-element
                                                         <img
                                                             src={g.portada}
                                                             alt={g.titulo}
                                                             className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80 group-hover:scale-[1.02]"
                                                         />
+                                                    ) : (
+                                                        <div className="w-full aspect-[2/3] bg-black rounded flex items-center justify-center text-center p-2 transition group-hover:opacity-80">
+                                                            <p className="text-xs font-semibold text-white">{g.titulo}</p>
+                                                        </div>
                                                     )}
                                                     <p className="mt-2 text-sm font-semibold text-white select-text">{g.titulo}</p>
                                                     <p className="text-xs text-gray-400">{g.anio}</p>
@@ -592,7 +604,7 @@ export default function GameCollectionLinks({
                                 {(tabModal === 'juegos' ? data.games : tabModal === 'cancelados' ? data.cancelados : data.otros).map((g) => {
                                     const esActual = g.igdbId === currentMediaIgdbId;
                                     const portadaReal = getPortadaReal(g);
-                                    const imagen = portadaReal && (
+                                    const imagen = portadaReal ? (
                                         // eslint-disable-next-line @next/next/no-img-element
                                         <img
                                             src={portadaReal}
@@ -607,6 +619,16 @@ export default function GameCollectionLinks({
                                                 : 'group-hover:opacity-80 group-hover:scale-[1.02]'
                                                 } ${esAdmin ? 'cursor-grab active:cursor-grabbing' : ''}`}
                                         />
+                                    ) : (
+                                        <div
+                                            draggable={esAdmin}
+                                            className={`w-full aspect-[2/3] bg-black rounded flex items-center justify-center text-center p-2 transition ${esActual
+                                                ? 'ring-2 ring-blue-500'
+                                                : 'group-hover:opacity-80 group-hover:scale-[1.02]'
+                                                } ${esAdmin ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                        >
+                                            <p className="text-xs font-semibold text-white select-text">{g.titulo}</p>
+                                        </div>
                                     );
                                     const textoTarjeta = (
                                         <>
