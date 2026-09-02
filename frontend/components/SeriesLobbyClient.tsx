@@ -51,13 +51,19 @@ export default function SeriesLobbyClient({
     setBuscadoYa(false);
   };
 
-  const getLocalData = (tmdbId: number) => {
-    const local = myDb.find((m: any) => m.tmdbId === tmdbId);
-    return {
-      dbId: local ? local.id : null,
-      customPoster: null,
-    };
+const getLocalData = (tmdbId: number) => {
+  // OJO: TMDB numera películas y series en espacios de IDs independientes,
+  // así que una película guardada puede tener el MISMO tmdbId numérico que
+  // una serie que aparece aquí. Sin comprobar también el tipo, esto podía
+  // devolver el dbId de una película — y el enlace acababa abriendo la
+  // ficha equivocada. Como este buscador solo trae series (ya filtradas por
+  // media_type === 'tv' antes de llegar aquí), basta con exigir tipo SERIE.
+  const local = myDb.find((m: any) => m.tmdbId === tmdbId && m.tipo === 'SERIE');
+  return {
+    dbId: local ? local.id : null,
+    customPoster: null,
   };
+};
 
   return (
     <>

@@ -2307,14 +2307,25 @@ async function mezclarCustomPosters(items, userId) {
   const tmdbIds = items.map((i) => i.id).filter(Boolean);
   if (tmdbIds.length === 0) return items;
 
+  // OJO: TMDB numera películas y series en espacios de IDs independientes,
+  // así que una película guardada puede tener el MISMO tmdbId numérico que
+  // una serie distinta (y viceversa). Antes esta función cruzaba solo por
+  // tmdbId, así que le colaba la carátula de una película a una serie con
+  // el mismo número (el título salía bien porque viene en crudo de TMDB,
+  // pero la carátula se pisaba con la de otro título sin relación). Ahora
+  // se pide también "tipo" y se cruza por tmdbId + tipo, igual que ya se
+  // corrigió en el frontend para el link (dbId).
   const mediaLocal = await prisma.media.findMany({
     where: { tmdbId: { in: tmdbIds } },
-    select: { id: true, tmdbId: true, portada: true, backdrop: true }
+    select: { id: true, tmdbId: true, tipo: true, portada: true, backdrop: true }
   });
   if (mediaLocal.length === 0) return items;
 
-  const mediaIdPorTmdbId = new Map(mediaLocal.map((m) => [m.tmdbId, m.id]));
-  const compartidaPorTmdbId = new Map(mediaLocal.map((m) => [m.tmdbId, { portada: m.portada, backdrop: m.backdrop }]));
+  const tipoEsperado = (mediaType) => (mediaType === 'tv' ? 'SERIE' : 'PELICULA');
+  const claveDe = (tmdbId, tipo) => `${tmdbId}-${tipo}`;
+
+  const mediaIdPorClave = new Map(mediaLocal.map((m) => [claveDe(m.tmdbId, m.tipo), m.id]));
+  const compartidaPorClave = new Map(mediaLocal.map((m) => [claveDe(m.tmdbId, m.tipo), { portada: m.portada, backdrop: m.backdrop }]));
 
   let personalizacionPorMediaId = new Map();
   if (userId) {
@@ -2327,8 +2338,9 @@ async function mezclarCustomPosters(items, userId) {
   }
 
   return items.map((item) => {
-    const mediaId = mediaIdPorTmdbId.get(item.id);
-    const compartida = compartidaPorTmdbId.get(item.id);
+    const clave = claveDe(item.id, tipoEsperado(item.media_type));
+    const mediaId = mediaIdPorClave.get(clave);
+    const compartida = compartidaPorClave.get(clave);
     const mia = mediaId ? personalizacionPorMediaId.get(mediaId) : null;
 
     const portadaFinal = mia?.customPoster || compartida?.portada || null;
@@ -2707,6 +2719,261 @@ app.post('/admin/curated-collections/reset-all', requireAuth, requireAdmin, asyn
   }
 });
 
+// --- REINICIAR ABSOLUTAMENTE TODO (sagas de juegos, sagas de
+// películas/series y universos) a como quedaría recalculado desde cero,
+// según las reglas actuales — borra CUALQUIER edición manual (juegos/
+// películas/series añadidos a mano, orden manual, "Other" personalizado...).
+// Solo admin. No se puede deshacer. ---
+app.post('/admin/reset-absolutamente-todo', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const resultado = { juegos: { total: 0, actualizadas: 0 }, sagas: { total: 0, actualizadas: 0, sinFuente: 0 }, universos: { total: 0, actualizados: 0 } };
+
+    // --- 1. Sagas de juegos (CuratedCollection) ---
+    const coleccionesJuegos = await prisma.curatedCollection.findMany({
+      include: { items: { take: 1, orderBy: { orden: 'asc' } } },
+    });
+    resultado.juegos.total = coleccionesJuegos.length;
+    for (const coleccion of coleccionesJuegos) {
+      const igdbIdAncla = coleccion.items[0]?.igdbId;
+      if (!igdbIdAncla) continue;
+      try {
+        const calculada = await calcularColeccionDesdeIgdb(igdbIdAncla);
+        if (!calculada) continue;
+        await prisma.curatedCollectionItem.deleteMany({ where: { collectionId: coleccion.id } });
+        await prisma.curatedCollection.update({
+          where: { id: coleccion.id },
+          data: {
+            nombre: calculada.nombre,
+            items: {
+              create: calculada.todos.map((g, index) => ({
+                igdbId: g.igdbId, titulo: g.titulo, anio: g.anio, portada: g.portada, cancelado: g.cancelado, orden: index,
+              })),
+            },
+          },
+        });
+        resultado.juegos.actualizadas++;
+      } catch (e) {
+        console.error(`Error reiniciando saga de juego "${coleccion.nombre}":`, e.message);
+      }
+    }
+
+    // --- 2. Sagas de películas/series (CuratedMovieCollection) ---
+    const sagasPeliculas = await prisma.curatedMovieCollection.findMany();
+    resultado.sagas.total = sagasPeliculas.length;
+    for (const saga of sagasPeliculas) {
+      if (!saga.tmdbCollectionId) {
+        // Sagas de serie suelta (sin Collection de TMDB): no hay de dónde
+        // recalcular, así que no se tocan — solo se avisa de cuántas hay.
+        resultado.sagas.sinFuente++;
+        continue;
+      }
+      try {
+        const calculada = await calcularColeccionMovieDesdeTmdb(saga.tmdbCollectionId, 'en-US');
+        if (!calculada) continue;
+        await prisma.curatedMovieCollectionItem.deleteMany({ where: { collectionId: saga.id } });
+        await prisma.curatedMovieCollection.update({
+          where: { id: saga.id },
+          data: {
+            nombre: calculada.nombre,
+            items: {
+              create: calculada.items.map((it, index) => ({
+                tmdbId: it.tmdbId, tipo: it.tipo, titulo: it.titulo, anio: it.anio, portada: it.portada, orden: index,
+              })),
+            },
+          },
+        });
+        resultado.sagas.actualizadas++;
+      } catch (e) {
+        console.error(`Error reiniciando saga de películas "${saga.nombre}":`, e.message);
+      }
+    }
+
+    // --- 3. Universos (CinematicUniverse): se vacían y se reconstruyen desde
+    // sus fuentes guardadas (collection/company/keyword), exactamente como
+    // si se importaran por primera vez. ---
+    const apiKey = process.env.TMDB_API_KEY;
+    const universos = await prisma.cinematicUniverse.findMany({ include: { fuentes: true } });
+    resultado.universos.total = universos.length;
+
+    for (const universo of universos) {
+      if (universo.fuentes.length === 0) continue; // universo sin fuentes = todo manual, no se toca
+
+      try {
+        await prisma.cinematicUniverseItem.deleteMany({ where: { universeId: universo.id } });
+
+        for (const fuente of universo.fuentes) {
+          let peliculas = [];
+
+          if (fuente.tipo === 'collection') {
+            const r = await fetch(`https://api.themoviedb.org/3/collection/${fuente.tmdbId}?api_key=${apiKey}`);
+            const d = await r.json();
+            if (d.parts) peliculas = d.parts.map((p) => ({ ...p, __pestañaFija: d.name || 'Collection', __tipoTmdb: 'movie' }));
+          } else if (fuente.tipo === 'company') {
+            let pagina = 1, totalPaginas = 1;
+            do {
+              const r = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&with_companies=${fuente.tmdbId}&sort_by=primary_release_date.asc&page=${pagina}`);
+              const d = await r.json();
+              peliculas.push(...(d.results || []).map((p) => ({ ...p, __tipoTmdb: 'movie' })));
+              totalPaginas = d.total_pages || 1;
+              pagina++;
+            } while (pagina <= totalPaginas && pagina <= 10);
+          } else if (fuente.tipo === 'keyword') {
+            for (const tipoTmdb of ['movie', 'tv']) {
+              let pagina = 1, totalPaginas = 1;
+              do {
+                const r = await fetch(`https://api.themoviedb.org/3/discover/${tipoTmdb}?api_key=${apiKey}&with_keywords=${fuente.tmdbId}&sort_by=${tipoTmdb === 'movie' ? 'primary_release_date.asc' : 'first_air_date.asc'}&page=${pagina}`);
+                const d = await r.json();
+                peliculas.push(...(d.results || []).map((p) => ({ ...p, __tipoTmdb: tipoTmdb })));
+                totalPaginas = d.total_pages || 1;
+                pagina++;
+              } while (pagina <= totalPaginas && pagina <= 10);
+            }
+          }
+
+          const idsExistentes = new Set(
+            (await prisma.cinematicUniverseItem.findMany({ where: { universeId: universo.id }, select: { tmdbId: true } })).map((e) => e.tmdbId)
+          );
+          const ordenPorPestaña = {};
+
+          for (const p of peliculas) {
+            if (idsExistentes.has(p.id)) continue;
+
+            let pestaña = p.__pestañaFija || 'Other';
+            if (!p.__pestañaFija && p.__tipoTmdb === 'movie') {
+              try {
+                const detR = await fetch(`https://api.themoviedb.org/3/movie/${p.id}?api_key=${apiKey}`);
+                const det = await detR.json();
+                if (det.belongs_to_collection?.name) pestaña = det.belongs_to_collection.name;
+              } catch (e) { }
+            }
+
+            if (ordenPorPestaña[pestaña] === undefined) {
+              const max = await prisma.cinematicUniverseItem.aggregate({ where: { universeId: universo.id, pestaña }, _max: { orden: true } });
+              ordenPorPestaña[pestaña] = (max._max.orden ?? -1) + 1;
+            }
+
+            const titulo = p.__tipoTmdb === 'movie' ? p.title : p.name;
+            const fechaTexto = p.__tipoTmdb === 'movie' ? p.release_date : p.first_air_date;
+
+            await prisma.cinematicUniverseItem.create({
+              data: {
+                universeId: universo.id,
+                tmdbId: p.id,
+                tipo: p.__tipoTmdb === 'movie' ? 'PELICULA' : 'SERIE',
+                titulo,
+                anio: fechaTexto ? new Date(fechaTexto).getFullYear() : null,
+                fechaEstreno: fechaTexto ? new Date(fechaTexto) : null,
+                portada: p.poster_path ? `https://image.tmdb.org/t/p/w780${p.poster_path}` : null,
+                pestaña,
+                orden: ordenPorPestaña[pestaña]++,
+              },
+            });
+            idsExistentes.add(p.id);
+          }
+        }
+
+        // Reordenar por fecha dentro de cada pestaña, igual que ya hace refresh.
+        const todosLosItems = await prisma.cinematicUniverseItem.findMany({ where: { universeId: universo.id } });
+        const porPestaña = new Map();
+        for (const item of todosLosItems) {
+          if (!porPestaña.has(item.pestaña)) porPestaña.set(item.pestaña, []);
+          porPestaña.get(item.pestaña).push(item);
+        }
+        const actualizaciones = [];
+        for (const items of porPestaña.values()) {
+          const ordenados = [...items].sort((a, b) => {
+            const fechaA = a.fechaEstreno ? new Date(a.fechaEstreno).getTime() : a.anio ? new Date(a.anio, 0, 1).getTime() : Infinity;
+            const fechaB = b.fechaEstreno ? new Date(b.fechaEstreno).getTime() : b.anio ? new Date(b.anio, 0, 1).getTime() : Infinity;
+            return fechaA - fechaB;
+          });
+          ordenados.forEach((item, index) => {
+            if (item.orden !== index) actualizaciones.push(prisma.cinematicUniverseItem.update({ where: { id: item.id }, data: { orden: index } }));
+          });
+        }
+        if (actualizaciones.length > 0) await prisma.$transaction(actualizaciones);
+
+        resultado.universos.actualizados++;
+      } catch (e) {
+        console.error(`Error reiniciando universo "${universo.nombre}":`, e.message);
+      }
+    }
+
+    res.json({ ok: true, ...resultado });
+  } catch (error) {
+    console.error('ERROR EN POST /admin/reset-absolutamente-todo:', error);
+    res.status(500).json({ error: 'Error al reiniciar todo' });
+  }
+});
+
+// --- REORDENAR POR FECHA (cronológico) TODAS LAS SAGAS DE PELÍCULAS/SERIES
+// Y TODOS LOS UNIVERSOS, de golpe (solo admin) ---
+// No borra ni recalcula nada desde TMDB — solo reescribe el campo "orden" en
+// la base de datos para que coincida con el orden por año, que es el
+// criterio que ahora se usa siempre. También resetea ordenUniverso a null
+// en los universos, para que la pestaña "todas" vuelva a caer en orden
+// cronológico puro (en vez de quedarse con un orden manual antiguo).
+app.post('/admin/reordenar-todo-por-fecha', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    let sagasActualizadas = 0;
+    let universosActualizados = 0;
+
+    // --- CuratedMovieCollection (sagas de películas/series) ---
+    const sagas = await prisma.curatedMovieCollection.findMany({
+      include: { items: true },
+    });
+    for (const saga of sagas) {
+      const ordenados = [...saga.items].sort((a, b) => (a.anio ?? Infinity) - (b.anio ?? Infinity));
+      const actualizaciones = ordenados
+        .map((item, index) =>
+          item.orden !== index
+            ? prisma.curatedMovieCollectionItem.update({ where: { id: item.id }, data: { orden: index } })
+            : null
+        )
+        .filter(Boolean);
+      if (actualizaciones.length > 0) {
+        await prisma.$transaction(actualizaciones);
+        sagasActualizadas++;
+      }
+    }
+
+    // --- CinematicUniverse (universos de cine/TV) ---
+    const universos = await prisma.cinematicUniverse.findMany({ include: { items: true } });
+    for (const universo of universos) {
+      const porPestaña = new Map();
+      for (const item of universo.items) {
+        if (!porPestaña.has(item.pestaña)) porPestaña.set(item.pestaña, []);
+        porPestaña.get(item.pestaña).push(item);
+      }
+
+      const actualizaciones = [];
+      for (const items of porPestaña.values()) {
+        const ordenados = [...items].sort((a, b) => {
+          const fechaA = a.fechaEstreno ? new Date(a.fechaEstreno).getTime() : a.anio ? new Date(a.anio, 0, 1).getTime() : Infinity;
+          const fechaB = b.fechaEstreno ? new Date(b.fechaEstreno).getTime() : b.anio ? new Date(b.anio, 0, 1).getTime() : Infinity;
+          return fechaA - fechaB;
+        });
+        ordenados.forEach((item, index) => {
+          const data = {};
+          if (item.orden !== index) data.orden = index;
+          if (item.ordenUniverso !== null) data.ordenUniverso = null;
+          if (Object.keys(data).length > 0) {
+            actualizaciones.push(prisma.cinematicUniverseItem.update({ where: { id: item.id }, data }));
+          }
+        });
+      }
+      if (actualizaciones.length > 0) {
+        await prisma.$transaction(actualizaciones);
+        universosActualizados++;
+      }
+    }
+
+    res.json({ ok: true, sagasActualizadas, totalSagas: sagas.length, universosActualizados, totalUniversos: universos.length });
+  } catch (error) {
+    console.error('ERROR EN POST /admin/reordenar-todo-por-fecha:', error);
+    res.status(500).json({ error: 'Error al reordenar por fecha' });
+  }
+});
+
 // --- CREAR UN UNIVERSO CINEMATOGRÁFICO NUEVO ---
 app.post('/admin/cinematic-universes', requireAuth, requireAdmin, async (req, res) => {
   try {
@@ -2894,6 +3161,21 @@ app.post('/admin/cinematic-universes/:universeId/reset', requireAuth, requireAdm
   } catch (error) {
     console.error('ERROR EN POST /admin/cinematic-universes/:universeId/reset:', error);
     res.status(500).json({ error: 'Error al vaciar el universo' });
+  }
+});
+
+// --- BORRAR UN UNIVERSO ENTERO (la fila en sí, no solo vaciarlo) ---
+app.delete('/admin/cinematic-universes/:universeId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const universeId = parseInt(req.params.universeId);
+    // Cascade en el schema borra items/fases/fuentes automáticamente al
+    // borrar el universo — no hace falta borrarlos a mano antes.
+    await prisma.cinematicUniverse.delete({ where: { id: universeId } });
+    res.json({ ok: true });
+  } catch (error) {
+    if (error.code === 'P2025') return res.json({ ok: true }); // ya no existía
+    console.error('ERROR EN DELETE /admin/cinematic-universes/:universeId:', error);
+    res.status(500).json({ error: 'Error al borrar el universo' });
   }
 });
 
@@ -3594,7 +3876,17 @@ app.post('/media/tmdb', async (req, res) => {
     // ahora las carátulas son enlaces <a> de verdad (para que el clic
     // central/Ctrl+clic abran en pestaña nueva de forma nativa) que pueden
     // apuntar directamente aquí sin haber comprobado antes si ya existe.
-    const existente = await prisma.media.findFirst({ where: { tmdbId: parseInt(tmdbId, 10) } });
+
+    // OJO: TMDB numera películas y series en espacios de IDs independientes,
+    // así que puede haber una película guardada con el MISMO tmdbId numérico
+    // que la serie (o película) que se está pidiendo ahora. Antes esta
+    // comprobación buscaba solo por tmdbId, así que devolvía la fila
+    // equivocada (p. ej. una película china sin relación) en vez de crear/
+    // consultar la serie real — y el frontend acababa navegando a la ficha
+    // de esa otra película. Ahora se exige también que coincida el tipo.
+    const existente = await prisma.media.findFirst({
+      where: { tmdbId: parseInt(tmdbId, 10), tipo: tipo || 'PELICULA' }
+    });
     if (existente) return res.json(existente);
 
     const apiKey = process.env.TMDB_API_KEY;
@@ -4492,20 +4784,57 @@ async function calcularColeccionMovieDesdeTmdb(tmdbCollectionId, idioma) {
 // Construye la respuesta que consume el frontend a partir de lo guardado en
 // CuratedMovieCollection/CuratedMovieCollectionItem — no vuelve a tocar TMDB
 // para nada salvo prequel/sequel, que sigue calculándose por posición.
-async function construirRespuestaMovieCollection(collectionId, tmdbIdActual) {
+async function construirRespuestaMovieCollection(collectionId, tmdbIdActual, idioma) {
   const collection = await prisma.curatedMovieCollection.findUnique({
     where: { id: collectionId },
     include: { items: { orderBy: { orden: 'asc' } } },
   });
   if (!collection) return null;
 
-  const items = collection.items;
+  // El orden dentro de una saga es SIEMPRE cronológico por año, sin importar
+  // si es película o serie.
+  let items = [...collection.items].sort((a, b) => (a.anio ?? Infinity) - (b.anio ?? Infinity));
+  let nombreMostrado = collection.nombre;
+
+  // Los títulos se guardaron en el idioma que estuviera activo la PRIMERA
+  // vez que se sembró esta saga, y nunca se actualizan solos. Para que
+  // respeten tu idioma actual (como el resto de la app), se piden en vivo
+  // los títulos reales en tu idioma, sin tocar lo guardado en la base de
+  // datos. Se aplica siempre, no solo cuando el idioma pedido es distinto
+  // de inglés — la saga pudo haberse guardado en cualquier idioma.
+  if (idioma) {
+    const apiKey = process.env.TMDB_API_KEY;
+    items = await Promise.all(
+      items.map(async (item) => {
+        try {
+          const endpointTmdb = item.tipo === 'SERIE' ? 'tv' : 'movie';
+          const r = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${item.tmdbId}?api_key=${apiKey}&language=${idioma}`);
+          const d = await r.json();
+          const tituloTraducido = d.title || d.name;
+          return tituloTraducido && tituloTraducido.trim() ? { ...item, titulo: tituloTraducido } : item;
+        } catch (e) {
+          return item; // si falla para uno solo, se queda con el título guardado
+        }
+      })
+    );
+
+    if (collection.tmdbCollectionId) {
+      try {
+        const rCol = await fetch(`https://api.themoviedb.org/3/collection/${collection.tmdbCollectionId}?api_key=${apiKey}&language=${idioma}`);
+        const dCol = await rCol.json();
+        if (dCol.name && dCol.name.trim()) nombreMostrado = dCol.name;
+      } catch (e) {
+        // si falla, se queda con el nombre guardado
+      }
+    }
+  }
+
   const indiceActual = items.findIndex((it) => it.tmdbId === tmdbIdActual);
   const prequelItem = indiceActual > 0 ? items[indiceActual - 1] : null;
   const sequelItem = indiceActual >= 0 && indiceActual < items.length - 1 ? items[indiceActual + 1] : null;
 
   return {
-    collection: { id: collection.id, nombre: collection.nombre, tmdbCollectionId: collection.tmdbCollectionId },
+    collection: { id: collection.id, nombre: nombreMostrado, tmdbCollectionId: collection.tmdbCollectionId },
     items: items.map((it) => ({
       id: it.id,
       tmdbId: it.tmdbId,
@@ -4582,6 +4911,39 @@ async function obtenerOCrearMovieCollection({ tmdbCollectionId, tmdbSeriesId, no
 
   return null;
 }
+
+// --- CREAR UNA SAGA NUEVA DESDE CERO, ANCLADA A ESTA PELÍCULA (sin
+// Collection de TMDB) — para cuando quieres empezar a mano una saga que
+// TMDB no reconoce como tal. ---
+app.post('/admin/movie-collections', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { nombre, tmdbId, tipo, titulo, anio, portada } = req.body;
+    if (!nombre || !nombre.trim() || !tmdbId || !titulo) {
+      return res.status(400).json({ error: 'Faltan datos: nombre, tmdbId y titulo son obligatorios' });
+    }
+
+    const coleccion = await prisma.curatedMovieCollection.create({
+      data: {
+        nombre: nombre.trim(),
+        items: {
+          create: [{
+            tmdbId: parseInt(tmdbId, 10),
+            tipo: tipo === 'SERIE' ? 'SERIE' : 'PELICULA',
+            titulo,
+            anio: anio || null,
+            portada: portada || null,
+            orden: 0,
+          }],
+        },
+      },
+    });
+
+    res.status(201).json(coleccion);
+  } catch (error) {
+    console.error('ERROR EN POST /admin/movie-collections:', error);
+    res.status(500).json({ error: 'Error al crear la saga' });
+  }
+});
 
 // --- AÑADIR MANUALMENTE una película/serie a una CuratedMovieCollection ---
 app.post('/admin/movie-collections/:collectionId/items', requireAuth, requireAdmin, async (req, res) => {
@@ -4678,7 +5040,7 @@ app.post('/admin/movie-collections/:collectionId/reset', requireAuth, requireAdm
       },
     });
 
-    res.json(await construirRespuestaMovieCollection(collectionId, req.body.tmdbIdActual || coleccion.tmdbCollectionId));
+    res.json(await construirRespuestaMovieCollection(collectionId, req.body.tmdbIdActual || coleccion.tmdbCollectionId, getLang(req)));
   } catch (error) {
     console.error('ERROR EN POST /admin/movie-collections/:collectionId/reset:', error);
     res.status(500).json({ error: 'Error al reiniciar la colección' });
@@ -4698,7 +5060,7 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
 
     let respuestaColeccion;
     if (itemExistente) {
-      respuestaColeccion = await construirRespuestaMovieCollection(itemExistente.collectionId, tmdbIdNum);
+      respuestaColeccion = await construirRespuestaMovieCollection(itemExistente.collectionId, tmdbIdNum, idioma);
     } else {
       const movieRes = await fetch(`https://api.themoviedb.org/3/movie/${tmdbIdNum}?api_key=${apiKey}&language=${idioma}`);
       const movieData = await movieRes.json();
@@ -4708,7 +5070,7 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
           tmdbCollectionId: movieData.belongs_to_collection.id,
           idioma,
         });
-        respuestaColeccion = coleccion ? await construirRespuestaMovieCollection(coleccion.id, tmdbIdNum) : null;
+        respuestaColeccion = coleccion ? await construirRespuestaMovieCollection(coleccion.id, tmdbIdNum, idioma) : null;
       } else {
         respuestaColeccion = null;
       }
@@ -4733,9 +5095,32 @@ app.get('/tmdb/collection/:tmdbId', async (req, res) => {
 // "By series" o el buscador mixto dentro del propio universo) ---
 app.get('/tmdb/tv/:tmdbId/universe', async (req, res) => {
   try {
-    const { tmdbId } = req.params;
-    const universo = await construirRespuestaUniverso(parseInt(tmdbId), getLang(req));
-    res.json({ prequel: null, sequel: null, nombreColeccion: null, collectionId: null, parts: [], universo });
+    const tmdbIdNum = parseInt(req.params.tmdbId, 10);
+    const idioma = getLang(req);
+
+    // Las series no tienen "Collection" propia en TMDB (a diferencia de las
+    // películas), así que no hay forma automática de detectar su saga — pero
+    // SÍ puede haberse añadido a mano a una CuratedMovieCollection de
+    // películas ya existente (p. ej. "El increíble Hulk - Colección"). Si es
+    // así, la tratamos igual que a una película: se sirve como su propia
+    // saga, sin pasar por el flujo de "Add to a Cinematic Universe".
+    const itemExistente = await prisma.curatedMovieCollectionItem.findFirst({
+      where: { tmdbId: tmdbIdNum, tipo: 'SERIE' },
+      select: { collectionId: true },
+    });
+
+    let respuestaColeccion = null;
+    if (itemExistente) {
+      respuestaColeccion = await construirRespuestaMovieCollection(itemExistente.collectionId, tmdbIdNum, idioma);
+    }
+
+    const universo = await construirRespuestaUniverso(tmdbIdNum, idioma);
+
+    if (!respuestaColeccion) {
+      return res.json({ collection: null, items: [], prequel: null, sequel: null, universo });
+    }
+
+    res.json({ ...respuestaColeccion, universo });
   } catch (error) {
     console.error('Error al obtener el universo de la serie:', error);
     res.status(500).json({ error: 'Error al obtener universo' });

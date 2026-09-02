@@ -44,15 +44,21 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   // comprueba tu portada real por su cuenta, en el navegador.
   const getLocalData = (item: any) => {
     const esJuego = item.media_type === 'juego';
+    // OJO: TMDB numera películas y series en espacios de IDs independientes,
+    // así que una película guardada puede tener el MISMO tmdbId numérico que
+    // una serie distinta que aparece en los resultados (y viceversa). Sin
+    // comprobar también el tipo, esto podía devolver el dbId de una película
+    // al buscar una serie con ese mismo número — y el enlace acababa
+    // abriendo la ficha equivocada.
+    const tipoEsperado = item.media_type === 'tv' ? 'SERIE' : 'PELICULA';
     const local = esJuego
       ? myDb.find((m: any) => m.igdbId === item.id)
-      : myDb.find((m: any) => m.tmdbId === item.id);
+      : myDb.find((m: any) => m.tmdbId === item.id && m.tipo === tipoEsperado);
     return {
       dbId: local ? local.id : null,
       customPoster: local?.portada || null
     };
   };
-
   const resultadosFiltrados = tipoActivo === 'all'
     ? results
     : results.filter((item: any) => item.media_type === tipoActivo);
@@ -93,11 +99,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 <Link
                   key={filtro.value}
                   href={`/search?q=${encodeURIComponent(query)}${filtro.value === 'all' ? '' : `&tipo=${filtro.value}`}`}
-                  className={`block px-4 py-3 text-sm font-semibold border-b border-gray-800 last:border-b-0 transition ${
-                    tipoActivo === filtro.value
+                  className={`block px-4 py-3 text-sm font-semibold border-b border-gray-800 last:border-b-0 transition ${tipoActivo === filtro.value
                       ? 'bg-gray-700 text-white'
                       : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  }`}
+                    }`}
                 >
                   {filtro.label}
                 </Link>
