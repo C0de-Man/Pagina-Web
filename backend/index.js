@@ -1279,15 +1279,24 @@ app.get('/igdb/ediciones/:igdbId', async (req, res) => {
       'Content-Type': 'text/plain'
     };
 
-    const queryBase = `fields name, platforms.id, platforms.name; where id = ${igdbId};`;
-    const queryVersiones = `fields name, game_type, platforms.id, platforms.name; where parent_game = ${igdbId}; limit 50;`;
+    const queryBase = `fields name, first_release_date, platforms.id, platforms.name; where id = ${igdbId};`;
+    const queryVersiones = `fields name, game_type, first_release_date, platforms.id, platforms.name; where parent_game = ${igdbId}; limit 50;`;
+    // IGDB representa las ediciones concretas de un mismo juego (Collector's
+    // Edition, GOTY Edition, Deluxe Edition...) como entradas SEPARADAS que
+    // apuntan de vuelta al juego "canónico" mediante version_parent — no
+    // mediante parent_game (ese campo es para DLCs/remasters/ports/bundles,
+    // ver arriba). Sin esta consulta aparte, esas ediciones nunca aparecían
+    // en el desplegable "Version played".
+    const queryEdicionesPorVersionParent = `fields name, game_type, platforms.id, platforms.name; where version_parent = ${igdbId}; limit 50;`;
 
-    const [resBase, resVersiones] = await Promise.all([
+    const [resBase, resVersiones, resEdicionesVersionParent] = await Promise.all([
       fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryBase }),
       fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryVersiones }),
+      fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryEdicionesPorVersionParent }),
     ]);
     const dataBase = await resBase.json();
     const dataVersiones = await resVersiones.json();
+    const dataEdicionesVersionParent = await resEdicionesVersionParent.json();
 
     const base = dataBase[0];
     // 3 bundle (GOTY/Complete Edition...), 9 remaster, 10 expanded_game,
@@ -1297,6 +1306,20 @@ app.get('/igdb/ediciones/:igdbId', async (req, res) => {
     const TIPOS_VERSION = [3, 9, 10, 11];
     let versiones = (dataVersiones || []).filter((g) => TIPOS_VERSION.includes(g.game_type));
 
+    // Las ediciones encontradas por version_parent se admiten TODAS, sin
+    // filtrar por game_type — a diferencia de parent_game, aquí el propio
+    // hecho de que apunten a este juego como su version_parent ya confirma
+    // que son una edición/SKU concreta del mismo juego (Collector's Edition,
+    // GOTY Edition, Deluxe Edition, Definitive Edition...), sea cual sea su
+    // game_type (o aunque no lo tengan puesto).
+    const idsYaVistos = new Set(versiones.map((v) => v.id));
+    for (const ed of dataEdicionesVersionParent || []) {
+      if (!idsYaVistos.has(ed.id)) {
+        versiones.push(ed);
+        idsYaVistos.add(ed.id);
+      }
+    }
+
     // Respaldo por texto: algunas ediciones/bundles tienen su parent_game en
     // IGDB apuntando a otra cosa (un DLC, un map pack...) en vez de al juego
     // base — mismo problema ya visto con updates/ports/remasters huérfanos.
@@ -1304,14 +1327,40 @@ app.get('/igdb/ediciones/:igdbId', async (req, res) => {
     // empiece igual (mismo criterio de prefijo que getIgdbVersiones), para
     // no colar secuelas con nombre parecido.
     if (base?.name) {
-      const queryTexto = `search "${base.name}"; fields name, game_type, platforms.id, platforms.name; limit 30;`;
+      // Se pide también version_parent.id y first_release_date: los
+      // remakes que comparten el MISMO nombre exacto que el juego original
+      // (p. ej. "Resident Evil 4" 2005 y 2023) hacían que este respaldo por
+      // texto colara las ediciones antiguas del original (Wii Edition,
+      // Zeebo Edition, Mobile Edition...) en la lista del remake, porque
+      // solo comprobaba que el NOMBRE empezara igual — nunca que la
+      // edición perteneciera de verdad a ESTE juego. Se comprueban dos
+      // cosas, en este orden:
+      //   1) Si tiene version_parent puesto, que apunte EXACTAMENTE a este
+      //      igdbId (el criterio más fiable, cuando está disponible).
+      //   2) Si no tiene version_parent (bastantes ediciones antiguas no lo
+      //      llevan puesto en absoluto), se compara el AÑO de lanzamiento:
+      //      una edición de hace 10-15 años casi seguro es del juego
+      //      original, no de un remake reciente con el mismo nombre — se
+      //      descarta si la diferencia de años es mayor de 5.
+      const queryTexto = `search "${base.name}"; fields name, game_type, first_release_date, platforms.id, platforms.name, version_parent.id; limit 30;`;
       const respTexto = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryTexto });
       if (respTexto.ok) {
         const dataTexto = await respTexto.json();
         const nombreBaseNormalizado = base.name.toLowerCase();
         const idsYaVistos = new Set([igdbId, ...versiones.map((v) => v.id)]);
+        const anioBase = base.first_release_date ? new Date(base.first_release_date * 1000).getFullYear() : null;
         const candidatosTexto = (dataTexto || []).filter((g) => {
           if (!g.name || idsYaVistos.has(g.id) || !TIPOS_VERSION.includes(g.game_type)) return false;
+
+          if (g.version_parent) {
+            return g.version_parent.id === igdbId;
+          }
+
+          if (anioBase !== null && g.first_release_date) {
+            const anioCandidato = new Date(g.first_release_date * 1000).getFullYear();
+            if (Math.abs(anioCandidato - anioBase) > 5) return false;
+          }
+
           const nombreNormalizado = g.name.toLowerCase();
           if (!nombreNormalizado.startsWith(nombreBaseNormalizado)) return false;
           const resto = nombreNormalizado.slice(nombreBaseNormalizado.length);
@@ -1323,12 +1372,21 @@ app.get('/igdb/ediciones/:igdbId', async (req, res) => {
       }
     }
 
-    // Si el título tiene plataformas, las añadimos entre paréntesis: varias
-    // versiones suelen compartir el mismo nombre (una por plataforma), y sin
-    // esto son indistinguibles en el desplegable.
+    // Antes se metían TODAS las plataformas seguidas en el texto de cada
+    // opción — con ediciones tipo "Franchise Pack" (6+ plataformas), el
+    // texto se volvía kilométrico y se cortaba contra el borde de la
+    // ventana en el <select> nativo (que no se puede ensanchar de forma
+    // fiable con CSS, su desplegable lo dibuja el propio navegador/SO).
+    // Ahora se muestran como mucho 2 plataformas y, si hay más, "+N more".
     const conPlataformas = (nombre, g) => {
-      const plataformas = (g.platforms || []).map((p) => p.name).join(', ');
-      return plataformas ? `${nombre} (${plataformas})` : nombre;
+      const nombresPlataformas = (g.platforms || []).map((p) => p.name);
+      const anio = g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null;
+      const nombreConAnio = anio ? `${nombre} (${anio})` : nombre;
+      if (nombresPlataformas.length === 0) return nombreConAnio;
+      const primeras = nombresPlataformas.slice(0, 2).join(', ');
+      const resto = nombresPlataformas.length - 2;
+      const sufijoPlataformas = resto > 0 ? `${primeras} +${resto} more` : primeras;
+      return `${nombreConAnio} — ${sufijoPlataformas}`;
     };
 
     const opciones = [
