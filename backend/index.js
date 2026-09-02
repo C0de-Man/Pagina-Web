@@ -683,7 +683,16 @@ app.get('/igdb/catalogo/page/:page', async (req, res) => {
     const countData = await countResponse.json();
     const totalPaginas = Math.max(1, Math.ceil((countData.count || 0) / itemsPerPage));
 
-    res.json({ page, totalPaginas, results: (data || []).map(arreglarCoverIgdb) });
+    // Antes este endpoint devolvía la carátula tal cual la diera IGDB en ese
+    // momento, sin comprobar si el juego ya está guardado con otra carátula
+    // (la elegida a mano, o simplemente la que se guardó al añadirlo por
+    // primera vez) — a diferencia de /igdb/popular, /igdb/year y sus versiones
+    // paginadas, que sí hacen este cruce. Resultado: el grid de "Games" podía
+    // mostrar una carátula distinta a la que se ve en cualquier otro sitio de
+    // la app para el mismo juego.
+    const arreglados = (data || []).map(arreglarCoverIgdb);
+    const final = await mezclarCaratulasJuegos(arreglados, getUserIdOpcional(req));
+    res.json({ page, totalPaginas, results: final });
   } catch (error) {
     console.error('ERROR EN GET /igdb/catalogo/page:', error);
     res.status(500).json({ error: 'Error al obtener el catálogo de juegos' });
