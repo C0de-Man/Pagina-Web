@@ -321,15 +321,29 @@ app.get('/igdb/company/:companyId', async (req, res) => {
       const respJuegos = await fetchIgdb('https://api.igdb.com/v4/games', {
         method: 'POST',
         headers,
-        body: `fields name, cover.url, first_release_date; where id = (${gameIds.join(',')}); sort first_release_date desc; limit 500;`,
+        body: `fields name, cover.url, first_release_date, game_type, platforms.name, version_parent; where id = (${gameIds.join(',')}); sort first_release_date desc; limit 500;`,
       });
       const dataJuegos = await respJuegos.json();
-      juegos = (dataJuegos || []).map((g) => ({
-        igdbId: g.id,
-        titulo: g.name,
-        anio: g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null,
-        portada: g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null,
-      }));
+
+      // Mismo criterio de game_type que ya usan /igdb/search, /igdb/catalogo
+      // y la franquicia amplia — antes esta ruta no filtraba nada, así que
+      // la filmografía de un estudio salía llena de bundles ("Marvel vs.
+      // Capcom 2"-style compilations no, pero sí "Capcom Essentials"),
+      // "Collections", DLCs, remasters, ediciones especiales, etc. en vez de
+      // solo los juegos base.
+      const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14];
+      const PLATAFORMAS_EXCLUIDAS = ['Handheld Electronic LCD', 'Plug & Play', 'V.Smile', 'LeapTV'];
+
+      juegos = (dataJuegos || [])
+        .filter((g) => !TIPOS_EXCLUIDOS.includes(g.game_type))
+        .filter((g) => !g.version_parent)
+        .filter((g) => !(g.platforms || []).some((p) => PLATAFORMAS_EXCLUIDAS.includes(p.name)))
+        .map((g) => ({
+          igdbId: g.id,
+          titulo: g.name,
+          anio: g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null,
+          portada: g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null,
+        }));
     }
 
     res.json({
