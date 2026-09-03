@@ -8,7 +8,7 @@ import SettingsIdiomaRegion from '@/components/SettingsIdiomaRegion';
 
 export default function Settings() {
   const router = useRouter();
-  const [tab, setTab] = useState<'perfil' | 'account'>('perfil');
+  const [tab, setTab] = useState<'perfil' | 'account' | 'admin'>('perfil');
   const [username, setUsername] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -83,6 +83,13 @@ export default function Settings() {
     const guardado = localStorage.getItem('ocultarNsfw');
     setOcultarNsfw(guardado === null ? true : guardado === 'true');
   }, []);
+
+  // Si en algún momento dejas de ser admin (o esta pestaña quedó activa de
+  // antes) y no lo eres, no te dejamos quedarte en una pestaña que ya no
+  // deberías ver — te devuelve a Profile.
+  useEffect(() => {
+    if (tab === 'admin' && !isAdmin) setTab('perfil');
+  }, [tab, isAdmin]);
 
   const alternarOcultarNsfw = () => {
     const nuevoValor = !ocultarNsfw;
@@ -319,76 +326,111 @@ export default function Settings() {
           >
             Account
           </button>
+          {/* Pestaña "Admin": solo se pinta si eres admin — un usuario normal
+              nunca la ve ni puede llegar a ella (y por si acaso, el useEffect
+              de arriba te saca de esta pestaña si dejas de ser admin). */}
+          {isAdmin && (
+            <button
+              onClick={() => setTab('admin')}
+              className={`pb-3 text-sm font-bold uppercase tracking-wider cursor-pointer ${tab === 'admin' ? 'text-white border-b-2 border-amber-500' : 'text-gray-400'
+                }`}
+            >
+              Admin
+            </button>
+          )}
         </div>
 
         {tab === 'perfil' ? (
-          <div className="flex flex-col md:flex-row gap-8">
-            <div className="flex-grow">
-              <h2 className="text-lg font-bold mb-4">Profile</h2>
-              <label className="text-xs text-gray-400 uppercase tracking-wider">Username</label>
-              <input
-                value={usernameInput}
-                onChange={(e) => setUsernameInput(e.target.value)}
-                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 mt-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-600"
-              />
-              {errorGuardar && <p className="text-red-400 text-xs mt-1">{errorGuardar}</p>}
+          <div>
+            <div className="flex flex-col md:flex-row gap-8">
+              <div className="flex-grow">
+                <h2 className="text-lg font-bold mb-4">Profile</h2>
+                <label className="text-xs text-gray-400 uppercase tracking-wider">Username</label>
+                <input
+                  value={usernameInput}
+                  onChange={(e) => setUsernameInput(e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 mt-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-600"
+                />
+                {errorGuardar && <p className="text-red-400 text-xs mt-1">{errorGuardar}</p>}
 
-              <button
-                onClick={guardarCambios}
-                disabled={guardando}
-                className="mt-6 bg-green-600 hover:bg-green-500 disabled:opacity-50 px-5 py-2 rounded font-bold text-sm transition cursor-pointer"
-              >
-                {guardando ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
+                <button
+                  onClick={guardarCambios}
+                  disabled={guardando}
+                  className="mt-6 bg-green-600 hover:bg-green-500 disabled:opacity-50 px-5 py-2 rounded font-bold text-sm transition cursor-pointer"
+                >
+                  {guardando ? 'Saving...' : 'Save Changes'}
+                </button>
 
-            <div className="w-full md:w-[420px] flex-shrink-0">
-              <div className="bg-[#1c2228] border border-gray-700 rounded-lg p-4 mb-6">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Avatar</h3>
-                <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-full overflow-hidden bg-gray-800 border border-gray-700 flex-shrink-0">
-                    <img
-                      src={avatarPreview || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username || 'user'}`}
-                      alt="Avatar"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <button
-                    onClick={() => setCropAbierto(true)}
-                    className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
-                  >
-                    Change
-                  </button>
+                {/* Idioma/región: dentro de la columna izquierda, justo
+                    debajo del botón — así no hereda la altura de la columna
+                    derecha (Avatar/Favorites) por el "stretch" del flex, que
+                    antes dejaba un hueco enorme antes de llegar aquí. */}
+                <div className="mt-10 pt-6 border-t border-gray-800 max-w-md">
+                  <SettingsIdiomaRegion />
                 </div>
               </div>
 
-              <div className="bg-[#1c2228] border border-gray-700 rounded-lg p-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Favorites</h3>
-                <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
-                  {favoritos.map((item, i) => (
-                    <div
-                      key={i}
-                      onClick={() => setSlotAbierto(i)}
-                      className="aspect-[2/3] rounded bg-gray-800 border border-gray-700 hover:border-gray-500 cursor-pointer overflow-hidden flex items-center justify-center transition"
-                    >
-                      {item?.portada ? (
-                        <img src={item.portada} alt={item.titulo} className="w-full h-full object-cover" />
-                      ) : (
-                        <span className="text-gray-500 text-xl">+</span>
-                      )}
+              <div className="w-full md:w-[420px] flex-shrink-0">
+                <div className="bg-[#1c2228] border border-gray-700 rounded-lg p-4 mb-6">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Avatar</h3>
+                  <div className="flex items-center gap-4">
+                    <div className="w-20 h-20 rounded-full overflow-hidden bg-gray-800 border border-gray-700 flex-shrink-0">
+                      <img
+                        src={avatarPreview || `https://api.dicebear.com/7.x/avataaars/svg?seed=${username || 'user'}`}
+                        alt="Avatar"
+                        className="w-full h-full object-cover"
+                      />
                     </div>
-                  ))}
+                    <button
+                      onClick={() => setCropAbierto(true)}
+                      className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
+                    >
+                      Change
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-[#1c2228] border border-gray-700 rounded-lg p-4">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Favorites</h3>
+                  <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
+                    {favoritos.map((item, i) => (
+                      <div
+                        key={i}
+                        onClick={() => setSlotAbierto(i)}
+                        className="group relative aspect-[2/3] rounded bg-gray-800 border border-gray-700 hover:border-gray-500 cursor-pointer overflow-hidden flex items-center justify-center transition"
+                      >
+                        {item?.portada ? (
+                          <>
+                            <img src={item.portada} alt={item.titulo} className="w-full h-full object-cover" />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const nuevos = [...favoritos];
+                                nuevos[i] = null;
+                                setFavoritos(nuevos);
+                              }}
+                              title="Remove from favorites"
+                              className="absolute top-1 right-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/80 text-xs font-bold text-white opacity-0 transition hover:bg-red-600 group-hover:opacity-100 cursor-pointer"
+                            >
+                              ×
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-gray-500 text-xl">+</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        ) : (
+        ) : tab === 'account' ? (
           <div className="max-w-md">
             <h2 className="text-lg font-bold mb-4">Account</h2>
 
-            <SettingsIdiomaRegion />
-
-            <div className="mt-8 pt-6 border-t border-gray-800">
+            <div>
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">Private account</h3>
@@ -414,7 +456,7 @@ export default function Settings() {
               </div>
             </div>
 
-                        <div className="mt-8 pt-6 border-t border-gray-800">
+            <div className="mt-8 pt-6 border-t border-gray-800">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">Hide adult content</h3>
@@ -439,21 +481,8 @@ export default function Settings() {
               </div>
             </div>
 
-            <div className="mt-8 pt-6 border-t border-gray-800">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Custom covers</h3>
-              <p className="text-gray-500 text-sm mb-3">
-                Remove every custom poster and banner you've personally set across your whole catalog, and go back to the original default cover for everything.
-              </p>
-              <button
-                onClick={() => setConfirmandoReset(true)}
-                disabled={reseteando}
-                className="bg-red-900/40 hover:bg-red-900/60 disabled:opacity-50 text-red-300 hover:text-red-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
-              >
-                {reseteando ? 'Resetting...' : 'Reset all custom covers'}
-              </button>
-              {resultadoReset && <p className="text-gray-400 text-sm mt-2">{resultadoReset}</p>}
-            </div>
-
+            {/* Change email / password: movido justo debajo de "Hide adult
+                content" (antes estaba después de "Custom covers"). */}
             <div className="mt-8 pt-6 border-t border-gray-800">
               <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Change email / password</h3>
               <p className="text-gray-500 text-sm mb-3">
@@ -510,24 +539,20 @@ export default function Settings() {
               </button>
             </div>
 
-            {isAdmin && (
-              <div className="mt-8 pt-6 border-t border-amber-900">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2">Reset account (admin)</h3>
-                <p className="text-gray-500 text-sm mb-3">
-                  Wipe every bit of activity on this account — watched history, ratings, reviews, lists, favorites, follows and notifications. Your email, username, password and avatar stay exactly as they are. This cannot be undone.
-                </p>
-                <button
-                  onClick={() => {
-                    setUsernameConfirmacionReset('');
-                    setErrorResetCuenta(null);
-                    setConfirmandoResetCuenta(true);
-                  }}
-                  className="bg-amber-900/40 hover:bg-amber-900/60 text-amber-300 hover:text-amber-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
-                >
-                  Reset account data
-                </button>
-              </div>
-            )}
+            <div className="mt-8 pt-6 border-t border-gray-800">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Custom covers</h3>
+              <p className="text-gray-500 text-sm mb-3">
+                Remove every custom poster and banner you've personally set across your whole catalog, and go back to the original default cover for everything.
+              </p>
+              <button
+                onClick={() => setConfirmandoReset(true)}
+                disabled={reseteando}
+                className="bg-red-900/40 hover:bg-red-900/60 disabled:opacity-50 text-red-300 hover:text-red-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
+              >
+                {reseteando ? 'Resetting...' : 'Reset all custom covers'}
+              </button>
+              {resultadoReset && <p className="text-gray-400 text-sm mt-2">{resultadoReset}</p>}
+            </div>
 
             <div className="mt-8 pt-6 border-t border-red-950">
               <h3 className="text-xs font-bold uppercase tracking-wider text-red-400 mb-2">Danger zone</h3>
@@ -543,6 +568,30 @@ export default function Settings() {
                 className="bg-red-950 hover:bg-red-900 border border-red-800 text-red-300 hover:text-red-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
               >
                 Delete my account
+              </button>
+            </div>
+          </div>
+        ) : (
+          // Pestaña Admin: solo se llega aquí si isAdmin es true (el botón de
+          // la pestaña ni se pinta si no lo eres, y el useEffect de arriba te
+          // saca de esta pestaña si en algún momento dejas de serlo).
+          <div className="max-w-md">
+            <h2 className="text-lg font-bold mb-4">Admin</h2>
+
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2">Reset account (admin)</h3>
+              <p className="text-gray-500 text-sm mb-3">
+                Wipe every bit of activity on this account — watched history, ratings, reviews, lists, favorites, follows and notifications. Your email, username, password and avatar stay exactly as they are. This cannot be undone.
+              </p>
+              <button
+                onClick={() => {
+                  setUsernameConfirmacionReset('');
+                  setErrorResetCuenta(null);
+                  setConfirmandoResetCuenta(true);
+                }}
+                className="bg-amber-900/40 hover:bg-amber-900/60 text-amber-300 hover:text-amber-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
+              >
+                Reset account data
               </button>
             </div>
           </div>
