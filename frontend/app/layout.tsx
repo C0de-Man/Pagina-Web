@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Navbar from "@/components/Navbar"; // <-- 1. Importamos tu nueva barra de navegación
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,7 +31,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <Navbar /> {/* <-- 2. Colocamos la barra justo al inicio para que salga en toda la web */}
-        {children}
+        <div className="flex-grow flex flex-col">
+          {children}
+        </div>
+        <Footer />
       </body>
     </html>
   );
