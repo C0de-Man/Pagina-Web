@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import ReviewDetailModal from './ReviewDetailModal';
+import { withLangRegion } from '@/lib/preferences';
 
 const API_URL = 'http://localhost:3001';
 const TOTAL_VISIBLE = 8;
@@ -37,7 +38,7 @@ export default function NewFromFriendsCarousel() {
       setCargando(false);
       return;
     }
-    fetch(`${API_URL}/friends/activity?limit=${TOTAL_VISIBLE}`, {
+    fetch(withLangRegion(`${API_URL}/friends/activity?limit=${TOTAL_VISIBLE}`), {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })

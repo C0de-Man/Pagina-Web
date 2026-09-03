@@ -2248,6 +2248,32 @@ app.get('/friends/activity', requireAuth, async (req, res) => {
     const mediaPorId = new Map(mediaItems.map((m) => [m.id, m]));
     const usuarioPorId = new Map(usuarios.map((u) => [u.id, u]));
 
+    // El título guardado en Media.titulo es el que estuviera activo la
+    // primera vez que se guardó ese título, y no se actualiza solo — así
+    // que se pide en vivo el título real en el idioma actual, igual que ya
+    // hace GET /media/:id. Se cachea por tmdbId+tipo dentro de esta misma
+    // petición para no pedir lo mismo dos veces si dos amigos vieron el
+    // mismo título.
+    const idioma = getLang(req);
+    const apiKey = process.env.TMDB_API_KEY;
+    const tituloEnVivoCache = new Map();
+    const obtenerTituloEnVivo = async (media) => {
+      if (!media.tmdbId || media.tipo === 'VIDEOJUEGO') return media.titulo;
+      const clave = `${media.tmdbId}-${media.tipo}`;
+      if (tituloEnVivoCache.has(clave)) return tituloEnVivoCache.get(clave);
+      try {
+        const endpointTmdb = media.tipo === 'SERIE' ? 'tv' : 'movie';
+        const r = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${media.tmdbId}?api_key=${apiKey}&language=${idioma}`);
+        const d = await r.json();
+        const tituloTraducido = d.title || d.name;
+        const resultado = tituloTraducido && tituloTraducido.trim() ? tituloTraducido : media.titulo;
+        tituloEnVivoCache.set(clave, resultado);
+        return resultado;
+      } catch (e) {
+        return media.titulo;
+      }
+    };
+
     // El log MÁS RECIENTE por usuario+media (ya vienen ordenados desc, así
     // que el primero que encontremos por esa clave es el bueno).
     const watchLogPorClave = new Map();
@@ -2261,11 +2287,13 @@ app.get('/friends/activity', requireAuth, async (req, res) => {
       if (!gameLogPorClave.has(clave)) gameLogPorClave.set(clave, g);
     }
 
-    const resultado = entradas
-      .map((e) => {
+    const resultadoConNulos = await Promise.all(
+      entradas.map(async (e) => {
         const item = mediaPorId.get(e.mediaId);
         const actor = usuarioPorId.get(e.userId);
         if (!item || !actor) return null;
+
+        const tituloMostrado = await obtenerTituloEnVivo(item);
 
         const clave = `${e.userId}-${e.mediaId}`;
         const esJuego = item.tipo === 'VIDEOJUEGO';
@@ -2276,6 +2304,7 @@ app.get('/friends/activity', requireAuth, async (req, res) => {
           actor,
           // Misma forma que /media/reviews (para reutilizar ReviewDetailModal tal cual)
           ...item,
+          titulo: tituloMostrado,
           id: item.id,
           mediaId: item.id,
           portada: e.customPoster || item.portada,
@@ -2296,7 +2325,8 @@ app.get('/friends/activity', requireAuth, async (req, res) => {
           fecha: e.lastActivityAt,
         };
       })
-      .filter(Boolean);
+    );
+    const resultado = resultadoConNulos.filter(Boolean);
 
     res.json(resultado);
   } catch (error) {
@@ -4141,6 +4171,157 @@ app.get('/media/playing', requireAuth, async (req, res) => {
   }
 });
 
+// --- CALCULA EL "PRÓXIMO EPISODIO" DE UNA SERIE EN CURSO ---
+// Recorre las temporadas en orden y, dentro de cada una, sus episodios en
+// orden. Se detiene en el PRIMER episodio que:
+//   a) ya se haya emitido y NO esté marcado como visto -> "hay que verlo ya"
+//      (esto alimenta "Continúa viendo").
+//   b) aún no se haya emitido pero ya tenga fecha conocida -> estás al día,
+//      este es el que viene (esto alimenta "Próximamente").
+// Si no encuentra ninguno de los dos (serie totalmente vista y sin fecha
+// anunciada para el siguiente episodio), devuelve null y la serie
+// simplemente no aparece en ninguna de las dos secciones.
+async function calcularProgresoSerie(media, userId, apiKey, idioma) {
+  const idTmdb = media.tmdbId;
+  const seasonsRes = await fetch(`https://api.themoviedb.org/3/tv/${idTmdb}?api_key=${apiKey}&language=${idioma}`);
+  const seasonsData = await seasonsRes.json();
+  const seasons = (seasonsData.seasons || [])
+    .filter((s) => s.season_number > 0)
+    .sort((a, b) => a.season_number - b.season_number);
+
+  const hoy = new Date();
+
+  const [episodiosVistos, temporadasVistas] = await Promise.all([
+    prisma.userEpisodeWatch.findMany({ where: { userId, mediaId: media.id, watched: true } }),
+    prisma.userSeasonWatch.findMany({ where: { userId, mediaId: media.id, watched: true } }),
+  ]);
+  const episodioVistoSet = new Set(episodiosVistos.map((e) => `${e.seasonNumber}-${e.episodeNumber}`));
+  const temporadaVistaSet = new Set(temporadasVistas.map((t) => t.seasonNumber));
+
+  for (const s of seasons) {
+    // Temporada marcada como vista de golpe (sin marcar episodio a episodio):
+    // se da por hecho que todos sus episodios están vistos y se pasa a la
+    // siguiente temporada, sin gastar una petición a TMDB para nada.
+    if (temporadaVistaSet.has(s.season_number)) continue;
+
+    const detRes = await fetch(`https://api.themoviedb.org/3/tv/${idTmdb}/season/${s.season_number}?api_key=${apiKey}&language=${idioma}`);
+    const det = await detRes.json();
+    const episodios = det.episodes || [];
+
+    for (const ep of episodios) {
+      const yaEmitido = ep.air_date && new Date(ep.air_date) <= hoy;
+      const visto = episodioVistoSet.has(`${s.season_number}-${ep.episode_number}`);
+
+      if (yaEmitido && !visto) {
+        return {
+          tipo: 'continuar',
+          temporada: s.season_number,
+          episodio: ep.episode_number,
+          titulo: ep.name,
+          duracion: ep.runtime || null,
+          imagen: ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : null,
+          fechaEmision: ep.air_date,
+        };
+      }
+      if (!yaEmitido && ep.air_date) {
+        return {
+          tipo: 'proximamente',
+          temporada: s.season_number,
+          episodio: ep.episode_number,
+          titulo: ep.name,
+          duracion: ep.runtime || null,
+          imagen: ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : null,
+          fechaEmision: ep.air_date,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+// --- MIS SERIES "EN CURSO": próximo episodio a ver, o próximo a emitirse
+// si ya estás al día ---
+app.get('/media/continue-watching', requireAuth, async (req, res) => {
+  try {
+    const idioma = getLang(req);
+    const apiKey = process.env.TMDB_API_KEY;
+
+    const entries = await prisma.userMedia.findMany({
+      where: { userId: req.userId, playStatus: 'WATCHING' },
+    });
+    if (entries.length === 0) return res.json({ continuando: [], proximamente: [] });
+
+    const mediaIds = entries.map((e) => e.mediaId);
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds }, tmdbId: { not: null } } });
+    const entryPorMediaId = new Map(entries.map((e) => [e.mediaId, e]));
+
+    const continuando = [];
+    const proximamente = [];
+
+    // Secuencial, no en paralelo: evita disparar decenas de peticiones a
+    // TMDB de golpe si tienes muchas series en "Watching" a la vez (mismo
+    // criterio que ya usas en refresh-covers-english y demás).
+    for (const media of mediaItems) {
+      try {
+        const resultado = await calcularProgresoSerie(media, req.userId, apiKey, idioma);
+        if (!resultado) continue;
+
+        // El título guardado en Media.titulo es el que estuviera activo la
+        // primera vez que se guardó la serie, y no se actualiza solo — para
+        // que respete tu idioma ACTUAL (como hace GET /media/:id), se pide
+        // en vivo el título real en tu idioma antes de devolverlo.
+        let tituloMostrado = media.titulo;
+        try {
+          const rTitulo = await fetch(`https://api.themoviedb.org/3/tv/${media.tmdbId}?api_key=${apiKey}&language=${idioma}`);
+          const dTitulo = await rTitulo.json();
+          if (dTitulo.name && dTitulo.name.trim()) tituloMostrado = dTitulo.name;
+        } catch (e) {
+          // si falla, se queda con el título guardado
+        }
+
+        const entrada = entryPorMediaId.get(media.id);
+        const item = {
+          ...media,
+          titulo: tituloMostrado,
+          portada: entrada?.customPoster || media.portada,
+          proximoEpisodio: {
+            temporada: resultado.temporada,
+            episodio: resultado.episodio,
+            titulo: resultado.titulo,
+            duracion: resultado.duracion,
+            imagen: resultado.imagen,
+            fechaEmision: resultado.fechaEmision,
+          },
+        };
+
+        if (resultado.tipo === 'continuar') continuando.push(item);
+        else proximamente.push(item);
+      } catch (e) {
+        console.error(`Error calculando progreso de "${media.titulo}":`, e.message);
+      }
+    }
+
+    // "Continúa viendo" ordenado por actividad más reciente primero — la
+    // serie que acabas de tocar (marcar un episodio, empezarla...) sube
+    // arriba del todo, en vez de quedarse en el orden en que Prisma
+    // devolviera las filas.
+    continuando.sort((a, b) => {
+      const fechaA = entryPorMediaId.get(a.id)?.lastActivityAt;
+      const fechaB = entryPorMediaId.get(b.id)?.lastActivityAt;
+      return new Date(fechaB || 0).getTime() - new Date(fechaA || 0).getTime();
+    });
+
+    proximamente.sort((a, b) =>
+      (a.proximoEpisodio.fechaEmision || '9999').localeCompare(b.proximoEpisodio.fechaEmision || '9999')
+    );
+
+    res.json({ continuando, proximamente });
+  } catch (error) {
+    console.error('ERROR EN GET /media/continue-watching:', error);
+    res.status(500).json({ error: 'Error al calcular el progreso de series' });
+  }
+});
+
 // --- LOGS DE UN VIDEOJUEGO (partidas/reviews, varios logs por juego) ---
 // Solo devuelve/edita los logs del propio usuario (nunca los de otros).
 app.get('/media/:id/logs', requireAuth, async (req, res) => {
@@ -5599,6 +5780,20 @@ app.patch('/media/:id/seasons/:seasonNumber/episodes/:episodeNumber', requireAut
       update: data,
       create: { userId: req.userId, mediaId, seasonNumber, episodeNumber, watched: watched ?? false, rating: rating ?? null, fechaVisto: watched ? new Date() : null }
     });
+
+    // Marcar un episodio como visto SÍ cuenta como actividad reciente en la
+    // serie — sin esto, UserMedia.lastActivityAt (lo que usa "Continúa
+    // viendo" en la home para ordenar) nunca se tocaba al ver episodios, así
+    // que el orden podía cambiar sin relación con lo que acabas de marcar.
+    // updateMany (no upsert): si por lo que sea no existe fila de UserMedia
+    // todavía para esta serie, no se crea una nueva solo por esto.
+    if (watched === true) {
+      await prisma.userMedia.updateMany({
+        where: { userId: req.userId, mediaId },
+        data: { lastActivityAt: new Date() },
+      });
+    }
+
     res.json(estado);
   } catch (error) {
     console.error('ERROR EN PATCH /media/:id/seasons/:seasonNumber/episodes/:episodeNumber:', error);
