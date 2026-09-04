@@ -5760,7 +5760,58 @@ app.get('/media/:id/seasons/:seasonNumber/episodes/status', requireAuth, async (
   }
 });
 
-// --- MARCAR VISTO/NOTA UN EPISODIO ---
+// --- Tras marcar un episodio como visto, comprueba en cascada si con eso
+// la TEMPORADA queda completa (todos sus episodios ya emitidos vistos) y,
+// si es así, si con eso la SERIE ENTERA queda completa — marcando cada
+// nivel automáticamente. Vive en el backend (no en un componente concreto
+// del frontend) precisamente para que funcione sea cual sea la pantalla
+// desde la que se marque el episodio (la ficha de la serie, "Continue
+// Watching" en la home, o cualquier sitio futuro). ---
+async function comprobarYCompletarProgreso(userId, mediaId, seasonNumberTocado) {
+  const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true } });
+  if (!media?.tmdbId) return;
+  const apiKey = process.env.TMDB_API_KEY;
+
+  const seasonRes = await fetch(`https://api.themoviedb.org/3/tv/${media.tmdbId}/season/${seasonNumberTocado}?api_key=${apiKey}`);
+  const seasonData = await seasonRes.json();
+  const hoy = new Date();
+  const episodiosEmitidos = (seasonData.episodes || []).filter((e) => e.air_date && new Date(e.air_date) <= hoy);
+  if (episodiosEmitidos.length === 0) return;
+
+  const vistos = await prisma.userEpisodeWatch.findMany({
+    where: { userId, mediaId, seasonNumber: seasonNumberTocado, watched: true },
+    select: { episodeNumber: true },
+  });
+  const vistosSet = new Set(vistos.map((v) => v.episodeNumber));
+  const temporadaCompleta = episodiosEmitidos.every((e) => vistosSet.has(e.episode_number));
+  if (!temporadaCompleta) return;
+
+  await prisma.userSeasonWatch.upsert({
+    where: { userId_mediaId_seasonNumber: { userId, mediaId, seasonNumber: seasonNumberTocado } },
+    update: { watched: true, fechaVisto: new Date() },
+    create: { userId, mediaId, seasonNumber: seasonNumberTocado, watched: true, fechaVisto: new Date() },
+  });
+
+  const seriesRes = await fetch(`https://api.themoviedb.org/3/tv/${media.tmdbId}?api_key=${apiKey}`);
+  const seriesData = await seriesRes.json();
+  const temporadasReales = (seriesData.seasons || []).filter((s) => s.season_number > 0);
+  if (temporadasReales.length === 0) return;
+
+  const temporadasVistas = await prisma.userSeasonWatch.findMany({
+    where: { userId, mediaId, watched: true },
+    select: { seasonNumber: true },
+  });
+  const temporadasVistasSet = new Set(temporadasVistas.map((t) => t.seasonNumber));
+  const serieCompleta = temporadasReales.every((s) => temporadasVistasSet.has(s.season_number));
+  if (!serieCompleta) return;
+
+  await prisma.userMedia.upsert({
+    where: { userId_mediaId: { userId, mediaId } },
+    update: { watched: true, playStatus: null, lastActivityAt: new Date() },
+    create: { userId, mediaId, watched: true, playStatus: null, lastActivityAt: new Date() },
+  });
+}
+
 app.patch('/media/:id/seasons/:seasonNumber/episodes/:episodeNumber', requireAuth, async (req, res) => {
   try {
     const mediaId = parseInt(req.params.id);
@@ -5781,17 +5832,18 @@ app.patch('/media/:id/seasons/:seasonNumber/episodes/:episodeNumber', requireAut
       create: { userId: req.userId, mediaId, seasonNumber, episodeNumber, watched: watched ?? false, rating: rating ?? null, fechaVisto: watched ? new Date() : null }
     });
 
-    // Marcar un episodio como visto SÍ cuenta como actividad reciente en la
-    // serie — sin esto, UserMedia.lastActivityAt (lo que usa "Continúa
-    // viendo" en la home para ordenar) nunca se tocaba al ver episodios, así
-    // que el orden podía cambiar sin relación con lo que acabas de marcar.
-    // updateMany (no upsert): si por lo que sea no existe fila de UserMedia
-    // todavía para esta serie, no se crea una nueva solo por esto.
     if (watched === true) {
       await prisma.userMedia.updateMany({
         where: { userId: req.userId, mediaId },
         data: { lastActivityAt: new Date() },
       });
+      // No bloquea la respuesta si falla (p. ej. TMDB caído) — el episodio
+      // ya se guardó bien, esto es solo la comprobación "extra" en cascada.
+      try {
+        await comprobarYCompletarProgreso(req.userId, mediaId, seasonNumber);
+      } catch (e) {
+        console.error('Error comprobando progreso en cascada:', e.message);
+      }
     }
 
     res.json(estado);

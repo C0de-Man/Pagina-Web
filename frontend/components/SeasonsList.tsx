@@ -86,9 +86,8 @@ function OjoVisto({ visto, onToggle }: { visto: boolean; onToggle?: () => void }
         if (onToggle) onToggle();
       }}
       title={visto ? 'Watched' : 'Not watched'}
-      className={`w-9 h-9 rounded-full flex items-center justify-center text-lg transition flex-shrink-0 ${
-        onToggle ? 'cursor-pointer hover:bg-gray-700' : 'cursor-default'
-      } ${visto ? 'text-teal-400 bg-teal-900/30' : 'text-gray-600 bg-gray-800/60'}`}
+      className={`w-9 h-9 rounded-full flex items-center justify-center text-lg transition flex-shrink-0 ${onToggle ? 'cursor-pointer hover:bg-gray-700' : 'cursor-default'
+        } ${visto ? 'text-teal-400 bg-teal-900/30' : 'text-gray-600 bg-gray-800/60'}`}
     >
       👁
     </button>
@@ -121,9 +120,9 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
       fetch(`http://localhost:3001/tmdb/tv/${tmdbId}/seasons?language=${idioma}`, { cache: 'no-store' }).then((r) => r.json()),
       token
         ? fetch(`http://localhost:3001/media/${mediaId}/seasons/status`, {
-            headers: { Authorization: `Bearer ${token}` },
-            cache: 'no-store',
-          }).then((r) => r.json())
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        }).then((r) => r.json())
         : Promise.resolve([]),
     ])
       .then(([temps, ests]) => {
@@ -134,7 +133,7 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
         });
         setEstadosTemporadas(mapa);
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setCargando(false));
   }, [tmdbId, mediaId, idioma]);
 
@@ -157,7 +156,7 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(cambios),
       });
-    } catch {}
+    } catch { }
   };
 
   const actualizarEpisodio = async (numeroTemporada: number, numeroEpisodio: number, cambios: Partial<{ watched: boolean; rating: number | null }>) => {
@@ -173,7 +172,92 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(cambios),
       });
-    } catch {}
+    } catch { }
+  };
+
+  // Si CON el mapa de estados de temporada que se le pase ya están TODAS las
+  // temporadas de la serie vistas, marca la serie entera como "Watched"
+  // (equivalente a elegir "Watched" en el desplegable "Set your watch
+  // status") — sin esto, la serie se quedaba indefinidamente en "Watching"
+  // aunque ya no quedara nada por ver.
+  const revisarSiSerieCompleta = async (estadosTemporadasActualizados: Record<number, EstadoTemporada>) => {
+    const todasVistas = temporadas.length > 0 && temporadas.every((t) => estadosTemporadasActualizados[t.numero]?.watched);
+    if (!todasVistas) return;
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      await fetch(`http://localhost:3001/media/${mediaId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ watched: true, playStatus: null }),
+      });
+      // Avisamos al resto de la página (p. ej. ActionButtons, que pinta el
+      // desplegable "Set your watch status") de que el estado general acaba
+      // de cambiar, por si quiere refrescarse sin necesidad de recargar.
+      window.dispatchEvent(new CustomEvent('media-status-changed', { detail: { mediaId } }));
+    } catch { }
+  };
+
+  // Marca la temporada indicada como vista y comprueba si con eso la serie
+  // entera queda completa. Se usa desde los TRES sitios donde se puede
+  // completar una temporada de golpe: el ojo de la fila en la lista, el
+  // botón "Mark season as watched" del modal, y automáticamente cuando se
+  // marca el último episodio pendiente de una temporada uno a uno.
+  const marcarTemporadaCompleta = async (numeroTemporada: number) => {
+    await actualizarTemporada(numeroTemporada, { watched: true });
+    const estadoActual = estadosTemporadas[numeroTemporada];
+    const estadosTemporadasActualizados = {
+      ...estadosTemporadas,
+      [numeroTemporada]: {
+        seasonNumber: numeroTemporada,
+        watched: true,
+        rating: estadoActual?.rating ?? null,
+        customPoster: estadoActual?.customPoster ?? null,
+      },
+    };
+    await revisarSiSerieCompleta(estadosTemporadasActualizados);
+  };
+
+  // Marca el episodio pulsado Y todos los ANTERIORES de la misma temporada
+  // que aún no lo estuvieran. Si con eso la temporada queda completa, la
+  // marca como vista (y de rebote comprueba si la serie entera queda
+  // completa).
+  const marcarVistoConAnteriores = async (ep: Episodio) => {
+    if (!temporadaAbierta) return;
+    const numeroTemporada = temporadaAbierta.numero;
+    const idsAMarcar = episodios
+      .filter((e) => e.numero <= ep.numero && !estadosEpisodios[e.numero]?.watched)
+      .map((e) => e.numero);
+
+    setEstadosEpisodios((prev) => {
+      const nuevo = { ...prev };
+      idsAMarcar.forEach((n) => {
+        nuevo[n] = { episodeNumber: n, watched: true, rating: prev[n]?.rating ?? null };
+      });
+      return nuevo;
+    });
+
+    const token = localStorage.getItem('token');
+    if (token) {
+      await Promise.all(
+        idsAMarcar.map((n) =>
+          fetch(`http://localhost:3001/media/${mediaId}/seasons/${numeroTemporada}/episodes/${n}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ watched: true }),
+          }).catch(() => { })
+        )
+      );
+    }
+
+    // ¿Quedan YA todos los episodios de esta temporada vistos? (los recién
+    // marcados + los que ya estaban vistos de antes)
+    const totalVistos = episodios.filter(
+      (e) => idsAMarcar.includes(e.numero) || estadosEpisodios[e.numero]?.watched
+    ).length;
+    if (episodios.length > 0 && totalVistos === episodios.length) {
+      await marcarTemporadaCompleta(numeroTemporada);
+    }
   };
 
   const abrirTemporada = async (t: Temporada) => {
@@ -189,9 +273,9 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
         fetch(`http://localhost:3001/tmdb/tv/${tmdbId}/season/${t.numero}?language=${idioma}`, { cache: 'no-store' }),
         token
           ? fetch(`http://localhost:3001/media/${mediaId}/seasons/${t.numero}/episodes/status`, {
-              headers: { Authorization: `Bearer ${token}` },
-              cache: 'no-store',
-            })
+            headers: { Authorization: `Bearer ${token}` },
+            cache: 'no-store',
+          })
           : Promise.resolve(null),
       ]);
       const data = await resEp.json();
@@ -269,18 +353,17 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
                 </p>
               </div>
 
-                            <OjoVisto
+              <OjoVisto
                 visto={visto}
-                onToggle={() => {
+                onToggle={async () => {
                   const nuevoEstado = !visto;
-                  actualizarTemporada(t.numero, { watched: nuevoEstado });
                   const token = localStorage.getItem('token');
                   if (token) {
                     fetch(`http://localhost:3001/media/${mediaId}/seasons/${t.numero}/mark-all`, {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                       body: JSON.stringify({ watched: nuevoEstado, totalEpisodios: t.episodios }),
-                    }).catch(() => {});
+                    }).catch(() => { });
                   }
                   // Si la temporada está abierta en el modal ahora mismo, refleja el cambio ahí también
                   if (temporadaAbierta?.numero === t.numero) {
@@ -291,6 +374,13 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
                       });
                       return nuevo;
                     });
+                  }
+                  if (nuevoEstado) {
+                    // Marcarla como vista de golpe: comprueba también si con
+                    // esto la serie entera queda completa.
+                    await marcarTemporadaCompleta(t.numero);
+                  } else {
+                    await actualizarTemporada(t.numero, { watched: false });
                   }
                 }}
               />
@@ -358,17 +448,20 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
 
             <div className="flex items-center gap-4 mb-6 pb-4 border-b border-gray-700">
               <button
-                onClick={() => {
+                onClick={async () => {
                   const nuevoEstado = !(estadoTemporadaAbierta?.watched);
-                  actualizarTemporada(temporadaAbierta.numero, { watched: nuevoEstado });
                   // Marca/desmarca TODOS los episodios de la temporada a la vez
                   episodios.forEach((ep) => actualizarEpisodio(temporadaAbierta.numero, ep.numero, { watched: nuevoEstado }));
+                  if (nuevoEstado) {
+                    await marcarTemporadaCompleta(temporadaAbierta.numero);
+                  } else {
+                    await actualizarTemporada(temporadaAbierta.numero, { watched: false });
+                  }
                 }}
-                className={`text-sm font-bold px-4 py-2 rounded transition cursor-pointer ${
-                  estadoTemporadaAbierta?.watched
+                className={`text-sm font-bold px-4 py-2 rounded transition cursor-pointer ${estadoTemporadaAbierta?.watched
                     ? 'bg-teal-700 text-white'
                     : 'bg-[#2c3440] text-gray-300 hover:bg-[#3a4552]'
-                }`}
+                  }`}
               >
                 {estadoTemporadaAbierta?.watched ? '✓ Season watched' : 'Mark season as watched'}
               </button>
@@ -419,7 +512,15 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
                       <div className="flex flex-col items-center gap-1.5 flex-shrink-0">
                         <OjoVisto
                           visto={estado?.watched || false}
-                          onToggle={() => actualizarEpisodio(temporadaAbierta.numero, ep.numero, { watched: !(estado?.watched) })}
+                          onToggle={() => {
+                            if (!estado?.watched) {
+                              marcarVistoConAnteriores(ep);
+                            } else {
+                              // Desmarcar solo afecta a ESTE episodio, nunca
+                              // en cascada hacia atrás.
+                              actualizarEpisodio(temporadaAbierta.numero, ep.numero, { watched: false });
+                            }
+                          }}
                         />
                         <EstrellasVisual
                           rating={estado?.rating ?? null}
