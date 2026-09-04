@@ -130,7 +130,7 @@ export default async function SeriesDetail({ params }: { params: Promise<{ slug:
                             <RatingWidget mediaId={media.id} />
                         </div>
 
-                        <CollectionLinks tmdbId={media.tmdbId} tipo="SERIE" />
+                        <CollectionLinks tmdbId={media.tmdbId} tipo="SERIE" tituloActual={media.titulo} anioActual={media.anio} />
                         <WatchProviders tmdbId={media.tmdbId} tipo="SERIE" />
                     </div>
 

@@ -47,7 +47,7 @@ export default async function MediaDetail({ params }: { params: Promise<{ slug: 
   const res = await fetch(`http://localhost:3001/media/${id}?language=${idioma}&region=${region}`, { cache: 'no-store' });
   const media = await res.json();
 
-if (!media || media.error) {
+  if (!media || media.error) {
     return <div className="p-8 text-white text-center min-h-screen bg-gray-950 flex items-center justify-center">Medio no encontrado</div>;
   }
 
@@ -107,7 +107,7 @@ if (!media || media.error) {
               <RatingWidget mediaId={media.id} />
             </div>
 
-            <CollectionLinks tmdbId={media.tmdbId} />
+            <CollectionLinks tmdbId={media.tmdbId} tituloActual={media.titulo} anioActual={media.anio} />
             <WatchProviders tmdbId={media.tmdbId} />
           </div>
 

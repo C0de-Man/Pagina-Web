@@ -60,9 +60,15 @@ function useEsAdmin() {
 export default function GameCollectionLinks({
     igdbId,
     currentMediaIgdbId,
+    tituloActual,
+    anioActual,
+    portadaActual,
 }: {
     igdbId: number;
     currentMediaIgdbId: number;
+    tituloActual?: string;
+    anioActual?: number | null;
+    portadaActual?: string | null;
 }) {
     const esAdmin = useEsAdmin();
     const [data, setData] = useState<CollectionResponse | null>(null);
@@ -73,6 +79,10 @@ export default function GameCollectionLinks({
     const [arrastrandoId, setArrastrandoId] = useState<number | null>(null);
     const [confirmandoReinicio, setConfirmandoReinicio] = useState(false);
     const [reiniciando, setReiniciando] = useState(false);
+    const [mostrarFormSaga, setMostrarFormSaga] = useState(false);
+    const [nombreNuevaSaga, setNombreNuevaSaga] = useState('');
+    const [guardandoSaga, setGuardandoSaga] = useState(false);
+    const [errorSaga, setErrorSaga] = useState<string | null>(null);
     const idPeticionRef = useRef(0);
 
     // /igdb/collection no lleva token y su "portada" es la compartida, no tu
@@ -340,7 +350,44 @@ export default function GameCollectionLinks({
         setReiniciando(false);
     }
 
-    if (!data || !data.collection || data.games.length <= 1) return null;
+    // Crea una CuratedCollection de juegos desde cero, cuando IGDB no tiene
+    // ninguna Collection real para este juego (mismo patrón que
+    // crearSagaDesdeCero en CollectionLinks.tsx de películas/series).
+    async function crearSagaDesdeCero() {
+        if (!nombreNuevaSaga.trim() || !igdbId) return;
+        setGuardandoSaga(true);
+        setErrorSaga(null);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/admin/curated-collections`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({
+                    nombre: nombreNuevaSaga.trim(),
+                    igdbId,
+                    titulo: tituloActual,
+                    anio: anioActual,
+                    portada: portadaActual,
+                }),
+            });
+            const body = await res.json();
+            if (!res.ok) throw new Error(body.error || 'No se pudo crear la saga');
+
+            setMostrarFormSaga(false);
+            setNombreNuevaSaga('');
+            cargarColeccion();
+        } catch (err: any) {
+            setErrorSaga(err.message || 'Algo falló');
+        }
+        setGuardandoSaga(false);
+    }
+
+    if (!data) return null;
+    // Sin colección real de IGDB: si eres admin, mostramos "Start a saga" en
+    // vez de nada (mismo comportamiento que en CollectionLinks.tsx de
+    // películas/series). Si no eres admin, aquí no hay nada que ver.
+    const hayColeccion = !!data.collection;
+    if (!hayColeccion && !esAdmin) return null;
 
     // Botón "X" en la esquina, solo visible al pasar el cursor y solo si eres
     // admin. Va como hermano de la imagen (no dentro del <button> que navega),
@@ -398,25 +445,67 @@ export default function GameCollectionLinks({
     return (
         <>
             <div className="mt-4 bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl">
-                <div className="flex justify-center gap-4">
-                    {data.prequel && (
-                        <div className={data.sequel ? 'w-1/2' : 'w-1/2 max-w-[200px]'}>
-                            <Miniatura juego={data.prequel} etiqueta="Prequel" />
-                        </div>
-                    )}
-                    {data.sequel && (
-                        <div className={data.prequel ? 'w-1/2' : 'w-1/2 max-w-[200px]'}>
-                            <Miniatura juego={data.sequel} etiqueta="Sequel" />
-                        </div>
-                    )}
-                </div>
+                {hayColeccion && (
+                    <div className="flex justify-center gap-4">
+                        {data.prequel && (
+                            <div className={data.sequel ? 'w-1/2' : 'w-1/2 max-w-[200px]'}>
+                                <Miniatura juego={data.prequel} etiqueta="Prequel" />
+                            </div>
+                        )}
+                        {data.sequel && (
+                            <div className={data.prequel ? 'w-1/2' : 'w-1/2 max-w-[200px]'}>
+                                <Miniatura juego={data.sequel} etiqueta="Sequel" />
+                            </div>
+                        )}
+                    </div>
+                )}
 
-                <button
-                    onClick={() => setModalAbierto(true)}
-                    className="mt-3 w-full text-center text-sm text-gray-300 underline cursor-pointer"
-                >
-                    See full saga
-                </button>
+                {(data.games.length > 1 || (esAdmin && hayColeccion)) && (
+                    <button
+                        onClick={() => setModalAbierto(true)}
+                        className="mt-3 w-full text-center text-sm text-gray-300 underline cursor-pointer"
+                    >
+                        See full saga
+                    </button>
+                )}
+
+                {esAdmin && !hayColeccion && (
+                    !mostrarFormSaga ? (
+                        <button
+                            onClick={() => setMostrarFormSaga(true)}
+                            className="w-full mt-3 text-xs text-blue-400 hover:text-blue-300 text-center underline cursor-pointer bg-gray-900/80 py-2 rounded border border-gray-800 transition"
+                        >
+                            Start a saga
+                        </button>
+                    ) : (
+                        <div className="mt-3 bg-gray-900/80 p-3 rounded border border-gray-800 space-y-2">
+                            <input
+                                type="text"
+                                value={nombreNuevaSaga}
+                                onChange={(e) => setNombreNuevaSaga(e.target.value)}
+                                placeholder="Saga name (e.g. God of War Collection)"
+                                className="w-full bg-[#2c3440] text-white text-sm rounded px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-gray-500"
+                            />
+                            {errorSaga && <p className="text-xs text-red-400">{errorSaga}</p>}
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    onClick={() => setMostrarFormSaga(false)}
+                                    disabled={guardandoSaga}
+                                    className="px-3 py-1 text-xs text-gray-300 hover:text-white transition cursor-pointer disabled:opacity-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={crearSagaDesdeCero}
+                                    disabled={guardandoSaga || !nombreNuevaSaga.trim()}
+                                    className="px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold transition cursor-pointer disabled:opacity-40"
+                                >
+                                    {guardandoSaga ? 'Creating...' : 'Create'}
+                                </button>
+                            </div>
+                        </div>
+                    )
+                )}
             </div>
 
             {modalAbierto && (

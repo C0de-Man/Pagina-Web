@@ -97,7 +97,13 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
             </div>
 
             {media.igdbId && (
-              <GameCollectionLinks igdbId={media.igdbId} currentMediaIgdbId={media.igdbId} />
+              <GameCollectionLinks
+                igdbId={media.igdbId}
+                currentMediaIgdbId={media.igdbId}
+                tituloActual={media.titulo}
+                anioActual={media.anio}
+                portadaActual={media.portada}
+              />
             )}
           </div>
 

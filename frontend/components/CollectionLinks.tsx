@@ -87,12 +87,18 @@ function useEsAdmin() {
   return esAdmin;
 }
 
-export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId: number; tipo?: string }) {
+export default function CollectionLinks({ tmdbId, tipo = 'PELICULA', tituloActual, anioActual }: { tmdbId: number; tipo?: string; tituloActual?: string; anioActual?: number | null }) {
   const esAdmin = useEsAdmin();
   const router = useRouter();
   const idPeticionRef = useRef(0);
 
   const [collection, setCollection] = useState<CollectionResponse | null>(null);
+  // tmdbIds cuya carátula ha fallado al cargar (URL rota — típico en títulos
+  // anunciados/futuros que TMDB aún no tiene bien puesta) — se tratan igual
+  // que si no tuvieran carátula, en vez de quedarse en blanco.
+  const [fallosImagen, setFallosImagen] = useState<Set<number>>(new Set());
+  const marcarFalloImagen = (tmdbId: number) =>
+    setFallosImagen((prev) => (prev.has(tmdbId) ? prev : new Set(prev).add(tmdbId)));
   const [myDb, setMyDb] = useState<any[]>([]);
   const [personalizaciones, setPersonalizaciones] = useState<
     Record<number, { customPoster: string | null; customBackdrop: string | null }>
@@ -380,14 +386,22 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     if (!item) return null;
     const { dbId, customPoster } = getLocalData(item.tmdbId);
     const posterUrl = customPoster || item.portada;
+    const mostrarImagen = posterUrl && !fallosImagen.has(item.tmdbId);
 
     return (
       <div onClick={() => handleClick(item, dbId)} className="flex flex-col items-center gap-1.5 cursor-pointer group w-24">
-        <div className="relative w-full aspect-[2/3] rounded border border-gray-700 group-hover:border-gray-400 transition shadow-lg overflow-hidden bg-gray-800">
-          {posterUrl ? (
-            <img src={posterUrl} alt={item.titulo} className={`w-full h-full object-cover ${loadingId === item.tmdbId ? 'opacity-50 blur-sm' : ''}`} />
+        <div className="relative w-full aspect-[2/3] rounded border border-gray-700 group-hover:border-gray-400 transition shadow-lg overflow-hidden bg-black">
+          {mostrarImagen ? (
+            <img
+              src={posterUrl}
+              alt={item.titulo}
+              onError={() => marcarFalloImagen(item.tmdbId)}
+              className={`w-full h-full object-cover ${loadingId === item.tmdbId ? 'opacity-50 blur-sm' : ''}`}
+            />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-[10px] text-center p-1">{item.titulo}</div>
+            <div className="w-full h-full flex items-center justify-center text-center p-2">
+              <p className="text-xs font-semibold text-white">{item.titulo}</p>
+            </div>
           )}
           {loadingId === item.tmdbId && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50">
@@ -404,6 +418,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
     const { dbId, customPoster } = getLocalData(item.tmdbId);
     const posterUrl = customPoster || item.portada;
     const esActual = item.tmdbId === tmdbId;
+    const mostrarImagen = posterUrl && !fallosImagen.has(item.tmdbId);
 
     return (
       <div key={item.id} className="group relative">
@@ -425,11 +440,18 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
           className={`flex flex-col items-center gap-2 p-2 rounded-lg cursor-pointer transition ${esActual ? 'bg-gray-800/80 ring-1 ring-blue-500' : 'hover:bg-gray-800/50'
             }`}
         >
-          <div className="w-full aspect-[2/3] rounded overflow-hidden border border-gray-700 bg-gray-800">
-            {posterUrl ? (
-              <img src={posterUrl} alt={item.titulo} className="w-full h-full object-cover" />
+          <div className="w-full aspect-[2/3] rounded overflow-hidden border border-gray-700 bg-black">
+            {mostrarImagen ? (
+              <img
+                src={posterUrl}
+                alt={item.titulo}
+                onError={() => marcarFalloImagen(item.tmdbId)}
+                className="w-full h-full object-cover"
+              />
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-[10px] text-center p-1 text-gray-400">{item.titulo}</div>
+              <div className="w-full h-full flex items-center justify-center text-center p-2">
+                <p className="text-xs font-semibold text-white">{item.titulo}</p>
+              </div>
             )}
           </div>
           <div className="text-center">
@@ -757,7 +779,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
       const res = await fetch(`${API_URL}/admin/movie-collections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ nombre: nombreNuevaSaga.trim(), tmdbId, tipo }),
+        body: JSON.stringify({ nombre: nombreNuevaSaga.trim(), tmdbId, tipo, titulo: tituloActual, anio: anioActual }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'No se pudo crear la saga');
@@ -1146,7 +1168,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA' }: { tmdbId:
           )}
         </div>
 
-        {((collection.items && collection.items.length > 1) || hayUniversos) && (
+        {((collection.items && collection.items.length > 1) || hayUniversos || (esAdmin && collection.collection)) && (
           <button
             onClick={() => setIsModalOpen(true)}
             className="w-full mt-4 text-xs text-gray-400 hover:text-white text-center underline cursor-pointer bg-gray-900/80 py-2 rounded border border-gray-800 transition"

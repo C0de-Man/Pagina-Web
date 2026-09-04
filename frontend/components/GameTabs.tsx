@@ -31,6 +31,34 @@ export default function GameTabs({
   const [dlcsData, setDlcsData] = useState<DlcsUpdatesResponse | null>(null);
   const [modalAbierto, setModalAbierto] = useState(false);
 
+  // igdbIds cuya carátula ha fallado al cargar (URL rota) — se tratan igual
+  // que si no tuvieran portada, en vez de dejar un hueco vacío.
+  const [fallosImagen, setFallosImagen] = useState<Set<number>>(new Set());
+  const marcarFalloImagen = (id: number) =>
+    setFallosImagen((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+
+  // Miniatura reutilizable: portada real si hay y carga bien, si no caja
+  // negra con el título — igual que GameCollectionLinks.tsx.
+  function Portada({ juego, className }: { juego: JuegoDlc; className: string }) {
+    const mostrarImagen = juego.portada && !fallosImagen.has(juego.igdbId);
+    if (mostrarImagen) {
+      return (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={juego.portada!}
+          alt={juego.titulo}
+          onError={() => marcarFalloImagen(juego.igdbId)}
+          className={className}
+        />
+      );
+    }
+    return (
+      <div className={`${className} bg-black flex items-center justify-center text-center p-2`}>
+        <p className="text-xs font-semibold text-white">{juego.titulo}</p>
+      </div>
+    );
+  }
+
   // Href real a la resolvedora /game/igdb/[igdbId]: guarda el juego (si no
   // lo tienes ya) y redirige a su ficha — como es un <Link> normal, esto
   // hace que el click central / Ctrl+click / "abrir en pestaña nueva"
@@ -96,14 +124,7 @@ export default function GameTabs({
               href={hrefDeJuego(j)}
               className="relative overflow-hidden rounded cursor-pointer group block"
             >
-              {j.portada && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={j.portada}
-                  alt={j.titulo}
-                  className="w-full aspect-[2/3] object-cover rounded transition"
-                />
-              )}
+              <Portada juego={j} className="w-full aspect-[2/3] object-cover rounded transition" />
 
               <div className="absolute inset-0 rounded bg-black/90 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-center p-2 pointer-events-none">
                 <p className="text-sm font-bold text-white">
@@ -177,14 +198,7 @@ export default function GameTabs({
                     href={hrefDeJuego(g)}
                     className="cursor-pointer group text-left block"
                   >
-                    {g.portada && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={g.portada}
-                        alt={g.titulo}
-                        className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80"
-                      />
-                    )}
+                    <Portada juego={g} className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80" />
                     <p className="mt-2 text-sm font-semibold text-white">{g.titulo}</p>
                     <p className="text-xs text-gray-400">{g.anio}</p>
                   </Link>
@@ -203,14 +217,7 @@ export default function GameTabs({
                     href={hrefDeJuego(g)}
                     className="cursor-pointer group text-left block"
                   >
-                    {g.portada && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={g.portada}
-                        alt={g.titulo}
-                        className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80"
-                      />
-                    )}
+                    <Portada juego={g} className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80" />
                   </Link>
                 ))}
               </div>
@@ -227,14 +234,7 @@ export default function GameTabs({
                     href={hrefDeJuego(g)}
                     className="cursor-pointer group text-left block"
                   >
-                    {g.portada && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={g.portada}
-                        alt={g.titulo}
-                        className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80"
-                      />
-                    )}
+                    <Portada juego={g} className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80" />
                     <p className="mt-2 text-sm font-semibold text-white">{g.titulo}</p>
                     <p className="text-xs text-gray-400">{g.anio}</p>
                   </Link>

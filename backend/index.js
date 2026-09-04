@@ -2781,6 +2781,40 @@ app.post('/admin/curated-collection-items', requireAuth, requireAdmin, async (re
   }
 });
 
+// --- CREAR UNA CuratedCollection de juegos DESDE CERO (cuando IGDB no
+// tiene ninguna Collection real para este juego) — mismo patrón que
+// POST /admin/movie-collections para películas/series.
+app.post('/admin/curated-collections', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { nombre, igdbId, titulo, anio, portada } = req.body;
+    if (!nombre || !nombre.trim() || !igdbId || !titulo) {
+      return res.status(400).json({ error: 'Faltan datos: nombre, igdbId y titulo son obligatorios' });
+    }
+
+    const coleccion = await prisma.curatedCollection.create({
+      data: {
+        nombre: nombre.trim(),
+        items: {
+          create: [{
+            igdbId: parseInt(igdbId, 10),
+            titulo,
+            anio: anio || null,
+            portada: portada || null,
+            cancelado: false,
+            esOtro: false,
+            orden: 0,
+          }],
+        },
+      },
+    });
+
+    res.status(201).json(coleccion);
+  } catch (error) {
+    console.error('ERROR EN POST /admin/curated-collections:', error);
+    res.status(500).json({ error: 'Error al crear la saga' });
+  }
+});
+
 // --- COLECCIONES CURADAS: reiniciar (solo admin) ---
 // Borra TODO lo que haya en la colección (orden manual, juegos borrados,
 // juegos añadidos a mano, cancelados marcados a mano, absolutamente todo,
@@ -5498,6 +5532,25 @@ app.post('/admin/movie-collections/:collectionId/reset', requireAuth, requireAdm
   } catch (error) {
     console.error('ERROR EN POST /admin/movie-collections/:collectionId/reset:', error);
     res.status(500).json({ error: 'Error al reiniciar la colección' });
+  }
+});
+
+// --- BORRAR TODAS las sagas de películas/series Y TODOS los universos
+// cinematográficos de golpe (botón de limpieza total en Admin). Tras esto,
+// las fichas vuelven a mostrar la colección/universo "por defecto" calculado
+// en vivo desde TMDB en cuanto se visitan de nuevo — se regeneran solas, sin
+// tener que recrearlas a mano una por una.
+app.post('/admin/movie-collections/delete-all', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await prisma.curatedMovieCollectionItem.deleteMany({});
+    const sagas = await prisma.curatedMovieCollection.deleteMany({});
+    // cinematicUniverse tiene cascade en el schema (borra items/fases/fuentes
+    // solo al borrar el universo) — no hace falta borrarlos a mano antes.
+    const universos = await prisma.cinematicUniverse.deleteMany({});
+    res.json({ ok: true, sagasBorradas: sagas.count, universosBorrados: universos.count });
+  } catch (error) {
+    console.error('ERROR EN POST /admin/movie-collections/delete-all:', error);
+    res.status(500).json({ error: 'Error al borrar todas las sagas y universos' });
   }
 });
 

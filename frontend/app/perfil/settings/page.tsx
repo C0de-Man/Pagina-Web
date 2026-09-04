@@ -41,7 +41,8 @@ export default function Settings() {
   const [errorCredenciales, setErrorCredenciales] = useState<string | null>(null);
   const [okCredenciales, setOkCredenciales] = useState<string | null>(null);
 
-    const [limpiandoSagas, setLimpiandoSagas] = useState(false);
+  const [limpiandoSagas, setLimpiandoSagas] = useState(false);
+  const [borrandoTodasSagas, setBorrandoTodasSagas] = useState(false);
   // --- Reiniciar cuenta (solo admin) ---
   const [confirmandoResetCuenta, setConfirmandoResetCuenta] = useState(false);
   const [usernameConfirmacionReset, setUsernameConfirmacionReset] = useState('');
@@ -444,14 +445,12 @@ export default function Settings() {
                   disabled={guardandoPrivacidad}
                   role="switch"
                   aria-checked={isPrivate}
-                  className={`relative flex-shrink-0 w-11 h-6 rounded-full transition cursor-pointer disabled:opacity-50 ${
-                    isPrivate ? 'bg-blue-600' : 'bg-gray-700'
-                  }`}
+                  className={`relative flex-shrink-0 w-11 h-6 rounded-full transition cursor-pointer disabled:opacity-50 ${isPrivate ? 'bg-blue-600' : 'bg-gray-700'
+                    }`}
                 >
                   <span
-                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                      isPrivate ? 'translate-x-5' : ''
-                    }`}
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${isPrivate ? 'translate-x-5' : ''
+                      }`}
                   />
                 </button>
               </div>
@@ -469,14 +468,12 @@ export default function Settings() {
                   onClick={alternarOcultarNsfw}
                   role="switch"
                   aria-checked={ocultarNsfw}
-                  className={`relative flex-shrink-0 w-11 h-6 rounded-full transition cursor-pointer ${
-                    ocultarNsfw ? 'bg-blue-600' : 'bg-gray-700'
-                  }`}
+                  className={`relative flex-shrink-0 w-11 h-6 rounded-full transition cursor-pointer ${ocultarNsfw ? 'bg-blue-600' : 'bg-gray-700'
+                    }`}
                 >
                   <span
-                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                      ocultarNsfw ? 'translate-x-5' : ''
-                    }`}
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${ocultarNsfw ? 'translate-x-5' : ''
+                      }`}
                   />
                 </button>
               </div>
@@ -613,6 +610,40 @@ export default function Settings() {
                 className="bg-amber-900/40 hover:bg-amber-900/60 text-amber-300 hover:text-amber-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer disabled:opacity-50 disabled:cursor-wait"
               >
                 {limpiandoSagas ? 'Cleaning up… this may take a minute' : 'Clean up bad sagas'}
+              </button>
+            </div>
+
+            <div className="pb-6 mb-6 border-b border-gray-800">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-red-400 mb-2">Delete ALL sagas & universes</h3>
+              <p className="text-gray-500 text-sm mb-3">
+                Wipes every movie/series saga (Curated Movie Collections) and every Cinematic Universe you've created or curated — for every user, not just you. Pages fall back to the live default collection from TMDB the next time they're visited. This cannot be undone.
+              </p>
+              <button
+                onClick={async () => {
+                  if (borrandoTodasSagas) return; // ya en marcha, ignora clics de más
+                  const token = localStorage.getItem('token');
+                  if (!token) return;
+                  setBorrandoTodasSagas(true);
+                  try {
+                    const res = await fetch('http://localhost:3001/admin/movie-collections/delete-all', {
+                      method: 'POST',
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                    const data = await res.json();
+                    alert(
+                      res.ok
+                        ? `Done. Removed ${data.sagasBorradas} sagas and ${data.universosBorrados} universes.`
+                        : 'Something went wrong, please try again.'
+                    );
+                  } catch {
+                    alert('Something went wrong, please try again.');
+                  }
+                  setBorrandoTodasSagas(false);
+                }}
+                disabled={borrandoTodasSagas}
+                className="bg-red-900/40 hover:bg-red-900/60 text-red-300 hover:text-red-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+              >
+                {borrandoTodasSagas ? 'Deleting…' : 'Delete all sagas & universes'}
               </button>
             </div>
 
