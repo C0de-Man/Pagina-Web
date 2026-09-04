@@ -121,7 +121,12 @@ export default function ContinueWatchingSection() {
               <button
                 type="button"
                 onClick={() => desplazar(-1)}
-                className="absolute left-0 top-0 bottom-0 z-20 w-10 flex items-center justify-center bg-gradient-to-r from-gray-950/90 to-transparent text-white opacity-0 group-hover/carrusel:opacity-100 transition cursor-pointer"
+                // Antes ocupaba TODA la altura de la fila (top-0 bottom-0),
+                // así que su z-index tapaba el botón de "marcar visto" de la
+                // tarjeta que quedara justo debajo, en la esquina superior.
+                // Ahora se limita a un círculo centrado verticalmente sobre
+                // la imagen, sin invadir esa esquina.
+                className="absolute left-1 top-[38%] -translate-y-1/2 z-20 w-8 h-8 rounded-full flex items-center justify-center bg-black/80 text-white opacity-0 hover:bg-black group-hover/carrusel:opacity-100 transition cursor-pointer"
                 aria-label="Scroll left"
               >
                 ‹
@@ -129,7 +134,7 @@ export default function ContinueWatchingSection() {
               <button
                 type="button"
                 onClick={() => desplazar(1)}
-                className="absolute right-0 top-0 bottom-0 z-20 w-10 flex items-center justify-center bg-gradient-to-l from-gray-950/90 to-transparent text-white opacity-0 group-hover/carrusel:opacity-100 transition cursor-pointer"
+                className="absolute right-1 top-[38%] -translate-y-1/2 z-20 w-8 h-8 rounded-full flex items-center justify-center bg-black/80 text-white opacity-0 hover:bg-black group-hover/carrusel:opacity-100 transition cursor-pointer"
                 aria-label="Scroll right"
               >
                 ›

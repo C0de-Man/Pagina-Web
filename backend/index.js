@@ -5774,16 +5774,23 @@ async function comprobarYCompletarProgreso(userId, mediaId, seasonNumberTocado) 
 
   const seasonRes = await fetch(`https://api.themoviedb.org/3/tv/${media.tmdbId}/season/${seasonNumberTocado}?api_key=${apiKey}`);
   const seasonData = await seasonRes.json();
-  const hoy = new Date();
-  const episodiosEmitidos = (seasonData.episodes || []).filter((e) => e.air_date && new Date(e.air_date) <= hoy);
-  if (episodiosEmitidos.length === 0) return;
+
+  // OJO: para marcar la temporada como "completa" hay que exigir TODOS sus
+  // episodios (emitidos o no), no solo los ya emitidos — si solo mirásemos
+  // los emitidos, una temporada en emisión (p. ej. "Steel Ball Run" con 1 de
+  // 12 episodios emitidos) se marcaría como terminada en cuanto vieras el
+  // primer episodio, con 11 todavía sin estrenar. "Estás al día con lo
+  // emitido" y "la temporada ya ha terminado del todo" son cosas distintas;
+  // esta comprobación es para la segunda.
+  const todosLosEpisodios = seasonData.episodes || [];
+  if (todosLosEpisodios.length === 0) return;
 
   const vistos = await prisma.userEpisodeWatch.findMany({
     where: { userId, mediaId, seasonNumber: seasonNumberTocado, watched: true },
     select: { episodeNumber: true },
   });
   const vistosSet = new Set(vistos.map((v) => v.episodeNumber));
-  const temporadaCompleta = episodiosEmitidos.every((e) => vistosSet.has(e.episode_number));
+  const temporadaCompleta = todosLosEpisodios.every((e) => vistosSet.has(e.episode_number));
   if (!temporadaCompleta) return;
 
   await prisma.userSeasonWatch.upsert({
@@ -5875,6 +5882,18 @@ app.patch('/media/:id/seasons/:seasonNumber/mark-all', requireAuth, async (req, 
         })
       )
     );
+
+    // Este endpoint marca TODOS los episodios de golpe, sin pasar por el
+    // PATCH por episodio (que sí actualiza esto) — así que había que
+    // repetirlo aquí también, o marcar temporada entera desde este botón
+    // nunca subía la serie arriba del todo en "Continue Watching".
+    if (watched === true) {
+      await prisma.userMedia.updateMany({
+        where: { userId: req.userId, mediaId },
+        data: { lastActivityAt: new Date() },
+      });
+    }
+
     res.json({ ok: true });
   } catch (error) {
     console.error('ERROR EN PATCH /media/:id/seasons/:seasonNumber/mark-all:', error);
