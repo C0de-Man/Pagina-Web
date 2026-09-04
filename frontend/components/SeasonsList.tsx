@@ -173,7 +173,11 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
   };
 
   const revisarSiSerieCompleta = async (estadosTemporadasActualizados: Record<number, EstadoTemporada>) => {
-    const todasVistas = temporadas.length > 0 && temporadas.every((t) => estadosTemporadasActualizados[t.numero]?.watched);
+    // Excluye "Especiales" (temporada 0), igual que el backend en
+    // comprobarYCompletarProgreso — si no, nunca se detecta la serie como
+    // completa a menos que también marques los especiales.
+    const temporadasReales = temporadas.filter((t) => t.numero > 0);
+    const todasVistas = temporadasReales.length > 0 && temporadasReales.every((t) => estadosTemporadasActualizados[t.numero]?.watched);
     if (!todasVistas) return;
     const token = localStorage.getItem('token');
     if (!token) return;

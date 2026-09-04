@@ -5932,6 +5932,20 @@ app.patch('/media/:id/seasons/:seasonNumber', requireAuth, async (req, res) => {
       update: data,
       create: { userId: req.userId, mediaId, seasonNumber, watched: watched ?? false, rating: rating ?? null, customPoster: customPoster ?? null, fechaVisto: watched ? new Date() : null }
     });
+    if (data.watched === true) {
+      try {
+        await marcarEnCursoSiHaceFalta(req.userId, mediaId);
+      } catch (e) {
+        console.error('Error marcando la serie en curso:', e.message);
+      }
+    } else if (data.watched === false) {
+      try {
+        await bajarACompletoTrasDesmarcar(req.userId, mediaId);
+      } catch (e) {
+        console.error('Error bajando la serie de Watched a Watching:', e.message);
+      }
+    }
+
     res.json(estado);
   } catch (error) {
     console.error('ERROR EN PATCH /media/:id/seasons/:seasonNumber:', error);
@@ -6013,6 +6027,75 @@ async function comprobarYCompletarProgreso(userId, mediaId, seasonNumberTocado) 
   });
 }
 
+// --- CASCADA HACIA ABAJO: marcar la serie entera como Watched (o
+// puntuarla) marca también TODAS sus temporadas y episodios como vistos.
+// Se apoya en seasons[].episode_count que ya viene en la propia ficha de la
+// serie (una sola petición a TMDB), sin necesidad de pedir cada temporada
+// por separado. Excluye "Specials" (season_number 0), igual que el resto
+// del proyecto.
+async function marcarTodaLaSerieVista(userId, mediaId, tmdbId) {
+  const apiKey = process.env.TMDB_API_KEY;
+  const seriesRes = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}?api_key=${apiKey}`);
+  const seriesData = await seriesRes.json();
+  const temporadas = (seriesData.seasons || []).filter((s) => s.season_number > 0);
+  const fecha = new Date();
+
+  for (const temporada of temporadas) {
+    const totalEpisodios = temporada.episode_count || 0;
+    if (totalEpisodios > 0) {
+      await Promise.all(
+        Array.from({ length: totalEpisodios }, (_, i) => i + 1).map((episodeNumber) =>
+          prisma.userEpisodeWatch.upsert({
+            where: { userId_mediaId_seasonNumber_episodeNumber: { userId, mediaId, seasonNumber: temporada.season_number, episodeNumber } },
+            update: { watched: true, fechaVisto: fecha },
+            create: { userId, mediaId, seasonNumber: temporada.season_number, episodeNumber, watched: true, fechaVisto: fecha },
+          })
+        )
+      );
+    }
+    await prisma.userSeasonWatch.upsert({
+      where: { userId_mediaId_seasonNumber: { userId, mediaId, seasonNumber: temporada.season_number } },
+      update: { watched: true, fechaVisto: fecha },
+      create: { userId, mediaId, seasonNumber: temporada.season_number, watched: true, fechaVisto: fecha },
+    });
+  }
+}
+
+// --- CASCADA HACIA ARRIBA (empezar a ver): si la serie no tenía ningún
+// estado guardado todavía (nunca la habías tocado), marcar una temporada o
+// episodio como visto la pone en "Watching". Si ya tiene algún estado
+// activo (Watching/Paused/Abandoned) o ya está completamente vista, no se
+// toca — evita pisar un estado que ya pusiste tú a mano.
+async function marcarEnCursoSiHaceFalta(userId, mediaId) {
+  const actual = await prisma.userMedia.findUnique({
+    where: { userId_mediaId: { userId, mediaId } },
+    select: { watched: true, playStatus: true },
+  });
+  if (actual?.playStatus || actual?.watched) return;
+  await prisma.userMedia.upsert({
+    where: { userId_mediaId: { userId, mediaId } },
+    update: { playStatus: 'WATCHING', watched: true, lastActivityAt: new Date() },
+    create: { userId, mediaId, playStatus: 'WATCHING', watched: true, lastActivityAt: new Date() },
+  });
+}
+
+// --- CASCADA HACIA ARRIBA (romper lo completo): si la serie estaba
+// marcada como completamente vista (watched=true, playStatus=null) y algo
+// se acaba de desmarcar (un episodio o una temporada entera), ya no es
+// coherente que siga como "Watched" del todo — se baja a "Watching".
+async function bajarACompletoTrasDesmarcar(userId, mediaId) {
+  const actual = await prisma.userMedia.findUnique({
+    where: { userId_mediaId: { userId, mediaId } },
+    select: { watched: true, playStatus: true },
+  });
+  if (actual?.watched && !actual.playStatus) {
+    await prisma.userMedia.update({
+      where: { userId_mediaId: { userId, mediaId } },
+      data: { playStatus: 'WATCHING' },
+    });
+  }
+}
+
 app.patch('/media/:id/seasons/:seasonNumber/episodes/:episodeNumber', requireAuth, async (req, res) => {
   try {
     const mediaId = parseInt(req.params.id);
@@ -6038,18 +6121,29 @@ app.patch('/media/:id/seasons/:seasonNumber/episodes/:episodeNumber', requireAut
         where: { userId: req.userId, mediaId },
         data: { lastActivityAt: new Date() },
       });
-      // omitirCascada: true lo manda el frontend cuando este PATCH es UNO
-      // de varios marcados de golpe (p. ej. "marcar hasta aquí" en cascada)
-      // — en ese caso el propio frontend ya comprueba la finalización por su
-      // cuenta al final del lote, así que aquí nos ahorramos repetir la
-      // consulta a TMDB (hasta 2 peticiones) en CADA uno de los episodios
-      // del lote, que antes saturaba el servidor al marcar varios seguidos.
+      try {
+        await marcarEnCursoSiHaceFalta(req.userId, mediaId);
+      } catch (e) {
+        console.error('Error marcando la serie en curso:', e.message);
+      }
       if (!omitirCascada) {
         try {
           await comprobarYCompletarProgreso(req.userId, mediaId, seasonNumber);
         } catch (e) {
           console.error('Error comprobando progreso en cascada:', e.message);
         }
+      }
+    } else if (watched === false) {
+      // Si esta temporada estaba marcada como completa, deja de estarlo:
+      // uno de sus episodios ya no está visto.
+      try {
+        await prisma.userSeasonWatch.updateMany({
+          where: { userId: req.userId, mediaId, seasonNumber, watched: true },
+          data: { watched: false },
+        });
+        await bajarACompletoTrasDesmarcar(req.userId, mediaId);
+      } catch (e) {
+        console.error('Error actualizando temporada/serie tras desmarcar episodio:', e.message);
       }
     }
 
@@ -6092,6 +6186,17 @@ app.patch('/media/:id/seasons/:seasonNumber/mark-all', requireAuth, async (req, 
         where: { userId: req.userId, mediaId },
         data: { lastActivityAt: new Date() },
       });
+      try {
+        await marcarEnCursoSiHaceFalta(req.userId, mediaId);
+      } catch (e) {
+        console.error('Error marcando la serie en curso:', e.message);
+      }
+    } else {
+      try {
+        await bajarACompletoTrasDesmarcar(req.userId, mediaId);
+      } catch (e) {
+        console.error('Error bajando la serie de Watched a Watching:', e.message);
+      }
     }
 
     res.json({ ok: true });
@@ -7570,11 +7675,42 @@ app.patch('/media/:id/status', requireAuth, async (req, res) => {
     const hayActividadReal = camposDeActividadReal.some((campo) => req.body[campo] !== undefined);
     if (hayActividadReal) data.lastActivityAt = new Date();
 
+    // --- CASCADA HACIA ABAJO (solo series): si el resultado final de este
+    // PATCH es "completamente vista" (playStatus null/undefined; Watching/
+    // Paused/Abandoned NUNCA cascadean hacia abajo), se marcan también todas
+    // las temporadas y episodios como vistos.
+    const resultaCompleta =
+      data.watched === true && !['WATCHING', 'PAUSED', 'ABANDONED'].includes(data.playStatus);
+
+    let previo = null;
+    if (resultaCompleta) {
+      previo = await prisma.userMedia.findUnique({
+        where: { userId_mediaId: { userId: req.userId, mediaId } },
+        select: { watched: true, playStatus: true },
+      });
+    }
+
     const status = await prisma.userMedia.upsert({
       where: { userId_mediaId: { userId: req.userId, mediaId } },
       update: data,
       create: { userId: req.userId, mediaId, ...data }
     });
+
+    // Ya estaba completa antes de este PATCH (p. ej. solo cambiaste tu nota
+    // sobre una serie que ya tenías como Watched) — no repetimos la cascada
+    // ni la petición a TMDB que conlleva.
+    const yaEstabaCompleta = previo?.watched && !previo.playStatus;
+
+    if (resultaCompleta && !yaEstabaCompleta) {
+      const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tipo: true, tmdbId: true } });
+      if (media?.tipo === 'SERIE' && media.tmdbId) {
+        try {
+          await marcarTodaLaSerieVista(req.userId, mediaId, media.tmdbId);
+        } catch (e) {
+          console.error('Error marcando serie completa en cascada:', e.message);
+        }
+      }
+    }
 
     res.json(status);
   } catch (error) {
