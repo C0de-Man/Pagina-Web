@@ -13,11 +13,36 @@ export default function JuegosLobbyClient({
   yearGamesConDatos: { juego: any; dbId: number | null; customPoster: string | null }[];
   popularConDatos: { juego: any; dbId: number | null; customPoster: string | null }[];
 }) {
+  const CATEGORIAS_FILTRO: { clave: string; etiqueta: string }[] = [
+    { clave: 'dlc', etiqueta: 'DLCs & Expansions' },
+    { clave: 'bundle', etiqueta: 'Bundles & Packs' },
+    { clave: 'remaster', etiqueta: 'Remasters & Enhanced Editions' },
+    { clave: 'edition', etiqueta: 'Editions / SKUs' },
+    { clave: 'port', etiqueta: 'Ports' },
+    { clave: 'mod', etiqueta: 'Mods' },
+    { clave: 'update', etiqueta: 'Updates' },
+    { clave: 'episode', etiqueta: 'Episodes & Seasons' },
+  ];
+
   const [query, setQuery] = useState('');
+  // Vacío por defecto = comportamiento de siempre (solo juegos base). Cada
+  // categoría marcada aquí se SUMA al resultado, sin afectar a las demás —
+  // se pueden combinar como se quiera, en vez de un interruptor "todo o nada".
+  const [categoriasActivas, setCategoriasActivas] = useState<Set<string>>(new Set());
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [resultados, setResultados] = useState<any[]>([]);
   const [myDb, setMyDb] = useState<any[]>([]);
   const [buscando, setBuscando] = useState(false);
   const [buscadoYa, setBuscadoYa] = useState(false);
+
+  const alternarCategoria = (clave: string) => {
+    setCategoriasActivas((prev) => {
+      const nuevo = new Set(prev);
+      if (nuevo.has(clave)) nuevo.delete(clave);
+      else nuevo.add(clave);
+      return nuevo;
+    });
+  };
 
   const buscar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,8 +50,10 @@ export default function JuegosLobbyClient({
     setBuscando(true);
     setBuscadoYa(true);
     try {
+      const incluir = Array.from(categoriasActivas).join(',');
+      const incluirParam = incluir ? `&incluir=${incluir}` : '';
       const [resJuegos, resDb] = await Promise.all([
-        fetch(`http://localhost:3001/igdb/search?q=${encodeURIComponent(query)}`),
+        fetch(`http://localhost:3001/igdb/search?q=${encodeURIComponent(query)}${incluirParam}`),
         fetch('http://localhost:3001/media'),
       ]);
       const juegos = await resJuegos.json();
@@ -60,7 +87,7 @@ export default function JuegosLobbyClient({
 
   return (
     <>
-      <form onSubmit={buscar} className="flex gap-2 mb-6 max-w-md">
+      <form onSubmit={buscar} className="flex flex-wrap gap-2 mb-6 max-w-2xl relative">
         <input
           type="text"
           value={query}
@@ -68,6 +95,47 @@ export default function JuegosLobbyClient({
           placeholder="Search for a game..."
           className="flex-grow bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
         />
+
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setFiltrosAbiertos((v) => !v)}
+            className="bg-[#2c3440] hover:bg-[#3a4552] text-white text-sm rounded px-3 py-2 transition cursor-pointer whitespace-nowrap"
+          >
+            Filters{categoriasActivas.size > 0 ? ` (${categoriasActivas.size})` : ''} ▾
+          </button>
+
+          {filtrosAbiertos && (
+            <div className="absolute z-20 top-full mt-1 right-0 w-64 bg-[#1c2228] border border-gray-700 rounded-lg shadow-xl p-3">
+              <p className="text-xs text-gray-500 mb-2">
+                Nothing checked = only base games. Check one or more to see ONLY those categories instead:
+              </p>
+              <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                {CATEGORIAS_FILTRO.map((cat) => (
+                  <label key={cat.clave} className="flex items-center gap-2 text-sm text-gray-200 cursor-pointer hover:text-white">
+                    <input
+                      type="checkbox"
+                      checked={categoriasActivas.has(cat.clave)}
+                      onChange={() => alternarCategoria(cat.clave)}
+                      className="cursor-pointer"
+                    />
+                    {cat.etiqueta}
+                  </label>
+                ))}
+              </div>
+              {categoriasActivas.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setCategoriasActivas(new Set())}
+                  className="mt-2 text-xs text-gray-500 hover:text-white underline cursor-pointer"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
         <button
           type="submit"
           disabled={buscando}

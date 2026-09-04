@@ -364,6 +364,32 @@ app.get('/igdb/search', async (req, res) => {
     const searchQuery = req.query.q;
     if (!searchQuery) return res.status(400).json({ error: 'Falta término' });
 
+    // Por defecto no se incluye ninguna categoría extra (mismo
+    // comportamiento de siempre: solo juegos base). Con ?incluir=dlc,port
+    // se dejan pasar TAMBIÉN esas categorías concretas, sin afectar al
+    // resto — así se pueden combinar como se quiera, en vez de un "todo o
+    // nada".
+    const CATEGORIAS_TIPO = {
+      dlc: [1, 2, 4],      // DLC, expansión, expansión independiente
+      bundle: [3, 13],     // bundle, pack
+      remaster: [9, 10],   // remaster, edición ampliada
+      port: [11],
+      mod: [5],
+      update: [14],
+      episode: [6, 7],     // episodio, temporada
+    };
+    const categoriasIncluidas = String(req.query.incluir || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const tiposPermitidos = new Set();
+    for (const cat of categoriasIncluidas) {
+      (CATEGORIAS_TIPO[cat] || []).forEach((t) => tiposPermitidos.add(t));
+    }
+    // "edition" es un caso aparte: no es un game_type, es el filtro de
+    // version_parent (ediciones/SKUs concretos de otro juego ya listado).
+    const incluirEdiciones = categoriasIncluidas.includes('edition');
+
     const token = await getIgdbToken();
 
     // Antes limitaba a 20 resultados. Para que el buscador muestre TODO lo
@@ -392,13 +418,27 @@ app.get('/igdb/search', async (req, res) => {
     // mod (5), episodio/temporada (6/7), remaster (9), edición ampliada
     // (10), port (11), pack (13), update (14). Se queda remake (8) y lo que
     // no tenga game_type puesto (null = se trata como juego base).
+    // Este filtro por tipo (y el de ediciones/SKUs vía version_parent) solo
+    // se aplica en modo "base" — en modo "todos" se deja pasar cualquier
+    // cosa cuyo nombre haya coincidido, sea DLC, bundle, remaster, edición
+    // especial, port...
     const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14];
     const PLATAFORMAS_EXCLUIDAS = ['Handheld Electronic LCD', 'Plug & Play', 'V.Smile', 'LeapTV'];
+    const hayFiltroActivo = categoriasIncluidas.length > 0;
 
+    // Filtro EXCLUSIVO, no aditivo: sin ninguna categoría marcada, se
+    // comporta como siempre (solo juegos base). En cuanto marcas UNA o más
+    // categorías, se muestran ÚNICAMENTE esas — los juegos base desaparecen
+    // de la lista, no se quedan mezclados de fondo.
     const filtrados = (data || [])
-      .filter((juego) => !TIPOS_EXCLUIDOS.includes(juego.game_type))
-      .filter((juego) => !juego.version_parent) // sin ediciones/SKUs concretos de otro juego ya listado
-      .filter((juego) => !(juego.platforms || []).some((p) => PLATAFORMAS_EXCLUIDAS.includes(p.name)));
+      .filter((juego) => !(juego.platforms || []).some((p) => PLATAFORMAS_EXCLUIDAS.includes(p.name)))
+      .filter((juego) => {
+        if (!hayFiltroActivo) {
+          return !TIPOS_EXCLUIDOS.includes(juego.game_type) && !juego.version_parent;
+        }
+        if (juego.version_parent) return incluirEdiciones;
+        return tiposPermitidos.has(juego.game_type);
+      });
 
     // IGDB devuelve las URLs sin "https:" y en tamaño miniatura (t_thumb) — las arreglamos aquí
     const arreglados = filtrados.map(juego => ({
