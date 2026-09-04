@@ -818,7 +818,17 @@ async function getIgdbGameCollection(igdbId) {
 
   const collections = juegoActual.collections || [];
   const franchises = juegoActual.franchises || [];
-  if (collections.length === 0 && franchises.length === 0) return null;
+
+  // OJO: antes, si el juego no tenía una Collection propia en IGDB, se caía
+  // a agrupar por Franchise (mucho más amplia y menos fiable — solo exige
+  // que el nombre del candidato CONTENGA la palabra de la franquicia, lo que
+  // dejaba colar mercancía/juegos educativos con licencia de marca, como un
+  // juego de LeapFrog llamado "The Batman: ..." apareciendo como precuela/
+  // secuela de Gotham Knights). Ahora, sin Collection real, no se calcula
+  // ninguna saga en absoluto — el respaldo por Franchise se queda
+  // ÚNICAMENTE en la pestaña "Franchise" de solo lectura (que usa su propia
+  // función, obtenerFranquiciaAmplia, y no ofrece precuela/secuela).
+  if (collections.length === 0) return null;
 
   // Si no hay Collection propia, miramos si la Franchise tiene una
   // palabra clave manual configurada arriba — así una franquicia genérica
@@ -2829,6 +2839,58 @@ app.post('/admin/curated-collections/:collectionId/reset', requireAuth, requireA
   } catch (error) {
     console.error('ERROR EN POST /admin/curated-collections/:collectionId/reset:', error);
     res.status(500).json({ error: 'Error al reiniciar la colección' });
+  }
+});
+
+// --- LIMPIA de golpe todas las sagas de juegos que se crearon por el
+// respaldo de Franchise (antes de que se corrigiera getIgdbGameCollection
+// para exigir siempre una Collection real de IGDB) — esas sagas podían
+// arrastrar juegos sin relación real (mercancía/ediciones educativas con
+// licencia de marca) como si fueran precuela/secuela. Las que SÍ tienen una
+// Collection real de verdad se dejan intactas. Solo admin. ---
+app.post('/admin/curated-collections/limpiar-sin-igdb-collection', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const colecciones = await prisma.curatedCollection.findMany({
+      include: { items: { take: 1, orderBy: { orden: 'asc' } } },
+    });
+
+    let borradas = 0;
+    let conservadas = 0;
+    let sinAncla = 0;
+
+    for (const coleccion of colecciones) {
+      const igdbIdAncla = coleccion.items[0]?.igdbId;
+      if (!igdbIdAncla) { sinAncla++; continue; }
+      try {
+        // getIgdbGameCollection ya devuelve null si el juego no tiene una
+        // Collection real de IGDB (con el arreglo aplicado) — así se
+        // reutiliza exactamente la misma regla que decide si una saga es
+        // legítima o no, sin duplicar lógica.
+        const real = await getIgdbGameCollection(igdbIdAncla);
+        if (!real) {
+          try {
+            await prisma.curatedCollectionItem.deleteMany({ where: { collectionId: coleccion.id } });
+            await prisma.curatedCollection.delete({ where: { id: coleccion.id } });
+            borradas++;
+          } catch (eBorrado) {
+            // P2025 = "no encontrado" — ya se había borrado (p. ej. por un
+            // clic duplicado en el botón procesando esto mismo a la vez).
+            // El resultado que queríamos (que esta fila no exista) ya es
+            // cierto, así que no hace falta tratarlo como fallo real.
+            if (eBorrado.code !== 'P2025') throw eBorrado;
+          }
+        } else {
+          conservadas++;
+        }
+      } catch (e) {
+        console.error(`Error comprobando colección "${coleccion.nombre}" (id ${coleccion.id}):`, e.message);
+      }
+    }
+
+    res.json({ ok: true, total: colecciones.length, borradas, conservadas, sinAncla });
+  } catch (error) {
+    console.error('ERROR EN POST /admin/curated-collections/limpiar-sin-igdb-collection:', error);
+    res.status(500).json({ error: 'Error al limpiar las colecciones sin Collection real de IGDB' });
   }
 });
 

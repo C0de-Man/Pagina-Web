@@ -41,6 +41,7 @@ export default function Settings() {
   const [errorCredenciales, setErrorCredenciales] = useState<string | null>(null);
   const [okCredenciales, setOkCredenciales] = useState<string | null>(null);
 
+    const [limpiandoSagas, setLimpiandoSagas] = useState(false);
   // --- Reiniciar cuenta (solo admin) ---
   const [confirmandoResetCuenta, setConfirmandoResetCuenta] = useState(false);
   const [usernameConfirmacionReset, setUsernameConfirmacionReset] = useState('');
@@ -360,14 +361,6 @@ export default function Settings() {
                 >
                   {guardando ? 'Saving...' : 'Save Changes'}
                 </button>
-
-                {/* Idioma/región: dentro de la columna izquierda, justo
-                    debajo del botón — así no hereda la altura de la columna
-                    derecha (Avatar/Favorites) por el "stretch" del flex, que
-                    antes dejaba un hueco enorme antes de llegar aquí. */}
-                <div className="mt-10 pt-6 border-t border-gray-800 max-w-md">
-                  <SettingsIdiomaRegion />
-                </div>
               </div>
 
               <div className="w-full md:w-[420px] flex-shrink-0">
@@ -424,6 +417,14 @@ export default function Settings() {
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Idioma/región: movido aquí desde la pestaña Account — es una
+                preferencia de cómo VES el contenido (título/sinopsis/dónde
+                ver), más cercana a "cómo se te muestra tu perfil" que a
+                credenciales/seguridad de la cuenta. */}
+            <div className="mt-10 pt-6 border-t border-gray-800 max-w-md">
+              <SettingsIdiomaRegion />
             </div>
           </div>
         ) : tab === 'account' ? (
@@ -577,6 +578,43 @@ export default function Settings() {
           // saca de esta pestaña si en algún momento dejas de serlo).
           <div className="max-w-md">
             <h2 className="text-lg font-bold mb-4">Admin</h2>
+
+            {/* TEMPORAL — botón de un solo uso para limpiar las sagas de
+                juegos creadas por el antiguo respaldo de Franchise. Bórralo
+                cuando ya no lo necesites. */}
+            <div className="pb-6 mb-6 border-b border-gray-800">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2">Clean up bad game sagas (one-time)</h3>
+              <p className="text-gray-500 text-sm mb-3">
+                Removes any game saga that was created from the old Franchise fallback (which could pull in unrelated licensed merchandise as if it were a prequel/sequel). Sagas with a real IGDB Collection are left untouched. This can take a minute or two — please only click once.
+              </p>
+              <button
+                onClick={async () => {
+                  if (limpiandoSagas) return; // ya en marcha, ignora clics de más
+                  const token = localStorage.getItem('token');
+                  if (!token) return;
+                  setLimpiandoSagas(true);
+                  try {
+                    const res = await fetch('http://localhost:3001/admin/curated-collections/limpiar-sin-igdb-collection', {
+                      method: 'POST',
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                    const data = await res.json();
+                    alert(
+                      res.ok
+                        ? `Done. Checked ${data.total}, removed ${data.borradas}, kept ${data.conservadas}${data.sinAncla ? `, ${data.sinAncla} had no anchor game` : ''}.`
+                        : 'Something went wrong, please try again.'
+                    );
+                  } catch {
+                    alert('Something went wrong, please try again.');
+                  }
+                  setLimpiandoSagas(false);
+                }}
+                disabled={limpiandoSagas}
+                className="bg-amber-900/40 hover:bg-amber-900/60 text-amber-300 hover:text-amber-200 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+              >
+                {limpiandoSagas ? 'Cleaning up… this may take a minute' : 'Clean up bad sagas'}
+              </button>
+            </div>
 
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 mb-2">Reset account (admin)</h3>
