@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { urlFicha } from '@/lib/slug';
 
-export default function GameCard({ juego, dbId, customPoster }: { juego: any, dbId: number | null, customPoster: string | null }) {
+export default function GameCard({ juego, dbId, customPoster, fullWidth }: { juego: any, dbId: number | null, customPoster: string | null, fullWidth?: boolean }) {
   const [miCustomPoster, setMiCustomPoster] = useState<string | null>(customPoster);
 
   useEffect(() => {
@@ -17,7 +17,7 @@ export default function GameCard({ juego, dbId, customPoster }: { juego: any, db
       .then((data) => {
         if (data.customPoster) setMiCustomPoster(data.customPoster);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [dbId, customPoster]);
 
   // Href real, siempre resoluble sin JS:
@@ -31,7 +31,7 @@ export default function GameCard({ juego, dbId, customPoster }: { juego: any, db
   const anio = juego.anio || (juego.first_release_date ? new Date(juego.first_release_date * 1000).getFullYear() : '');
 
   return (
-    <Link href={href} className="flex-shrink-0 w-32 md:w-40 group cursor-pointer relative block">
+    <Link href={href} className={`${fullWidth ? 'w-full' : 'flex-shrink-0 w-32 md:w-40'} group cursor-pointer relative block`}>
       {posterUrl ? (
         <img
           src={posterUrl}

@@ -390,6 +390,56 @@ app.get('/igdb/search', async (req, res) => {
     // version_parent (ediciones/SKUs concretos de otro juego ya listado).
     const incluirEdiciones = categoriasIncluidas.includes('edition');
 
+    // --- NUEVO: filtros del sidebar (mismo patrón que /igdb/catalogo/page) ---
+    // Estos son independientes del "incluir" de arriba (que viene del
+    // desplegable "Filters ▾" ya existente en el propio buscador). Si el
+    // sidebar manda categorías (game_type: Main Game/Expanded/Standalone
+    // Expansion/Remake/Remaster/Port), se aplican como "where" en la propia
+    // consulta a IGDB, y el filtro "solo juegos base" por defecto se
+    // desactiva — el sidebar ya decidió exactamente qué game_type quiere ver.
+    const { categorias, estado, anio, genero, plataforma, ratingMin, ratingMax, orden } = req.query;
+    const condicionesSidebar = [];
+
+    const ahora = Math.floor(Date.now() / 1000);
+    if (estado === 'upcoming') {
+      condicionesSidebar.push(`first_release_date > ${ahora}`);
+    } else if (estado === 'released') {
+      condicionesSidebar.push(`first_release_date <= ${ahora}`);
+    } else if (anio) {
+      const y = parseInt(anio);
+      const desde = Math.floor(new Date(Date.UTC(y, 0, 1)).getTime() / 1000);
+      const hasta = Math.floor(new Date(Date.UTC(y, 11, 31, 23, 59, 59)).getTime() / 1000);
+      condicionesSidebar.push(`first_release_date >= ${desde} & first_release_date <= ${hasta}`);
+    }
+
+    let categoriasSidebarIds = [];
+    if (categorias) {
+      categoriasSidebarIds = String(categorias).split(',').map((c) => parseInt(c)).filter((n) => !Number.isNaN(n));
+      if (categoriasSidebarIds.length > 0) {
+        const condicionBase = categoriasSidebarIds.length === 1
+          ? `game_type = ${categoriasSidebarIds[0]}`
+          : `game_type = (${categoriasSidebarIds.join(',')})`;
+        const partes = [condicionBase];
+        // "Main Game" (id 0): muchos juegos normales tienen game_type vacío
+        // (null) en vez de puesto explícitamente a 0 — mismo caso especial
+        // que en /igdb/catalogo/page.
+        if (categoriasSidebarIds.includes(0)) partes.push('game_type = null');
+        condicionesSidebar.push(partes.length > 1 ? `(${partes.join(' | ')})` : partes[0]);
+      }
+    }
+
+    if (genero) condicionesSidebar.push(`genres = (${parseInt(genero)})`);
+    if (plataforma) condicionesSidebar.push(`platforms = (${parseInt(plataforma)})`);
+
+    if (ratingMin || ratingMax) {
+      const min = ratingMin ? parseFloat(ratingMin) * 20 : 0;
+      const max = ratingMax ? parseFloat(ratingMax) * 20 : 100;
+      condicionesSidebar.push(`total_rating != null & total_rating >= ${min} & total_rating <= ${max}`);
+    }
+
+    const whereSidebar = condicionesSidebar.length > 0 ? `where ${condicionesSidebar.join(' & ')};` : '';
+    const sortSidebar = orden ? `sort total_rating_count ${orden === 'asc' ? 'asc' : 'desc'};` : '';
+
     const token = await getIgdbToken();
 
     // Antes limitaba a 20 resultados. Para que el buscador muestre TODO lo
@@ -398,7 +448,7 @@ app.get('/igdb/search', async (req, res) => {
     // game_type y platforms.name se piden para poder filtrar: solo juegos
     // base (fuera DLCs/expansiones/bundles/mods/episodios/remasters/ports/
     // updates; se queda remake) y sin juguetes electrónicos standalone.
-    const body = `search "${searchQuery}"; fields name,cover.url,first_release_date,summary,game_type,platforms.name,version_parent; limit 500;`;
+    const body = `search "${searchQuery}"; fields name,cover.url,first_release_date,summary,game_type,platforms.name,version_parent; ${whereSidebar} ${sortSidebar} limit 500;`;
 
     const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
@@ -418,21 +468,18 @@ app.get('/igdb/search', async (req, res) => {
     // mod (5), episodio/temporada (6/7), remaster (9), edición ampliada
     // (10), port (11), pack (13), update (14). Se queda remake (8) y lo que
     // no tenga game_type puesto (null = se trata como juego base).
-    // Este filtro por tipo (y el de ediciones/SKUs vía version_parent) solo
-    // se aplica en modo "base" — en modo "todos" se deja pasar cualquier
-    // cosa cuyo nombre haya coincidido, sea DLC, bundle, remaster, edición
-    // especial, port...
     const TIPOS_EXCLUIDOS = [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14];
     const PLATAFORMAS_EXCLUIDAS = ['Handheld Electronic LCD', 'Plug & Play', 'V.Smile', 'LeapTV'];
     const hayFiltroActivo = categoriasIncluidas.length > 0;
+    const hayCategoriasSidebar = categoriasSidebarIds.length > 0;
 
-    // Filtro EXCLUSIVO, no aditivo: sin ninguna categoría marcada, se
-    // comporta como siempre (solo juegos base). En cuanto marcas UNA o más
-    // categorías, se muestran ÚNICAMENTE esas — los juegos base desaparecen
-    // de la lista, no se quedan mezclados de fondo.
     const filtrados = (data || [])
       .filter((juego) => !(juego.platforms || []).some((p) => PLATAFORMAS_EXCLUIDAS.includes(p.name)))
       .filter((juego) => {
+        // El sidebar ya filtró por game_type en el "where" de la propia
+        // consulta a IGDB — no volvemos a aplicar el filtro "solo base" por
+        // defecto encima, sería incompatible con lo que el sidebar pidió.
+        if (hayCategoriasSidebar) return true;
         if (!hayFiltroActivo) {
           return !TIPOS_EXCLUIDOS.includes(juego.game_type) && !juego.version_parent;
         }
@@ -5536,6 +5583,35 @@ app.get('/tmdb/tv/:tmdbId/universe', async (req, res) => {
   }
 });
 
+// --- MEDIA REAL DE DURACIÓN DE EPISODIO ---
+// TMDB solo da a nivel de serie un episode_run_time (array impreciso) o el
+// runtime del último episodio emitido — ninguno refleja la duración típica
+// real. Aquí se recorren TODAS las temporadas (excepto "Specials", igual que
+// ya se excluye en otros sitios del proyecto) y se promedia el runtime real
+// de cada episodio que TMDB tenga relleno.
+async function calcularDuracionMediaEpisodios(tmdbId, apiKey, idioma, temporadasData) {
+  const temporadas = (temporadasData || []).filter((s) => s.season_number > 0);
+  if (temporadas.length === 0) return null;
+
+  const respuestas = await Promise.all(
+    temporadas.map((s) =>
+      fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${s.season_number}?api_key=${apiKey}&language=${idioma}`)
+        .then((r) => r.json())
+        .catch(() => null)
+    )
+  );
+
+  const duraciones = [];
+  for (const det of respuestas) {
+    for (const ep of det?.episodes || []) {
+      if (ep.runtime && ep.runtime > 0) duraciones.push(ep.runtime);
+    }
+  }
+
+  if (duraciones.length === 0) return null;
+  return Math.round(duraciones.reduce((a, b) => a + b, 0) / duraciones.length);
+}
+
 // --- RUTA PARA DETALLES COMPLETOS: DURACIÓN, REPARTO, EQUIPO, ESTUDIO, PAÍS, PRESUPUESTO ---
 app.get('/tmdb/details/:tmdbId', async (req, res) => {
   try {
@@ -5570,7 +5646,14 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
     const guionistas = data.credits?.crew?.filter(p => p.job === 'Screenplay' || p.job === 'Writer') || [];
     // Series no tienen "runtime" único, sino episode_run_time (array) o el
     // runtime de la última temporada. Cogemos el primero disponible.
-    const runtimeSerie = data.episode_run_time?.[0] || data.last_episode_to_air?.runtime || null;
+    let runtimeSerie = null;
+    if (esSerie) {
+      runtimeSerie = await calcularDuracionMediaEpisodios(tmdbId, apiKey, lang, data.seasons);
+      if (!runtimeSerie) {
+        // Fallback si TMDB no tiene runtime puesto en ningún episodio todavía
+        runtimeSerie = data.episode_run_time?.[0] || data.last_episode_to_air?.runtime || null;
+      }
+    }
 
     res.json({
       runtime: esSerie ? runtimeSerie : (data.runtime || null),

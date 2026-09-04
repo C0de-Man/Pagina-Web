@@ -1,8 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import GameCard from '@/components/GameCard';
 import YearGamesCarousel from '@/components/YearGamesCarousel';
+import SearchFiltersSidebar, { FiltrosBusqueda, FILTROS_VACIOS } from '@/components/SearchFiltersSidebar';
 
 export default function JuegosLobbyClient({
   currentYear,
@@ -35,6 +36,20 @@ export default function JuegosLobbyClient({
   const [buscando, setBuscando] = useState(false);
   const [buscadoYa, setBuscadoYa] = useState(false);
 
+  // Filtros del sidebar (Categories/Release year/Popularity/Genre/Platform/
+  // Rating — mismo panel que /game/all, pero controlado en vez de por URL).
+  const [filtrosSidebar, setFiltrosSidebar] = useState<FiltrosBusqueda>(FILTROS_VACIOS);
+  const [plataformas, setPlataformas] = useState<{ id: number; name: string }[]>([]);
+
+  useEffect(() => {
+    fetch('http://localhost:3001/igdb/filtros')
+      .then((r) => r.json())
+      .then((data) => {
+        setPlataformas(data.plataformas || []);
+      })
+      .catch((error) => console.error('Error al cargar plataformas:', error));
+  }, []);
+
   const alternarCategoria = (clave: string) => {
     setCategoriasActivas((prev) => {
       const nuevo = new Set(prev);
@@ -42,35 +57,6 @@ export default function JuegosLobbyClient({
       else nuevo.add(clave);
       return nuevo;
     });
-  };
-
-  const buscar = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!query.trim() || buscando) return;
-    setBuscando(true);
-    setBuscadoYa(true);
-    try {
-      const incluir = Array.from(categoriasActivas).join(',');
-      const incluirParam = incluir ? `&incluir=${incluir}` : '';
-      const [resJuegos, resDb] = await Promise.all([
-        fetch(`http://localhost:3001/igdb/search?q=${encodeURIComponent(query)}${incluirParam}`),
-        fetch('http://localhost:3001/media'),
-      ]);
-      const juegos = await resJuegos.json();
-      const db = await resDb.json();
-      setResultados(Array.isArray(juegos) ? juegos : []);
-      setMyDb(db);
-    } catch (error) {
-      console.error('Error al buscar juegos:', error);
-      setResultados([]);
-    }
-    setBuscando(false);
-  };
-
-  const limpiarBusqueda = () => {
-    setQuery('');
-    setResultados([]);
-    setBuscadoYa(false);
   };
 
   // /media no lleva token (esta búsqueda va sin auth) y su "portada" es la
@@ -83,6 +69,61 @@ export default function JuegosLobbyClient({
       dbId: local ? local.id : null,
       customPoster: null,
     };
+  };
+
+  const ejecutarBusqueda = async (q: string, filtros: FiltrosBusqueda) => {
+    if (!q.trim()) return;
+    setBuscando(true);
+    setBuscadoYa(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('q', q);
+
+      const incluir = Array.from(categoriasActivas).join(',');
+      if (incluir) params.set('incluir', incluir);
+
+      if (filtros.estado) params.set('estado', filtros.estado);
+      if (filtros.anio) params.set('anio', filtros.anio);
+      if (filtros.plataforma) params.set('plataforma', filtros.plataforma);
+      if (filtros.ratingMin > 0) params.set('ratingMin', String(filtros.ratingMin));
+      if (filtros.ratingMax < 5) params.set('ratingMax', String(filtros.ratingMax));
+
+      const [resJuegos, resDb] = await Promise.all([
+        fetch(`http://localhost:3001/igdb/search?${params.toString()}`),
+        fetch('http://localhost:3001/media'),
+      ]);
+      const juegos = await resJuegos.json();
+      const db = await resDb.json();
+      const juegosUnicos = Array.isArray(juegos)
+        ? Array.from(new Map(juegos.map((j: any) => [j.id, j])).values())
+        : [];
+      setResultados(juegosUnicos);
+      setMyDb(db);
+    } catch (error) {
+      console.error('Error al buscar juegos:', error);
+      setResultados([]);
+    }
+    setBuscando(false);
+  };
+
+  const buscar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query.trim() || buscando) return;
+    await ejecutarBusqueda(query, filtrosSidebar);
+  };
+
+  // Se llama desde el sidebar al pulsar "Update filters" o el botón de
+  // resetear. Si ya hay una búsqueda en marcha, se re-ejecuta al momento con
+  // los filtros nuevos; si no, solo se guardan para la próxima búsqueda.
+  const aplicarFiltrosSidebar = (filtros: FiltrosBusqueda) => {
+    setFiltrosSidebar(filtros);
+    if (query.trim()) ejecutarBusqueda(query, filtros);
+  };
+
+  const limpiarBusqueda = () => {
+    setQuery('');
+    setResultados([]);
+    setBuscadoYa(false);
   };
 
   return (
@@ -155,20 +196,29 @@ export default function JuegosLobbyClient({
       </form>
 
       {buscadoYa ? (
-        buscando ? (
-          <p className="text-gray-500 text-sm">Searching...</p>
-        ) : resultados.length === 0 ? (
-          <p className="text-gray-500 text-sm">No games found for "{query}".</p>
-        ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-4">
-            {resultados.map((juego: any) => {
-              const { dbId, customPoster } = getLocalData(juego.id);
-              return (
-                <GameCard key={juego.id} juego={juego} dbId={dbId} customPoster={customPoster} />
-              );
-            })}
+        <div className="flex flex-col lg:flex-row gap-6">
+          <SearchFiltersSidebar
+            plataformas={plataformas}
+            onAplicar={aplicarFiltrosSidebar}
+          />
+
+          <div className="flex-grow min-w-0">
+            {buscando ? (
+              <p className="text-gray-500 text-sm">Searching...</p>
+            ) : resultados.length === 0 ? (
+              <p className="text-gray-500 text-sm">No games found for "{query}".</p>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4">
+                {resultados.map((juego: any) => {
+                  const { dbId, customPoster } = getLocalData(juego.id);
+                  return (
+                    <GameCard key={juego.id} juego={juego} dbId={dbId} customPoster={customPoster} fullWidth />
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )
+        </div>
       ) : (
         <>
           <div className="mb-12">
