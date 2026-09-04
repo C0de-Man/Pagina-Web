@@ -5556,15 +5556,24 @@ app.get('/tmdb/tv/:tmdbId/seasons', async (req, res) => {
       });
     }
 
+    // Antes se descartaba directamente la temporada 0 ("Specials"). Ahora se
+    // incluye, pero reordenada para que quede SIEMPRE al final de la lista
+    // (nunca al principio, que es como TMDB la da por defecto) — así, si en
+    // el futuro se añade una temporada nueva (p. ej. Season 4), "Specials"
+    // se queda detrás de ELLA también, no vuelve a subir a la posición 0.
     const temporadas = seasons
-      .filter(s => s.season_number > 0)
       .map(s => ({
         numero: s.season_number,
         nombre: s.name,
         episodios: s.episode_count,
         fechaEstreno: s.air_date,
         portada: s.poster_path ? `https://image.tmdb.org/t/p/w300${s.poster_path}` : null
-      }));
+      }))
+      .sort((a, b) => {
+        if (a.numero === 0) return 1;
+        if (b.numero === 0) return -1;
+        return a.numero - b.numero;
+      });
     res.json(temporadas);
   } catch (error) {
     console.error('ERROR EN GET /tmdb/tv/:tmdbId/seasons:', error);
