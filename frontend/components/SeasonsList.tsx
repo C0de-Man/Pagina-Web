@@ -61,9 +61,6 @@ function EstrellasVisual({ rating, onSelect, size = 'text-sm' }: { rating: numbe
               e.stopPropagation();
               if (!onSelect) return;
               const valor = i * 2;
-              // Volver a pulsar la MISMA estrella que ya marca tu nota actual
-              // quita la nota (null), en vez de dejarla fija para siempre —
-              // mismo gesto que ya tienes en películas/juegos.
               onSelect(rating === valor ? null : valor);
             }}
             className={`${size} leading-none ${onSelect ? 'cursor-pointer hover:scale-110 transition' : 'cursor-default'} ${lleno || medio ? 'text-teal-400' : 'text-gray-600'}`}
@@ -87,7 +84,7 @@ function OjoVisto({ visto, onToggle }: { visto: boolean; onToggle?: () => void }
       }}
       title={visto ? 'Watched' : 'Not watched'}
       className={`w-9 h-9 rounded-full flex items-center justify-center text-lg transition flex-shrink-0 ${onToggle ? 'cursor-pointer hover:bg-gray-700' : 'cursor-default'
-        } ${visto ? 'text-teal-400 bg-teal-900/30' : 'text-gray-600 bg-gray-800/60'}`}
+        } ${visto ? 'text-teal-300 bg-teal-500/20 ring-1 ring-teal-500/40' : 'text-gray-500 bg-gray-800/70'}`}
     >
       👁
     </button>
@@ -175,11 +172,6 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
     } catch { }
   };
 
-  // Si CON el mapa de estados de temporada que se le pase ya están TODAS las
-  // temporadas de la serie vistas, marca la serie entera como "Watched"
-  // (equivalente a elegir "Watched" en el desplegable "Set your watch
-  // status") — sin esto, la serie se quedaba indefinidamente en "Watching"
-  // aunque ya no quedara nada por ver.
   const revisarSiSerieCompleta = async (estadosTemporadasActualizados: Record<number, EstadoTemporada>) => {
     const todasVistas = temporadas.length > 0 && temporadas.every((t) => estadosTemporadasActualizados[t.numero]?.watched);
     if (!todasVistas) return;
@@ -191,18 +183,10 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ watched: true, playStatus: null }),
       });
-      // Avisamos al resto de la página (p. ej. ActionButtons, que pinta el
-      // desplegable "Set your watch status") de que el estado general acaba
-      // de cambiar, por si quiere refrescarse sin necesidad de recargar.
       window.dispatchEvent(new CustomEvent('media-status-changed', { detail: { mediaId } }));
     } catch { }
   };
 
-  // Marca la temporada indicada como vista y comprueba si con eso la serie
-  // entera queda completa. Se usa desde los TRES sitios donde se puede
-  // completar una temporada de golpe: el ojo de la fila en la lista, el
-  // botón "Mark season as watched" del modal, y automáticamente cuando se
-  // marca el último episodio pendiente de una temporada uno a uno.
   const marcarTemporadaCompleta = async (numeroTemporada: number) => {
     await actualizarTemporada(numeroTemporada, { watched: true });
     const estadoActual = estadosTemporadas[numeroTemporada];
@@ -218,10 +202,6 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
     await revisarSiSerieCompleta(estadosTemporadasActualizados);
   };
 
-  // Marca el episodio pulsado Y todos los ANTERIORES de la misma temporada
-  // que aún no lo estuvieran. Si con eso la temporada queda completa, la
-  // marca como vista (y de rebote comprueba si la serie entera queda
-  // completa).
   const marcarVistoConAnteriores = async (ep: Episodio) => {
     if (!temporadaAbierta) return;
     const numeroTemporada = temporadaAbierta.numero;
@@ -239,19 +219,21 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
 
     const token = localStorage.getItem('token');
     if (token) {
+      // omitirCascada: true — el resultado de esta cascada ya se comprueba
+      // una sola vez más abajo (marcarTemporadaCompleta), así que no hace
+      // falta que CADA episodio del lote dispare su propia comprobación
+      // pesada contra TMDB en el backend.
       await Promise.all(
         idsAMarcar.map((n) =>
           fetch(`http://localhost:3001/media/${mediaId}/seasons/${numeroTemporada}/episodes/${n}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ watched: true }),
+            body: JSON.stringify({ watched: true, omitirCascada: true }),
           }).catch(() => { })
         )
       );
     }
 
-    // ¿Quedan YA todos los episodios de esta temporada vistos? (los recién
-    // marcados + los que ya estaban vistos de antes)
     const totalVistos = episodios.filter(
       (e) => idsAMarcar.includes(e.numero) || estadosEpisodios[e.numero]?.watched
     ).length;
@@ -331,7 +313,7 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
     <section className="mt-8">
       <h2 className="text-xl font-bold text-white mb-4">Seasons ({temporadas.length})</h2>
 
-      <div className="bg-[#1c2228] rounded-lg border border-gray-700 divide-y divide-gray-700">
+      <div className="bg-[#1c2228] rounded-lg border border-gray-700 divide-y divide-gray-800/80 overflow-hidden">
         {temporadas.map((t) => {
           const estado = estadosTemporadas[t.numero];
           const visto = estado?.watched || false;
@@ -340,15 +322,15 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
             <div
               key={t.numero}
               onClick={() => abrirTemporada(t)}
-              className="flex items-center gap-4 p-3 hover:bg-[#242b33] transition cursor-pointer"
+              className="flex items-center gap-4 p-3.5 hover:bg-[#242b33] transition cursor-pointer group"
             >
-              <div className="w-12 h-16 flex-shrink-0 rounded overflow-hidden bg-gray-800">
+              <div className="w-12 h-16 flex-shrink-0 rounded-md overflow-hidden bg-gray-800 shadow-sm ring-1 ring-white/5 group-hover:ring-white/10 transition">
                 {posterFila && <img src={posterFila} alt={t.nombre} className="w-full h-full object-cover" />}
               </div>
 
               <div className="flex-grow min-w-0">
                 <p className="text-white font-semibold truncate">{t.nombre}</p>
-                <p className="text-gray-500 text-xs">
+                <p className="text-gray-500 text-xs mt-0.5">
                   {t.fechaEstreno ? new Date(t.fechaEstreno).getFullYear() : '—'} · {t.episodios} episodes
                 </p>
               </div>
@@ -365,7 +347,6 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
                       body: JSON.stringify({ watched: nuevoEstado, totalEpisodios: t.episodios }),
                     }).catch(() => { });
                   }
-                  // Si la temporada está abierta en el modal ahora mismo, refleja el cambio ahí también
                   if (temporadaAbierta?.numero === t.numero) {
                     setEstadosEpisodios((prev) => {
                       const nuevo: Record<number, EstadoEpisodio> = {};
@@ -376,8 +357,6 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
                     });
                   }
                   if (nuevoEstado) {
-                    // Marcarla como vista de golpe: comprueba también si con
-                    // esto la serie entera queda completa.
                     await marcarTemporadaCompleta(t.numero);
                   } else {
                     await actualizarTemporada(t.numero, { watched: false });
@@ -390,7 +369,7 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
                 onSelect={(r) => actualizarTemporada(t.numero, { rating: r })}
               />
 
-              <span className="text-gray-500">→</span>
+              <span className="text-gray-600 group-hover:text-gray-400 transition">→</span>
             </div>
           );
         })}
@@ -398,59 +377,57 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
 
       {temporadaAbierta && (
         <div
-          className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4"
           onClick={() => setTemporadaAbierta(null)}
         >
           <div
-            className="bg-[#1c2228] rounded-lg border border-gray-700 w-full max-w-3xl max-h-[85vh] overflow-y-auto p-6"
+            className="bg-[#1c2228] rounded-xl border border-gray-700/80 shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-y-auto p-7"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex justify-between items-start mb-4">
-              <div className="flex gap-4">
+            <div className="flex justify-between items-start mb-5">
+              <div className="flex gap-5">
                 <div className="w-28 flex-shrink-0">
-                  <div className="w-28 aspect-[2/3] rounded overflow-hidden bg-gray-800 mb-2">
+                  <div className="w-28 aspect-[2/3] rounded-lg overflow-hidden bg-gray-800 mb-2 shadow-lg ring-1 ring-white/10">
                     {posterModal && <img src={posterModal} alt={temporadaAbierta.nombre} className="w-full h-full object-cover" />}
                   </div>
                   <button
                     onClick={abrirSelectorPoster}
-                    className="text-[11px] text-gray-400 hover:text-white underline cursor-pointer"
+                    className="text-[11px] text-gray-400 hover:text-white underline cursor-pointer transition"
                   >
                     Change poster
                   </button>
                 </div>
                 <div>
-                  <h3 className="text-2xl font-bold text-white">{temporadaAbierta.nombre}</h3>
-                  <p className="text-gray-500 text-sm mb-2">
+                  <h3 className="text-2xl font-bold text-white leading-tight">{temporadaAbierta.nombre}</h3>
+                  <p className="text-gray-500 text-sm mt-1 mb-3">
                     {(detalleTemporada?.fechaEstreno || temporadaAbierta.fechaEstreno)
                       ? new Date(detalleTemporada?.fechaEstreno || temporadaAbierta.fechaEstreno!).getFullYear()
                       : '—'} · {totalEpisodiosModal} episodes
                   </p>
                   {detalleTemporada?.sinopsis && (
-                    <p className="text-gray-300 text-sm leading-snug max-w-md">{detalleTemporada.sinopsis}</p>
+                    <p className="text-gray-300 text-sm leading-relaxed max-w-md">{detalleTemporada.sinopsis}</p>
                   )}
                 </div>
               </div>
-              <button onClick={() => setTemporadaAbierta(null)} className="text-gray-400 hover:text-white text-xl cursor-pointer flex-shrink-0">
+              <button onClick={() => setTemporadaAbierta(null)} className="text-gray-500 hover:text-white text-xl cursor-pointer flex-shrink-0 transition">
                 ✕
               </button>
             </div>
 
-            <div className="w-full h-2 rounded-full bg-gray-800 overflow-hidden mb-2 mt-4">
-              <div
-                className="h-full bg-teal-500 transition-all"
-                style={{
-                  width: `${porcentajeModal}%`,
-                  backgroundImage: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.15) 0, rgba(255,255,255,0.15) 8px, transparent 8px, transparent 16px)',
-                }}
-              />
+            <div className="flex items-center gap-3 mb-6">
+              <div className="flex-grow h-2 rounded-full bg-gray-800/80 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-teal-600 to-teal-400 transition-all duration-500 rounded-full"
+                  style={{ width: `${porcentajeModal}%` }}
+                />
+              </div>
+              <p className="text-xs text-gray-500 flex-shrink-0 tabular-nums">{vistosModal} / {totalEpisodiosModal}</p>
             </div>
-            <p className="text-xs text-gray-500 mb-4">{vistosModal} / {totalEpisodiosModal}</p>
 
-            <div className="flex items-center gap-4 mb-6 pb-4 border-b border-gray-700">
+            <div className="flex items-center gap-4 mb-7 pb-6 border-b border-gray-800">
               <button
                 onClick={async () => {
                   const nuevoEstado = !(estadoTemporadaAbierta?.watched);
-                  // Marca/desmarca TODOS los episodios de la temporada a la vez
                   episodios.forEach((ep) => actualizarEpisodio(temporadaAbierta.numero, ep.numero, { watched: nuevoEstado }));
                   if (nuevoEstado) {
                     await marcarTemporadaCompleta(temporadaAbierta.numero);
@@ -458,9 +435,9 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
                     await actualizarTemporada(temporadaAbierta.numero, { watched: false });
                   }
                 }}
-                className={`text-sm font-bold px-4 py-2 rounded transition cursor-pointer ${estadoTemporadaAbierta?.watched
-                    ? 'bg-teal-700 text-white'
-                    : 'bg-[#2c3440] text-gray-300 hover:bg-[#3a4552]'
+                className={`text-sm font-bold px-4 py-2 rounded-lg transition cursor-pointer ${estadoTemporadaAbierta?.watched
+                  ? 'bg-teal-600/90 text-white shadow-sm shadow-teal-900/40'
+                  : 'bg-[#2c3440] text-gray-300 hover:bg-[#3a4552]'
                   }`}
               >
                 {estadoTemporadaAbierta?.watched ? '✓ Season watched' : 'Mark season as watched'}
@@ -474,50 +451,53 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
             {cargandoEpisodios ? (
               <p className="text-gray-500 text-sm">Loading episodes...</p>
             ) : (
-              <div className="space-y-5">
+              <div className="space-y-3">
                 {episodios.map((ep) => {
                   const estado = estadosEpisodios[ep.numero];
+                  const visto = estado?.watched || false;
                   return (
-                    <div key={ep.numero} className="flex gap-3 items-start">
-                      <div className="w-28 h-16 flex-shrink-0 rounded overflow-hidden bg-gray-800">
+                    <div
+                      key={ep.numero}
+                      className={`flex gap-4 items-start p-3 rounded-lg transition ${visto ? 'bg-teal-950/20' : 'hover:bg-gray-800/40'
+                        }`}
+                    >
+                      <div className="w-32 h-[72px] flex-shrink-0 rounded-md overflow-hidden bg-gray-800 shadow-sm">
                         {ep.imagen && <img src={ep.imagen} alt={ep.titulo} className="w-full h-full object-cover" />}
                       </div>
 
-                      <div className="flex-grow min-w-0">
-                        <p className="text-white text-sm font-semibold">
+                      <div className="flex-grow min-w-0 pt-0.5">
+                        <p className="text-white text-sm font-semibold leading-snug">
                           {ep.numero}. {ep.titulo}
                         </p>
-                        <p className="text-gray-500 text-xs mb-1">
+                        <p className="text-gray-500 text-xs mt-0.5 mb-1.5">
                           {ep.fechaEmision ? new Date(ep.fechaEmision).toLocaleDateString() : ''}
                           {ep.duracion ? ` · ${ep.duracion}m` : ''}
                         </p>
-                        <p className="text-gray-400 text-xs line-clamp-2 mb-1.5">{ep.sinopsis}</p>
+                        <p className="text-gray-400 text-xs leading-relaxed line-clamp-2 mb-2">{ep.sinopsis}</p>
 
                         <div className="flex items-center gap-2">
                           {ep.notaMedia != null && (
-                            <div className="inline-flex items-center gap-1 bg-gray-800 px-2 py-0.5 rounded text-xs" title="Average rating (TMDB)">
+                            <div className="inline-flex items-center gap-1 bg-gray-800/80 px-2 py-0.5 rounded-full text-xs" title="Average rating (TMDB)">
                               <span className="text-yellow-400">★</span>
                               <span className="text-gray-300">{ep.notaMedia.toFixed(1)}</span>
                             </div>
                           )}
                           {estado?.rating != null && (
-                            <div className="inline-flex items-center gap-1 bg-gray-800 px-2 py-0.5 rounded text-xs" title="Your rating">
+                            <div className="inline-flex items-center gap-1 bg-teal-900/30 px-2 py-0.5 rounded-full text-xs" title="Your rating">
                               <span className="text-teal-400">★</span>
-                              <span className="text-gray-200">{(estado.rating / 2).toFixed(2)}</span>
+                              <span className="text-teal-100">{(estado.rating / 2).toFixed(2)}</span>
                             </div>
                           )}
                         </div>
                       </div>
 
-                      <div className="flex flex-col items-center gap-1.5 flex-shrink-0">
+                      <div className="flex flex-col items-center gap-2 flex-shrink-0 pt-0.5">
                         <OjoVisto
-                          visto={estado?.watched || false}
+                          visto={visto}
                           onToggle={() => {
-                            if (!estado?.watched) {
+                            if (!visto) {
                               marcarVistoConAnteriores(ep);
                             } else {
-                              // Desmarcar solo afecta a ESTE episodio, nunca
-                              // en cascada hacia atrás.
                               actualizarEpisodio(temporadaAbierta.numero, ep.numero, { watched: false });
                             }
                           }}
@@ -543,12 +523,12 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
           onClick={() => setSelectorPosterAbierto(false)}
         >
           <div
-            className="bg-[#1c2228] rounded-lg border border-gray-700 w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6"
+            className="bg-[#1c2228] rounded-xl border border-gray-700/80 shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold text-white">Choose a poster</h3>
-              <button onClick={() => setSelectorPosterAbierto(false)} className="text-gray-400 hover:text-white text-xl cursor-pointer">
+              <button onClick={() => setSelectorPosterAbierto(false)} className="text-gray-500 hover:text-white text-xl cursor-pointer transition">
                 ✕
               </button>
             </div>
@@ -563,7 +543,7 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
                   <button
                     key={i}
                     onClick={() => elegirPoster(p.url)}
-                    className="aspect-[2/3] rounded overflow-hidden border-2 border-transparent hover:border-teal-500 transition cursor-pointer"
+                    className="aspect-[2/3] rounded-lg overflow-hidden border-2 border-transparent hover:border-teal-500 transition cursor-pointer shadow-sm"
                   >
                     <img src={p.url} alt="" className="w-full h-full object-cover" />
                   </button>

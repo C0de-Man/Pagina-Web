@@ -5873,7 +5873,7 @@ app.patch('/media/:id/seasons/:seasonNumber/episodes/:episodeNumber', requireAut
     const mediaId = parseInt(req.params.id);
     const seasonNumber = parseInt(req.params.seasonNumber);
     const episodeNumber = parseInt(req.params.episodeNumber);
-    const { watched, rating } = req.body;
+    const { watched, rating, omitirCascada } = req.body;
 
     const data = {};
     if (typeof watched === 'boolean') {
@@ -5893,12 +5893,18 @@ app.patch('/media/:id/seasons/:seasonNumber/episodes/:episodeNumber', requireAut
         where: { userId: req.userId, mediaId },
         data: { lastActivityAt: new Date() },
       });
-      // No bloquea la respuesta si falla (p. ej. TMDB caído) — el episodio
-      // ya se guardó bien, esto es solo la comprobación "extra" en cascada.
-      try {
-        await comprobarYCompletarProgreso(req.userId, mediaId, seasonNumber);
-      } catch (e) {
-        console.error('Error comprobando progreso en cascada:', e.message);
+      // omitirCascada: true lo manda el frontend cuando este PATCH es UNO
+      // de varios marcados de golpe (p. ej. "marcar hasta aquí" en cascada)
+      // — en ese caso el propio frontend ya comprueba la finalización por su
+      // cuenta al final del lote, así que aquí nos ahorramos repetir la
+      // consulta a TMDB (hasta 2 peticiones) en CADA uno de los episodios
+      // del lote, que antes saturaba el servidor al marcar varios seguidos.
+      if (!omitirCascada) {
+        try {
+          await comprobarYCompletarProgreso(req.userId, mediaId, seasonNumber);
+        } catch (e) {
+          console.error('Error comprobando progreso en cascada:', e.message);
+        }
       }
     }
 
