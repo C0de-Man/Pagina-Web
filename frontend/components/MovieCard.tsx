@@ -45,18 +45,24 @@ export default function MovieCard({ pelicula, dbId, customPoster }: { pelicula: 
   const posterUrl = miCustomPoster || pelicula.portada || (pelicula.poster_path ? `https://image.tmdb.org/t/p/w780${pelicula.poster_path}` : null);
   const titulo = pelicula.title || pelicula.name || pelicula.titulo;
   const anio = pelicula.anio || (pelicula.release_date ? pelicula.release_date.split('-')[0] : (pelicula.first_air_date ? pelicula.first_air_date.split('-')[0] : ''));
+  // La URL de portada puede fallar al cargar (título anunciado/futuro sin
+  // imagen real puesta bien en TMDB) — en ese caso, tratamos como si no
+  // hubiera portada en vez de dejar el cuadro en blanco.
+  const [falloImagen, setFalloImagen] = useState(false);
+  const mostrarImagen = posterUrl && !falloImagen;
 
   return (
     <Link href={href} className="flex-shrink-0 w-32 md:w-40 group cursor-pointer relative block">
-      {posterUrl ? (
+      {mostrarImagen ? (
         <img
           src={posterUrl}
           alt={titulo}
+          onError={() => setFalloImagen(true)}
           className="w-full aspect-[2/3] object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition duration-300 shadow-lg"
         />
       ) : (
-        <div className="w-full aspect-[2/3] bg-gray-800 rounded-md border border-gray-700 flex items-center justify-center text-xs text-center p-2 group-hover:border-gray-400 transition shadow-lg">
-          {titulo}
+        <div className="w-full aspect-[2/3] bg-black rounded-md border border-gray-700 flex items-center justify-center text-center p-2 group-hover:border-gray-400 transition shadow-lg">
+          <p className="text-xs font-semibold text-white">{titulo}</p>
         </div>
       )}
 

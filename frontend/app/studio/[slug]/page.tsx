@@ -50,9 +50,9 @@ export default async function StudioPage({
 
   const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
   const myDb = await resDb.json();
-  const getLocalData = (tmdbId: number) => {
-    const local = myDb.find((m: any) => m.tmdbId === tmdbId);
-    return { dbId: local ? local.id : null, customPoster: local?.portada || null };
+  const getLocalData = (tmdbId: number, esSerie: boolean) => {
+    const local = myDb.find((m: any) => m.tmdbId === tmdbId && m.tipo === (esSerie ? 'SERIE' : 'PELICULA'));
+    return { dbId: local ? local.id : null, portadaCompartida: local?.portada || null };
   };
 
   return (
@@ -76,10 +76,14 @@ export default async function StudioPage({
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4">
             {data.peliculas.map((pelicula: any) => {
-              const { dbId, customPoster } = getLocalData(pelicula.id);
+              const { dbId, portadaCompartida } = getLocalData(pelicula.id, pelicula.media_type === 'tv');
               return (
                 <div key={`${pelicula.media_type}-${pelicula.id}`} className="w-full">
-                  <MovieCard pelicula={pelicula} dbId={dbId} customPoster={customPoster} />
+                  <MovieCard
+                    pelicula={portadaCompartida ? { ...pelicula, portada: portadaCompartida } : pelicula}
+                    dbId={dbId}
+                    customPoster={null}
+                  />
                 </div>
               );
             })}
