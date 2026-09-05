@@ -27,6 +27,20 @@ export default function RatingWidget({ mediaId }: { mediaId: number }) {
       .catch(() => {});
   }, [mediaId]);
 
+  // Escucha el aviso de SeasonsList: si se aplica la nota media sugerida,
+  // "Your rating" se actualiza aquí mismo sin recargar la página.
+  useEffect(() => {
+    const handleRatingApplied = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.mediaId === mediaId) {
+        setMiNota(detail.rating);
+        cargarMedia();
+      }
+    };
+    window.addEventListener('media-rating-applied', handleRatingApplied);
+    return () => window.removeEventListener('media-rating-applied', handleRatingApplied);
+  }, [mediaId]);
+
   const puntuar = async (valor: number | null) => {
     const token = localStorage.getItem('token');
     if (!token) {

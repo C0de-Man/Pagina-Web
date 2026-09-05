@@ -109,6 +109,10 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
   const [selectorPosterAbierto, setSelectorPosterAbierto] = useState(false);
   const [postersAlternativos, setPostersAlternativos] = useState<PosterAlternativo[]>([]);
   const [cargandoPosters, setCargandoPosters] = useState(false);
+  // Recuerda qué valor de nota sugerida ya descartaste (con "Cancel" o
+  // "Apply"), para no repetirte el mismo aviso una y otra vez mientras nada
+  // cambie — solo reaparece si el cálculo da un valor distinto.
+  const [notaDescartada, setNotaDescartada] = useState<number | null>(null);
 
   const idioma = getIdioma();
 
@@ -313,6 +317,41 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
   if (cargando) return null;
   if (temporadas.length === 0) return null;
 
+  // --- SUGERENCIA DE NOTA MEDIA PROPIA ---
+  // Cuando TODAS las temporadas reales (sin contar "Especiales") están
+  // vistas Y tienen nota puesta, se calcula la media y se ofrece aplicarla
+  // como tu nota general de la serie — sin forzar nada, el usuario decide.
+  const temporadasReales = temporadas.filter((t) => t.numero > 0);
+  const todasConNotaYVistas =
+    temporadasReales.length > 0 &&
+    temporadasReales.every((t) => {
+      const est = estadosTemporadas[t.numero];
+      return est?.watched && est?.rating != null;
+    });
+  const notaSugerida = todasConNotaYVistas
+    ? Math.round(
+      temporadasReales.reduce((suma, t) => suma + (estadosTemporadas[t.numero]?.rating || 0), 0) /
+      temporadasReales.length
+    )
+    : null;
+  const mostrarSugerenciaNota = notaSugerida !== null && notaSugerida !== notaDescartada;
+
+  const aplicarNotaSugerida = async () => {
+    if (notaSugerida === null) return;
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      await fetch(`http://localhost:3001/media/${mediaId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ rating: notaSugerida }),
+      });
+      window.dispatchEvent(new CustomEvent('mediaWatchedChanged', { detail: { mediaId, watched: true } }));
+      window.dispatchEvent(new CustomEvent('media-rating-applied', { detail: { mediaId, rating: notaSugerida } }));
+    } catch { }
+    setNotaDescartada(notaSugerida);
+  };
+
   const estadoTemporadaAbierta = temporadaAbierta ? estadosTemporadas[temporadaAbierta.numero] : null;
   const posterModal = estadoTemporadaAbierta?.customPoster || detalleTemporada?.portada || temporadaAbierta?.portada || null;
   const totalEpisodiosModal = temporadaAbierta ? (episodios.length || temporadaAbierta.episodios) : 0;
@@ -322,6 +361,32 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
   return (
     <section className="mt-8">
       <h2 className="text-xl font-bold text-white mb-4">Seasons ({temporadas.length})</h2>
+
+      {mostrarSugerenciaNota && (
+        <div className="mb-4 bg-teal-950/30 border border-teal-800/60 rounded-lg p-4 flex flex-col items-center gap-2 text-center">
+          <p className="text-sm text-gray-200">
+            Your calculated average rating is{' '}
+            <span className="font-bold text-teal-300">{(notaSugerida! / 2).toFixed(1)}</span>
+          </p>
+          <EstrellasVisual rating={notaSugerida} size="text-xl" />
+          <div className="flex gap-3 mt-1">
+            <button
+              type="button"
+              onClick={() => setNotaDescartada(notaSugerida)}
+              className="text-xs font-semibold text-gray-400 hover:text-white px-3 py-1.5 rounded transition cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={aplicarNotaSugerida}
+              className="text-xs font-semibold text-white bg-teal-600 hover:bg-teal-500 px-4 py-1.5 rounded transition cursor-pointer"
+            >
+              Apply
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-[#1c2228] rounded-lg border border-gray-700 divide-y divide-gray-800/80 overflow-hidden">
         {temporadas.map((t) => {
