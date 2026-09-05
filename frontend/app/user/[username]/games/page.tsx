@@ -16,6 +16,15 @@ const selectoresJuegos: Selectores<any> = {
   miNota: (i) => i.rating,
 };
 
+// Mismos valores/colores que ActionButtons.tsx y la propia página "Played".
+const ESTADOS_JUEGO = [
+  { valor: 'PLAYING', color: '#ec4899', label: 'Playing' },
+  { valor: 'COMPLETED', color: '#22c55e', label: 'Completed' },
+  { valor: 'RETIRED', color: '#3b82f6', label: 'Retired' },
+  { valor: 'SHELVED', color: '#f97316', label: 'Shelved' },
+  { valor: 'ABANDONED', color: '#ef4444', label: 'Abandoned' },
+];
+
 export default function JuegosDeUsuario() {
   const params = useParams();
   const username = params.username as string;
@@ -24,6 +33,7 @@ export default function JuegosDeUsuario() {
   const [cargando, setCargando] = useState(true);
   const [noEncontrado, setNoEncontrado] = useState(false);
   const [esPrivado, setEsPrivado] = useState(false);
+  const [filtroEstado, setFiltroEstado] = useState<string | null>(null);
 
   useEffect(() => {
     if (!username) return;
@@ -53,7 +63,9 @@ export default function JuegosDeUsuario() {
     campo: 'fechaLanzamiento',
     direccion: 'DESC',
   });
-  const itemsOrdenados = ordenCargado ? ordenarItems(items, orden, selectoresJuegos) : items;
+
+  const itemsFiltrados = filtroEstado ? items.filter((j) => j.playStatus === filtroEstado) : items;
+  const itemsOrdenados = ordenCargado ? ordenarItems(itemsFiltrados, orden, selectoresJuegos) : itemsFiltrados;
 
   if (cargando) {
     return <main className="min-h-screen bg-[#14181c] text-white flex items-center justify-center">Loading...</main>;
@@ -88,8 +100,33 @@ export default function JuegosDeUsuario() {
           <Link href={`/user/${username}`} className="hover:underline">{username}</Link>
         </p>
 
+        {items.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-6">
+            {ESTADOS_JUEGO.map((e) => {
+              const total = items.filter((j) => j.playStatus === e.valor).length;
+              if (total === 0) return null;
+              const activo = filtroEstado === e.valor;
+              return (
+                <button
+                  key={e.valor}
+                  onClick={() => setFiltroEstado(activo ? null : e.valor)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition cursor-pointer border ${
+                    activo ? 'border-white text-white' : 'border-transparent text-gray-300 hover:border-gray-600'
+                  }`}
+                  style={{ backgroundColor: activo ? e.color : `${e.color}22` }}
+                >
+                  <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: e.color }} />
+                  {e.label} <span className="opacity-70">{total}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {items.length === 0 ? (
           <p className="text-gray-500 text-sm">{username} hasn't marked any games as played yet.</p>
+        ) : itemsOrdenados.length === 0 ? (
+          <p className="text-gray-500 text-sm">No games with that status.</p>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
             {itemsOrdenados.map((item) => (

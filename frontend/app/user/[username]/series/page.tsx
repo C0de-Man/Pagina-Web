@@ -7,6 +7,20 @@ import { urlFicha } from '@/lib/slug';
 
 const API_URL = 'http://localhost:3001';
 
+// Mismos valores/colores que ActionButtons.tsx. "WATCHED" no es un
+// playStatus real en la base de datos (solo WATCHING/PAUSED/ABANDONED lo
+// son) — se identifica por watched=true con playStatus vacío.
+const ESTADOS_SERIE = [
+  { valor: 'WATCHING', color: '#ec4899', label: 'Watching' },
+  { valor: 'WATCHED', color: '#22c55e', label: 'Watched' },
+  { valor: 'PAUSED', color: '#f97316', label: 'Paused' },
+  { valor: 'ABANDONED', color: '#ef4444', label: 'Abandoned' },
+];
+
+function coincideEstado(item: any, valor: string) {
+  return valor === 'WATCHED' ? !item.playStatus : item.playStatus === valor;
+}
+
 export default function SeriesDeUsuario() {
   const params = useParams();
   const username = params.username as string;
@@ -14,6 +28,7 @@ export default function SeriesDeUsuario() {
   const [items, setItems] = useState<any[]>([]);
   const [cargando, setCargando] = useState(true);
   const [noEncontrado, setNoEncontrado] = useState(false);
+  const [filtroEstado, setFiltroEstado] = useState<string | null>(null);
 
   useEffect(() => {
     if (!username) return;
@@ -29,6 +44,8 @@ export default function SeriesDeUsuario() {
       .catch(() => setNoEncontrado(true))
       .finally(() => setCargando(false));
   }, [username]);
+
+  const itemsFiltrados = filtroEstado ? items.filter((i) => coincideEstado(i, filtroEstado)) : items;
 
   if (cargando) {
     return <main className="min-h-screen bg-[#14181c] text-white flex items-center justify-center">Loading...</main>;
@@ -46,11 +63,36 @@ export default function SeriesDeUsuario() {
           <Link href={`/user/${username}`} className="hover:underline">{username}</Link>
         </p>
 
+        {items.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-6">
+            {ESTADOS_SERIE.map((e) => {
+              const total = items.filter((i) => coincideEstado(i, e.valor)).length;
+              if (total === 0) return null;
+              const activo = filtroEstado === e.valor;
+              return (
+                <button
+                  key={e.valor}
+                  onClick={() => setFiltroEstado(activo ? null : e.valor)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition cursor-pointer border ${
+                    activo ? 'border-white text-white' : 'border-transparent text-gray-300 hover:border-gray-600'
+                  }`}
+                  style={{ backgroundColor: activo ? e.color : `${e.color}22` }}
+                >
+                  <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: e.color }} />
+                  {e.label} <span className="opacity-70">{total}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {items.length === 0 ? (
           <p className="text-gray-500 text-sm">{username} hasn't marked any series as watched yet.</p>
+        ) : itemsFiltrados.length === 0 ? (
+          <p className="text-gray-500 text-sm">No series with that status.</p>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
-            {items.map((item) => (
+            {itemsFiltrados.map((item) => (
               <div key={item.id} className="flex flex-col gap-1.5">
                 <Link href={urlFicha(item)} className="group relative block">
                   {item.portada ? (

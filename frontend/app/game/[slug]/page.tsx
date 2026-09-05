@@ -74,6 +74,13 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
             <div className="flex items-center gap-2 text-gray-400 mb-6">
               <span className="text-lg">{fechaCompleta || media.anio}</span>
               <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{ETIQUETA_TIPO[media.tipo] || media.tipo}</span>
+              {detalles?.estado && (
+                <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                  detalles.estado === 'Cancelled' ? 'bg-red-900/60 text-red-300' : 'bg-amber-900/60 text-amber-300'
+                }`}>
+                  {detalles.estado}
+                </span>
+              )}
             </div>
 
             <GameRemakeOfBadge igdbId={media.igdbId} />

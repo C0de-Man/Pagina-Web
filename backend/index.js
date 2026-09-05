@@ -122,8 +122,7 @@ app.get('/igdb/details/:igdbId', async (req, res) => {
     const { igdbId } = req.params;
     const token = await getIgdbToken();
 
-    const body = `fields first_release_date, platforms.name, genres.name, involved_companies.company.id, involved_companies.company.name, involved_companies.developer, involved_companies.publisher; where id = ${igdbId};`;
-    const response = await fetchIgdb('https://api.igdb.com/v4/games', {
+    const body = `fields first_release_date, status, platforms.name, genres.name, involved_companies.company.id, involved_companies.company.name, involved_companies.developer, involved_companies.publisher; where id = ${igdbId};`; const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
         'Client-ID': process.env.IGDB_CLIENT_ID,
@@ -140,10 +139,25 @@ app.get('/igdb/details/:igdbId', async (req, res) => {
 
     const companies = juego.involved_companies || [];
 
+    // Mapa del campo "status" de IGDB — solo se manda al frontend si NO es
+    // "Released" (el caso normal, que no necesita destacarse con un badge),
+    // igual que estadoSerie en series solo se muestra si aporta algo.
+    const ESTADOS_JUEGO_IGDB = {
+      2: 'Alpha',
+      3: 'Beta',
+      4: 'Early Access',
+      5: 'Offline',
+      6: 'Cancelled',
+      7: 'Rumored',
+      8: 'Delisted',
+    };
+    const estadoJuego = ESTADOS_JUEGO_IGDB[juego.status] || null;
+
     // Antes solo el nombre (string). Ahora {id, nombre}: hace falta el id
     // de IGDB para poder enlazar cada developer/publisher a su propia
     // ficha (GET /igdb/company/:companyId).
     res.json({
+      estado: estadoJuego,
       // IGDB da first_release_date como timestamp Unix en SEGUNDOS (no ms)
       fechaLanzamiento: juego.first_release_date ? juego.first_release_date * 1000 : null,
       plataformas: (juego.platforms || []).map(p => p.name),
@@ -7629,6 +7643,7 @@ app.get('/users/:username/watched', async (req, res) => {
           fechaVisto: e.updatedAt,
           rating: e.rating,
           liked: e.liked,
+          playStatus: e.playStatus,
         };
       })
       .filter(Boolean);

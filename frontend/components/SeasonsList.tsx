@@ -60,7 +60,13 @@ function EstrellasVisual({ rating, onSelect, size = 'text-sm' }: { rating: numbe
             onClick={(e) => {
               e.stopPropagation();
               if (!onSelect) return;
-              const valor = i * 2;
+              // Mitad izquierda del carácter = media estrella (i*2 - 1),
+              // mitad derecha = estrella entera (i*2) — mismo principio que
+              // StarRating.tsx, adaptado a botones por estrella en vez de
+              // una franja continua.
+              const rect = e.currentTarget.getBoundingClientRect();
+              const clicEnMitadIzquierda = e.clientX - rect.left < rect.width / 2;
+              const valor = clicEnMitadIzquierda ? i * 2 - 1 : i * 2;
               onSelect(rating === valor ? null : valor);
             }}
             className={`${size} leading-none ${onSelect ? 'cursor-pointer hover:scale-110 transition' : 'cursor-default'} ${lleno || medio ? 'text-teal-400' : 'text-gray-600'}`}
