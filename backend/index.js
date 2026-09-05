@@ -2446,6 +2446,48 @@ app.get('/friends/activity', requireAuth, async (req, res) => {
   }
 });
 
+// --- AMIGOS QUE YA HAN VISTO/JUGADO ESTA FICHA CONCRETA ---
+// Mismo criterio de "amigos" que /friends/activity (gente a la que sigues,
+// solicitud ACCEPTED), pero filtrado a un solo mediaId — para el widget
+// "Friends' activity" dentro de la propia ficha.
+app.get('/media/:id/friends-activity', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id);
+
+    const siguiendo = await prisma.follow.findMany({
+      where: { followerId: req.userId, estado: 'ACCEPTED' },
+      select: { followingId: true },
+    });
+    const idsAmigos = siguiendo.map((f) => f.followingId);
+    if (idsAmigos.length === 0) return res.json([]);
+
+    const entradas = await prisma.userMedia.findMany({
+      where: { userId: { in: idsAmigos }, mediaId, watched: true },
+      select: { userId: true, rating: true },
+    });
+    if (entradas.length === 0) return res.json([]);
+
+    const usuarios = await prisma.user.findMany({
+      where: { id: { in: entradas.map((e) => e.userId) } },
+      select: { id: true, username: true, avatar: true },
+    });
+    const usuarioPorId = new Map(usuarios.map((u) => [u.id, u]));
+
+    const resultado = entradas
+      .map((e) => {
+        const u = usuarioPorId.get(e.userId);
+        if (!u) return null;
+        return { username: u.username, avatar: u.avatar, rating: e.rating };
+      })
+      .filter(Boolean);
+
+    res.json(resultado);
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/friends-activity:', error);
+    res.status(500).json({ error: 'Error al obtener la actividad de amigos de esta ficha' });
+  }
+});
+
 // --- HELPER: ¿puede "miUserId" ver el catálogo/listas/reseñas de "usuario"? ---
 // true si: el propio dueño, o la cuenta es pública, o (siendo privada) hay
 // un Follow con estado ACCEPTED de miUserId hacia usuario.id. Se usa en

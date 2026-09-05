@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import SeriesLobbyClient from '@/components/SeriesLobbyClient';
+import FriendsActivityOnMedia from '@/components/FriendsActivityOnMedia';
 
 export default async function SeriesLobby() {
   const currentYear = new Date().getFullYear();

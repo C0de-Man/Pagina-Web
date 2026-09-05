@@ -13,6 +13,7 @@ import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
 import { formatFechaEstrenoTmdb } from '@/lib/fecha';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import FriendsActivityOnMedia from '@/components/FriendsActivityOnMedia';
 
 // Mismo mapa que ya usan MediaTabs.tsx / ReviewDetailModal.tsx: el tipo se
 // guarda en español en la base de datos, pero la interfaz es en inglés.
@@ -106,6 +107,8 @@ export default async function MediaDetail({ params }: { params: Promise<{ slug: 
 
               <RatingWidget mediaId={media.id} />
             </div>
+
+            <FriendsActivityOnMedia mediaId={media.id} />
 
             <CollectionLinks tmdbId={media.tmdbId} tituloActual={media.titulo} anioActual={media.anio} />
             <WatchProviders tmdbId={media.tmdbId} />

@@ -13,6 +13,7 @@ import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
 import { formatFechaEstrenoTmdb } from '@/lib/fecha';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import FriendsActivityOnMedia from '@/components/FriendsActivityOnMedia';
 
 function formatRuntime(minutes: number | null) {
     if (!minutes) return null;
@@ -129,6 +130,8 @@ export default async function SeriesDetail({ params }: { params: Promise<{ slug:
 
                             <RatingWidget mediaId={media.id} />
                         </div>
+
+                        <FriendsActivityOnMedia mediaId={media.id} />
 
                         <CollectionLinks tmdbId={media.tmdbId} tipo="SERIE" tituloActual={media.titulo} anioActual={media.anio} />
                         <WatchProviders tmdbId={media.tmdbId} tipo="SERIE" />

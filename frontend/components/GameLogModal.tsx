@@ -60,6 +60,7 @@ export default function GameLogModal({
   const [renombrando, setRenombrando] = useState(false);
   const [nombreTemp, setNombreTemp] = useState('');
   const [plataformas, setPlataformas] = useState<{ id: number; name: string }[]>([]);
+  const [plataformasDelJuego, setPlataformasDelJuego] = useState<{ id: string; name: string }[]>([]);
   const [ediciones, setEdiciones] = useState<{ igdbId: number; titulo: string; plataformas: { id: number; name: string }[] }[]>([]);
   const router = useRouter();
 
@@ -72,6 +73,20 @@ export default function GameLogModal({
       .catch(() => {});
   }, []);
 
+  // Plataformas REALES en las que salió este juego (mismo dato que la
+  // pestaña "More" → "Platforms") — para que "Platform" y "Played on"
+  // ofrezcan solo lo jugable de verdad, en vez de las ~200 de IGDB entero.
+  useEffect(() => {
+    if (!igdbId) return;
+    fetch(`${API_URL}/igdb/details/${igdbId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const nombres: string[] = Array.isArray(d?.plataformas) ? d.plataformas : [];
+        setPlataformasDelJuego(nombres.map((n) => ({ id: n, name: n })));
+      })
+      .catch(() => {});
+  }, [igdbId]);
+
   useEffect(() => {
     if (!igdbId) return;
     fetch(`${API_URL}/igdb/ediciones/${igdbId}`)
@@ -81,8 +96,15 @@ export default function GameLogModal({
   }, [igdbId]);
 
   const edicionElegida = ediciones.find((e) => e.titulo === logActual?.edicion);
+  // Prioridad: plataformas de la edición elegida > plataformas reales del
+  // juego > lista completa de IGDB como último recurso (por si el juego no
+  // tuviera ninguna plataforma listada, para no dejar el select vacío).
   const plataformasFiltradas =
-    edicionElegida && edicionElegida.plataformas.length > 0 ? edicionElegida.plataformas : plataformas;
+    edicionElegida && edicionElegida.plataformas.length > 0
+      ? edicionElegida.plataformas
+      : plataformasDelJuego.length > 0
+      ? plataformasDelJuego
+      : plataformas;
 
   const abrirModal = async () => {
     const token = localStorage.getItem('token');
@@ -358,7 +380,7 @@ export default function GameLogModal({
                       className="w-full bg-[#2c3440] border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none"
                     >
                       <option value="">Played platform</option>
-                      {plataformas.map((p) => (
+                      {plataformasFiltradas.map((p) => (
                         <option key={p.id} value={p.name}>{p.name}</option>
                       ))}
                     </select>

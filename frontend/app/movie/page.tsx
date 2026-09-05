@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import PeliculasLobbyClient from '@/components/PeliculasLobbyClient';
+import FriendsActivityOnMedia from '@/components/FriendsActivityOnMedia';
 
 export default async function PeliculasLobby() {
   const currentYear = new Date().getFullYear();

@@ -1,4 +1,5 @@
 import JuegosLobbyClient from '@/components/JuegosLobbyClient';
+import FriendsActivityOnMedia from '@/components/FriendsActivityOnMedia';
 
 export default async function JuegosLobby() {
   const currentYear = new Date().getFullYear();

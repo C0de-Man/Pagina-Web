@@ -13,6 +13,7 @@ import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
 import { formatFechaLanzamientoIgdb } from '@/lib/fecha';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import FriendsActivityOnMedia from '@/components/FriendsActivityOnMedia';
 
 // Mismo mapa que ya usan MediaTabs.tsx / ReviewDetailModal.tsx: el tipo se
 // guarda en español en la base de datos, pero la interfaz es en inglés.
@@ -102,6 +103,8 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
 
               <RatingWidget mediaId={media.id} />
             </div>
+
+            <FriendsActivityOnMedia mediaId={media.id} />
 
             {media.igdbId && (
               <GameCollectionLinks
