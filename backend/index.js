@@ -4472,28 +4472,38 @@ app.get('/media/watched', requireAuth, async (req, res) => {
       }
     };
 
-    // Secuencial, no en paralelo: disparar todas las peticiones a TMDB de
-    // golpe (Promise.all) puede toparse con su límite de peticiones — mismo
-    // criterio que ya usas en refresh-covers-english y demás procesos
-    // masivos del proyecto. En paralelo, algunas fallaban silenciosamente y
-    // se quedaban con el título en inglés guardado, sin avisar de nada.
-    const resultado = [];
-    for (const e of entries) {
-      const item = mediaItems.find(m => m.id === e.mediaId);
-      if (!item) continue;
-      resultado.push({
-        ...item,
-        titulo: await obtenerTituloEnVivo(item),
-        portada: e.customPoster || item.portada,
-        backdrop: e.customBackdrop || item.backdrop,
-        fechaVisto: e.lastActivityAt,
-        rating: e.rating,
-        liked: e.liked,
-        playStatus: e.playStatus
-      });
+    // Concurrencia limitada, ni todo en paralelo (revienta el límite de
+    // peticiones de TMDB) ni todo secuencial (demasiado lento con muchos
+    // títulos) — mismo criterio que ya usas con IGDB en fetchIgdb/
+    // procesarColaIgdb, aplicado aquí con un límite más sencillo.
+    const CONCURRENCIA_MAX = 5;
+    const resultado = new Array(entries.length);
+    let cursor = 0;
+
+    async function procesarSiguiente() {
+      while (cursor < entries.length) {
+        const indice = cursor++;
+        const e = entries[indice];
+        const item = mediaItems.find(m => m.id === e.mediaId);
+        if (!item) { resultado[indice] = null; continue; }
+        resultado[indice] = {
+          ...item,
+          titulo: await obtenerTituloEnVivo(item),
+          portada: e.customPoster || item.portada,
+          backdrop: e.customBackdrop || item.backdrop,
+          fechaVisto: e.lastActivityAt,
+          rating: e.rating,
+          liked: e.liked,
+          playStatus: e.playStatus
+        };
+      }
     }
 
-    res.json(resultado);
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCIA_MAX, entries.length) }, procesarSiguiente)
+    );
+
+    res.json(resultado.filter(Boolean));
   } catch (error) {
     console.error('ERROR EN GET WATCHED:', error);
     res.status(500).json({ error: 'Error al obtener las vistas' });
