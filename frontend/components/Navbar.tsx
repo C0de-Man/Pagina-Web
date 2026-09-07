@@ -73,6 +73,26 @@ export default function Navbar() {
     return '';
   }
 
+    const borrarNotificacion = async (e: React.MouseEvent, notiId: number) => {
+    e.preventDefault(); // no navegar al hacer clic en la "×"
+    e.stopPropagation();
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    // Se quita de la lista al instante, sin esperar respuesta del servidor.
+    setNotificaciones((prev) => prev.filter((n) => n.id !== notiId));
+
+    try {
+      await fetch(`http://localhost:3001/notifications/${notiId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // si falla, no revertimos — la próxima vez que se abra el panel se
+      // volverá a pedir la lista real del servidor
+    }
+  };
+
   const responderSolicitud = async (e: React.MouseEvent, actorId: number, accion: 'accept' | 'decline', notiId: number) => {
     e.preventDefault(); // no navegar al hacer clic en Accept/Decline
     e.stopPropagation();
@@ -309,7 +329,7 @@ export default function Navbar() {
                           key={n.id}
                           href={hrefNotificacion(n)}
                           onClick={() => setPanelNotisAbierto(false)}
-                          className={`flex items-start gap-3 px-4 py-2.5 text-sm hover:bg-gray-700 transition ${!n.leida ? 'bg-blue-900/20' : ''}`}
+                          className={`group flex items-start gap-3 px-4 py-2.5 text-sm hover:bg-gray-700 transition relative ${!n.leida ? 'bg-blue-900/20' : ''}`}
                         >
                           <div className="w-8 h-8 rounded-full overflow-hidden bg-blue-600 flex-shrink-0">
                             <img
@@ -318,7 +338,14 @@ export default function Navbar() {
                               className="w-full h-full object-cover"
                             />
                           </div>
-                          <div className="flex-grow min-w-0">
+                          <button
+                            onClick={(e) => borrarNotificacion(e, n.id)}
+                            className="absolute top-2 right-2 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition cursor-pointer text-xs w-5 h-5 flex items-center justify-center rounded-full hover:bg-gray-600"
+                            aria-label="Dismiss notification"
+                          >
+                            ✕
+                          </button>
+                          <div className="flex-grow min-w-0 pr-4">
                             <p className="text-gray-200 leading-snug">
                               <span className="font-bold text-white">{n.actor?.username || 'Someone'}</span>{' '}
                               {textoNotificacion(n)}

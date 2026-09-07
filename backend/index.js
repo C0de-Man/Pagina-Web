@@ -7015,6 +7015,20 @@ app.get('/notifications/unread-count', requireAuth, async (req, res) => {
   }
 });
 
+// --- MARCAR TODAS MIS NOTIFICACIONES COMO LEÍDAS (se llama al abrir la campana) ---
+app.post('/notifications/mark-read', requireAuth, async (req, res) => {
+  try {
+    await prisma.notification.updateMany({
+      where: { userId: req.userId, leida: false },
+      data: { leida: true },
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('ERROR EN POST /notifications/mark-read:', error);
+    res.status(500).json({ error: 'Error al marcar las notificaciones como leídas' });
+  }
+});
+
 // --- BORRAR UNA NOTIFICACIÓN CONCRETA ---
 app.delete('/notifications/:id', requireAuth, async (req, res) => {
   try {
