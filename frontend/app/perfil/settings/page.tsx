@@ -8,7 +8,7 @@ import SettingsIdiomaRegion from '@/components/SettingsIdiomaRegion';
 
 export default function Settings() {
   const router = useRouter();
-  const [tab, setTab] = useState<'perfil' | 'account' | 'admin'>('perfil');
+  const [tab, setTab] = useState<'perfil' | 'account' | 'importexport' | 'admin'>('perfil');
   const [username, setUsername] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -328,6 +328,13 @@ export default function Settings() {
           >
             Account
           </button>
+          <button
+            onClick={() => setTab('importexport')}
+            className={`pb-3 text-sm font-bold uppercase tracking-wider cursor-pointer ${tab === 'importexport' ? 'text-white border-b-2 border-blue-500' : 'text-gray-400'
+              }`}
+          >
+            Import/Export
+          </button>
           {/* Pestaña "Admin": solo se pinta si eres admin — un usuario normal
               nunca la ve ni puede llegar a ella (y por si acaso, el useEffect
               de arriba te saca de esta pestaña si dejas de ser admin). */}
@@ -551,7 +558,6 @@ export default function Settings() {
               </button>
               {resultadoReset && <p className="text-gray-400 text-sm mt-2">{resultadoReset}</p>}
             </div>
-
             <div className="mt-8 pt-6 border-t border-red-950">
               <h3 className="text-xs font-bold uppercase tracking-wider text-red-400 mb-2">Danger zone</h3>
               <p className="text-gray-500 text-sm mb-3">
@@ -567,6 +573,23 @@ export default function Settings() {
               >
                 Delete my account
               </button>
+            </div>
+          </div>
+        ) : tab === 'importexport' ? (
+          <div className="max-w-md">
+            <h2 className="text-lg font-bold mb-4">Import / Export</h2>
+
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Import your data</h3>
+              <p className="text-gray-500 text-sm mb-3">
+                Bring in your watched history, ratings, reviews and watchlist from another site.
+              </p>
+              <Link
+                href="/perfil/settings/import"
+                className="inline-block bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
+              >
+                Import from Letterboxd
+              </Link>
             </div>
           </div>
         ) : (

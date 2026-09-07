@@ -2296,6 +2296,126 @@ app.post('/media/igdb', async (req, res) => {
   }
 });
 
+// --- IMPORTAR HISTORIAL DESDE LETTERBOXD ---
+// Recibe una lista ya combinada (una entrada por película, con watched/
+// rating/review/watchlist ya unificados desde los distintos CSV de
+// Letterboxd) y para cada una: busca en TMDB por título+año (margen ±1,
+// mismo criterio que ya usa el proyecto en SteamGridDB/Wikidata), guarda o
+// reutiliza el Media, y aplica el estado a UserMedia/WatchLog.
+async function buscarPeliculaTmdbPorTituloYAnio(titulo, anio) {
+  const apiKey = process.env.TMDB_API_KEY;
+  const url = `https://api.themoviedb.org/3/search/movie?api_key=${apiKey}&query=${encodeURIComponent(titulo)}&language=en-US`;
+  const resp = await fetch(url);
+  const data = await resp.json();
+  const candidatos = data.results || [];
+  if (candidatos.length === 0) return null;
+
+  if (!anio) return candidatos[0];
+
+  const conAnio = candidatos
+    .map((c) => ({ ...c, anioReal: c.release_date ? new Date(c.release_date).getFullYear() : null }))
+    .filter((c) => c.anioReal !== null && Math.abs(c.anioReal - anio) <= 1);
+
+  if (conAnio.length === 0) return null;
+  return conAnio[0];
+}
+
+// --- RUTA: IMPORTAR HISTORIAL DESDE LETTERBOXD ---
+app.post('/import/letterboxd', requireAuth, async (req, res) => {
+  try {
+    const { filas } = req.body;
+    if (!Array.isArray(filas) || filas.length === 0) {
+      return res.status(400).json({ error: 'No hay datos que importar' });
+    }
+
+    let importadas = 0;
+    const titulosNoEncontrados = [];
+
+    // Secuencial, no en paralelo: un historial de Letterboxd puede tener
+    // cientos/miles de películas — disparar todas las peticiones a TMDB de
+    // golpe reventaría su límite de peticiones (mismo criterio que ya usas
+    // en refresh-covers-english y demás procesos masivos del proyecto).
+    for (const fila of filas) {
+      try {
+        const candidato = await buscarPeliculaTmdbPorTituloYAnio(fila.titulo, fila.anio);
+        if (!candidato) {
+          titulosNoEncontrados.push(fila.anio ? `${fila.titulo} (${fila.anio})` : fila.titulo);
+          continue;
+        }
+
+        // Reutilizamos el mismo patrón que POST /media/tmdb: si ya está
+        // guardada, no se vuelve a crear.
+        let media = await prisma.media.findFirst({
+          where: { tmdbId: candidato.id, tipo: 'PELICULA' },
+        });
+
+        if (!media) {
+          const posterUrl = candidato.poster_path ? `https://image.tmdb.org/t/p/w780${candidato.poster_path}` : null;
+          const backdropUrl = candidato.backdrop_path ? `https://image.tmdb.org/t/p/original${candidato.backdrop_path}` : null;
+          media = await prisma.media.create({
+            data: {
+              tmdbId: candidato.id,
+              titulo: candidato.title,
+              tituloOriginal: candidato.original_title || candidato.title,
+              tipo: 'PELICULA',
+              anio: candidato.release_date ? parseInt(candidato.release_date.split('-')[0], 10) : null,
+              portada: posterUrl,
+              backdrop: backdropUrl,
+              sinopsis: candidato.overview || null,
+            },
+          });
+        }
+
+        // Rating de Letterboxd es 0.5-5 (medias estrellas) — se convierte a
+        // la escala 0-10 que usa el resto de MediaTracker.
+        const ratingConvertido = fila.rating ? Math.round(fila.rating * 2 * 10) / 10 : null;
+
+        const dataUserMedia = {};
+        if (fila.watched) dataUserMedia.watched = true;
+        if (fila.watchlist) dataUserMedia.watchlist = true;
+        if (ratingConvertido !== null) dataUserMedia.rating = ratingConvertido;
+        if (Object.keys(dataUserMedia).length > 0) {
+          dataUserMedia.lastActivityAt = fila.fechaVisto ? new Date(fila.fechaVisto) : new Date();
+          await prisma.userMedia.upsert({
+            where: { userId_mediaId: { userId: req.userId, mediaId: media.id } },
+            update: dataUserMedia,
+            create: { userId: req.userId, mediaId: media.id, ...dataUserMedia },
+          });
+        }
+
+        // Reseña: se guarda como un WatchLog aparte (igual que cuando se
+        // añade una reseña a mano desde el modal de "Review or log").
+        if (fila.watched && fila.review) {
+          await prisma.watchLog.create({
+            data: {
+              userId: req.userId,
+              mediaId: media.id,
+              fechaVisto: fila.fechaVisto ? new Date(fila.fechaVisto) : new Date(),
+              review: fila.review,
+              rewatch: false,
+            },
+          });
+        }
+
+        importadas++;
+      } catch (e) {
+        console.error(`Error importando "${fila.titulo}":`, e.message);
+        titulosNoEncontrados.push(fila.anio ? `${fila.titulo} (${fila.anio})` : fila.titulo);
+      }
+    }
+
+    res.json({
+      total: filas.length,
+      importadas,
+      noEncontradas: titulosNoEncontrados.length,
+      titulosNoEncontrados,
+    });
+  } catch (error) {
+    console.error('ERROR EN POST /import/letterboxd:', error);
+    res.status(500).json({ error: 'Error al importar desde Letterboxd' });
+  }
+});
+
 // --- MIDDLEWARE: comprueba el token y añade req.userId ---
 function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -4325,21 +4445,53 @@ app.get('/media/watched', requireAuth, async (req, res) => {
     const mediaIds = entries.map(e => e.mediaId);
     const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
 
-    const resultado = entries
-      .map(e => {
-        const item = mediaItems.find(m => m.id === e.mediaId);
-        if (!item) return null;
-        return {
-          ...item,
-          portada: e.customPoster || item.portada,
-          backdrop: e.customBackdrop || item.backdrop,
-          fechaVisto: e.lastActivityAt,
-          rating: e.rating,
-          liked: e.liked,
-          playStatus: e.playStatus
-        };
-      })
-      .filter(Boolean);
+    // Mismo motivo que en /friends/activity: Media.titulo se guardó en el
+    // idioma que estuviera activo la primera vez que se añadió CADA título,
+    // no en tu idioma actual — así que sin esto la grid sale con una mezcla
+    // de idiomas según cuándo añadiste cada película. Se pide el título real
+    // en vivo, en tu idioma, y se cachea por tmdbId+tipo dentro de esta misma
+    // petición para no repetir la llamada si hay varias entradas iguales.
+    const idioma = getLang(req);
+    const apiKey = process.env.TMDB_API_KEY;
+    const tituloEnVivoCache = new Map();
+    const obtenerTituloEnVivo = async (item) => {
+      if (!item.tmdbId || item.tipo === 'VIDEOJUEGO') return item.titulo;
+      const clave = `${item.tmdbId}-${item.tipo}`;
+      if (tituloEnVivoCache.has(clave)) return tituloEnVivoCache.get(clave);
+      try {
+        const endpointTmdb = item.tipo === 'SERIE' ? 'tv' : 'movie';
+        const r = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${item.tmdbId}?api_key=${apiKey}&language=${idioma}`);
+        const d = await r.json();
+        const tituloTraducido = d.title || d.name;
+        const resultado = tituloTraducido && tituloTraducido.trim() ? tituloTraducido : item.titulo;
+        tituloEnVivoCache.set(clave, resultado);
+        return resultado;
+      } catch (e) {
+        console.error(`No se pudo traducir el título de "${item.titulo}" (tmdbId ${item.tmdbId}):`, e.message);
+        return item.titulo;
+      }
+    };
+
+    // Secuencial, no en paralelo: disparar todas las peticiones a TMDB de
+    // golpe (Promise.all) puede toparse con su límite de peticiones — mismo
+    // criterio que ya usas en refresh-covers-english y demás procesos
+    // masivos del proyecto. En paralelo, algunas fallaban silenciosamente y
+    // se quedaban con el título en inglés guardado, sin avisar de nada.
+    const resultado = [];
+    for (const e of entries) {
+      const item = mediaItems.find(m => m.id === e.mediaId);
+      if (!item) continue;
+      resultado.push({
+        ...item,
+        titulo: await obtenerTituloEnVivo(item),
+        portada: e.customPoster || item.portada,
+        backdrop: e.customBackdrop || item.backdrop,
+        fechaVisto: e.lastActivityAt,
+        rating: e.rating,
+        liked: e.liked,
+        playStatus: e.playStatus
+      });
+    }
 
     res.json(resultado);
   } catch (error) {

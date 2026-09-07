@@ -6,6 +6,7 @@ import { urlFicha } from '@/lib/slug';
 import SortDropdown from '@/components/SortDropdown';
 import { useSortPreference } from '@/hooks/useSortPreference';
 import { OPCIONES_ORDEN_WATCHED_DISPONIBLE, ordenarItems, type Selectores } from '@/lib/ordenamiento';
+import { withLangRegion } from '@/lib/preferences';
 
 const selectoresPeliculas: Selectores<any> = {
   nombre: (i) => i.titulo,
@@ -22,7 +23,7 @@ export default function MisPeliculas() {
     if (!token) return;
     setLogueado(true);
 
-    fetch('http://localhost:3001/media/watched', {
+    fetch(withLangRegion('http://localhost:3001/media/watched'), {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })
