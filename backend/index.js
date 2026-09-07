@@ -2416,6 +2416,348 @@ app.post('/import/letterboxd', requireAuth, async (req, res) => {
   }
 });
 
+// --- BUSCA UN JUEGO EN IGDB POR TÍTULO EXACTO (sin año, Backloggd no lo da) ---
+async function buscarJuegoIgdbPorTitulo(titulo) {
+  const token = await getIgdbToken();
+  const headers = {
+    'Client-ID': process.env.IGDB_CLIENT_ID,
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'text/plain',
+  };
+  const body = `search "${titulo}"; fields name, cover.url, first_release_date, summary; limit 5;`;
+  const resp = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body });
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  if (!data || data.length === 0) return null;
+
+  const normalizado = titulo.trim().toLowerCase();
+  const exacto = data.find((g) => g.name && g.name.trim().toLowerCase() === normalizado);
+  return exacto || data[0];
+}
+
+// --- RUTA: IMPORTAR HISTORIAL DE JUEGOS DESDE BACKLOGGD ---
+app.post('/import/backloggd', requireAuth, async (req, res) => {
+  try {
+    const { filas } = req.body;
+    if (!Array.isArray(filas) || filas.length === 0) {
+      return res.status(400).json({ error: 'No hay datos que importar' });
+    }
+
+    let importadas = 0;
+    const titulosNoEncontrados = [];
+
+    for (const fila of filas) {
+      try {
+        const encontrado = await buscarJuegoIgdbPorTitulo(fila.titulo);
+        if (!encontrado) {
+          titulosNoEncontrados.push(fila.titulo);
+          continue;
+        }
+
+        let media = await prisma.media.findFirst({
+          where: { igdbId: encontrado.id, tipo: 'VIDEOJUEGO' },
+        });
+
+        if (!media) {
+          const portadaUrl = encontrado.cover
+            ? `https:${encontrado.cover.url.replace('t_thumb', 't_cover_big')}`
+            : null;
+          media = await prisma.media.create({
+            data: {
+              igdbId: encontrado.id,
+              titulo: encontrado.name,
+              tituloOriginal: encontrado.name,
+              tipo: 'VIDEOJUEGO',
+              anio: encontrado.first_release_date
+                ? new Date(encontrado.first_release_date * 1000).getFullYear()
+                : null,
+              portada: portadaUrl,
+              sinopsis: encontrado.summary || null,
+              sinopsisTraducciones: {},
+            },
+          });
+        }
+
+        const ratingConvertido = fila.rating
+          ? Math.round(parseFloat(fila.rating) * 2 * 10) / 10
+          : null;
+
+        const dataUserMedia = { watched: true, lastActivityAt: new Date() };
+        if (ratingConvertido !== null && !Number.isNaN(ratingConvertido)) {
+          dataUserMedia.rating = ratingConvertido;
+        }
+
+        await prisma.userMedia.upsert({
+          where: { userId_mediaId: { userId: req.userId, mediaId: media.id } },
+          update: dataUserMedia,
+          create: { userId: req.userId, mediaId: media.id, ...dataUserMedia },
+        });
+
+        importadas++;
+      } catch (e) {
+        console.error(`Error importando "${fila.titulo}":`, e.message);
+        titulosNoEncontrados.push(fila.titulo);
+      }
+    }
+
+    res.json({
+      total: filas.length,
+      importadas,
+      noEncontradas: titulosNoEncontrados.length,
+      titulosNoEncontrados,
+    });
+  } catch (error) {
+    console.error('ERROR EN POST /import/backloggd:', error);
+    res.status(500).json({ error: 'Error al importar desde Backloggd' });
+  }
+});
+
+// --- BUSCA UN JUEGO EN IGDB POR TÍTULO EXACTO (sin año, Backloggd no lo da) ---
+async function buscarJuegoIgdbPorTitulo(titulo) {
+  const token = await getIgdbToken();
+  const headers = {
+    'Client-ID': process.env.IGDB_CLIENT_ID,
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'text/plain',
+  };
+  const body = `search "${titulo}"; fields name, cover.url, first_release_date, summary; limit 5;`;
+  const resp = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body });
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  if (!data || data.length === 0) return null;
+
+  // Preferimos una coincidencia exacta de nombre si la hay; si no, el
+  // primer resultado (IGDB ya ordena "search" por relevancia).
+  const normalizado = titulo.trim().toLowerCase();
+  const exacto = data.find((g) => g.name && g.name.trim().toLowerCase() === normalizado);
+  return exacto || data[0];
+}
+
+// --- RUTA: IMPORTAR HISTORIAL DE JUEGOS DESDE BACKLOGGD ---
+// Backloggd no tiene exportación oficial — esto recibe el CSV ya parseado en
+// el frontend desde la herramienta de terceros BackloggdExporter, que solo
+// da título + rating (escala 0-5). Sin fecha ni estado (Playing/Backlog/...),
+// así que solo se marca watched=true con la nota convertida; el resto
+// (estado, fecha jugado, plataforma...) se deja para repasar a mano después.
+app.post('/import/backloggd', requireAuth, async (req, res) => {
+  try {
+    const { filas } = req.body;
+    if (!Array.isArray(filas) || filas.length === 0) {
+      return res.status(400).json({ error: 'No hay datos que importar' });
+    }
+
+    let importadas = 0;
+    const titulosNoEncontrados = [];
+
+    // Secuencial: mismo motivo que /import/letterboxd — evitar disparar
+    // decenas de búsquedas a IGDB de golpe.
+    for (const fila of filas) {
+      try {
+        const encontrado = await buscarJuegoIgdbPorTitulo(fila.titulo);
+        if (!encontrado) {
+          titulosNoEncontrados.push(fila.titulo);
+          continue;
+        }
+
+        let media = await prisma.media.findFirst({
+          where: { igdbId: encontrado.id, tipo: 'VIDEOJUEGO' },
+        });
+
+        if (!media) {
+          const portadaUrl = encontrado.cover
+            ? `https:${encontrado.cover.url.replace('t_thumb', 't_cover_big')}`
+            : null;
+          media = await prisma.media.create({
+            data: {
+              igdbId: encontrado.id,
+              titulo: encontrado.name,
+              tituloOriginal: encontrado.name,
+              tipo: 'VIDEOJUEGO',
+              anio: encontrado.first_release_date
+                ? new Date(encontrado.first_release_date * 1000).getFullYear()
+                : null,
+              portada: portadaUrl,
+              sinopsis: encontrado.summary || null,
+              sinopsisTraducciones: {},
+            },
+          });
+        }
+
+        // Backloggd usa escala 0-5 (con medias); MediaTracker usa 0-10 —
+        // mismo criterio de conversión que ya usas con Letterboxd.
+        const ratingConvertido = fila.rating
+          ? Math.round(parseFloat(fila.rating) * 2 * 10) / 10
+          : null;
+
+        const dataUserMedia = { watched: true, lastActivityAt: new Date() };
+        if (ratingConvertido !== null && !Number.isNaN(ratingConvertido)) {
+          dataUserMedia.rating = ratingConvertido;
+        }
+
+        await prisma.userMedia.upsert({
+          where: { userId_mediaId: { userId: req.userId, mediaId: media.id } },
+          update: dataUserMedia,
+          create: { userId: req.userId, mediaId: media.id, ...dataUserMedia },
+        });
+
+        importadas++;
+      } catch (e) {
+        console.error(`Error importando "${fila.titulo}":`, e.message);
+        titulosNoEncontrados.push(fila.titulo);
+      }
+    }
+
+    res.json({
+      total: filas.length,
+      importadas,
+      noEncontradas: titulosNoEncontrados.length,
+      titulosNoEncontrados,
+    });
+  } catch (error) {
+    console.error('ERROR EN POST /import/backloggd:', error);
+    res.status(500).json({ error: 'Error al importar desde Backloggd' });
+  }
+});
+
+// --- LIMPIA UN TÍTULO DE ANIME DE SUFIJOS QUE MAL SUELE LLEVAR Y TMDB NO ---
+// "Shingeki no Kyojin: The Final Season Part 2" -> "Shingeki no Kyojin"
+// "Kimetsu no Yaiba (TV)" -> "Kimetsu no Yaiba"
+function limpiarTituloAnime(titulo) {
+  return titulo
+    .replace(/\s*\([^)]*\)\s*$/g, '') // quita paréntesis finales, ej "(TV)"
+    .replace(/\s*:\s*(the\s+)?(final\s+)?season\s*\d*\s*(part\s*\d+)?$/i, '')
+    .replace(/\s+\d+(st|nd|rd|th)\s+season$/i, '')
+    .replace(/\s+season\s+\d+$/i, '')
+    .replace(/\s+part\s+\d+$/i, '')
+    .trim();
+}
+
+// --- BUSCA UN ANIME EN TMDB (película o serie según venga de MAL) ---
+async function buscarAnimeTmdb(titulo, tipoDestino) {
+  const apiKey = process.env.TMDB_API_KEY;
+  const endpointTmdb = tipoDestino === 'PELICULA' ? 'movie' : 'tv';
+
+  const intentarBusqueda = async (query) => {
+    const url = `https://api.themoviedb.org/3/search/${endpointTmdb}?api_key=${apiKey}&query=${encodeURIComponent(query)}&language=en-US`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    return (data.results || [])[0] || null;
+  };
+
+  // Intento 1: título tal cual viene de MAL.
+  let candidato = await intentarBusqueda(titulo);
+  if (candidato) return candidato;
+
+  // Intento 2: mismo título, pero sin sufijos de temporada/ruido que MAL
+  // suele llevar y TMDB no.
+  const limpio = limpiarTituloAnime(titulo);
+  if (limpio && limpio !== titulo) {
+    candidato = await intentarBusqueda(limpio);
+    if (candidato) return candidato;
+  }
+
+  return null;
+}
+
+// --- TRADUCE my_status de MAL a los campos de UserMedia que ya usa el proyecto ---
+function mapearEstadoMal(malStatus) {
+  switch (malStatus) {
+    case 'Watching':
+      return { watched: true, playStatus: 'WATCHING', watchlist: false };
+    case 'Completed':
+      return { watched: true, playStatus: null, watchlist: false };
+    case 'On-Hold':
+      return { watched: true, playStatus: 'PAUSED', watchlist: false };
+    case 'Dropped':
+      return { watched: true, playStatus: 'ABANDONED', watchlist: false };
+    case 'Plan to Watch':
+      return { watched: false, playStatus: null, watchlist: true };
+    default:
+      return { watched: false, playStatus: null, watchlist: false };
+  }
+}
+
+// --- RUTA: IMPORTAR ANIME (SERIES Y PELÍCULAS) DESDE MYANIMELIST ---
+// Recibe filas ya extraídas del XML oficial de MAL (Settings → Export en
+// myanimelist.net), buscando cada título en TMDB — el anime en este proyecto
+// sale siempre de TMDB, nunca de MAL/Jikan en vivo (decisión ya tomada y
+// cerrada tras las integraciones revertidas).
+app.post('/import/mal-anime', requireAuth, async (req, res) => {
+  try {
+    const { filas } = req.body;
+    if (!Array.isArray(filas) || filas.length === 0) {
+      return res.status(400).json({ error: 'No hay datos que importar' });
+    }
+
+    let importadas = 0;
+    const titulosNoEncontrados = [];
+
+    // Secuencial: mismo motivo que en los demás importadores.
+    for (const fila of filas) {
+      try {
+        const tipoDestino = fila.tipoMal === 'Movie' ? 'PELICULA' : 'SERIE';
+        const encontrado = await buscarAnimeTmdb(fila.titulo, tipoDestino);
+        if (!encontrado) {
+          titulosNoEncontrados.push(fila.titulo);
+          continue;
+        }
+
+        let media = await prisma.media.findFirst({
+          where: { tmdbId: encontrado.id, tipo: tipoDestino },
+        });
+
+        if (!media) {
+          const posterUrl = encontrado.poster_path ? `https://image.tmdb.org/t/p/w780${encontrado.poster_path}` : null;
+          const backdropUrl = encontrado.backdrop_path ? `https://image.tmdb.org/t/p/original${encontrado.backdrop_path}` : null;
+          const titulo = encontrado.title || encontrado.name;
+          const tituloOriginal = encontrado.original_title || encontrado.original_name || titulo;
+          const fechaLanzamiento = encontrado.release_date || encontrado.first_air_date || null;
+
+          media = await prisma.media.create({
+            data: {
+              tmdbId: encontrado.id,
+              titulo,
+              tituloOriginal,
+              tipo: tipoDestino,
+              anio: fechaLanzamiento ? parseInt(fechaLanzamiento.split('-')[0], 10) : null,
+              portada: posterUrl,
+              backdrop: backdropUrl,
+              sinopsis: encontrado.overview || null,
+            },
+          });
+        }
+
+        const estado = mapearEstadoMal(fila.status);
+        const ratingConvertido = fila.score && fila.score > 0 ? fila.score : null;
+
+        const dataUserMedia = { ...estado, lastActivityAt: new Date() };
+        if (ratingConvertido !== null) dataUserMedia.rating = ratingConvertido;
+
+        await prisma.userMedia.upsert({
+          where: { userId_mediaId: { userId: req.userId, mediaId: media.id } },
+          update: dataUserMedia,
+          create: { userId: req.userId, mediaId: media.id, ...dataUserMedia },
+        });
+
+        importadas++;
+      } catch (e) {
+        console.error(`Error importando "${fila.titulo}":`, e.message);
+        titulosNoEncontrados.push(fila.titulo);
+      }
+    }
+
+    res.json({
+      total: filas.length,
+      importadas,
+      noEncontradas: titulosNoEncontrados.length,
+      titulosNoEncontrados,
+    });
+  } catch (error) {
+    console.error('ERROR EN POST /import/mal-anime:', error);
+    res.status(500).json({ error: 'Error al importar desde MyAnimeList' });
+  }
+});
+
 // --- MIDDLEWARE: comprueba el token y añade req.userId ---
 function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;

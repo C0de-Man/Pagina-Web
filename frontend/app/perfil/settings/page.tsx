@@ -584,12 +584,26 @@ export default function Settings() {
               <p className="text-gray-500 text-sm mb-3">
                 Bring in your watched history, ratings, reviews and watchlist from another site.
               </p>
-              <Link
-                href="/perfil/settings/import"
-                className="inline-block bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
-              >
-                Import from Letterboxd
-              </Link>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/perfil/settings/import"
+                  className="inline-block bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
+                >
+                  Import from Letterboxd
+                </Link>
+                <Link
+                  href="/perfil/settings/import/backloggd"
+                  className="inline-block bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
+                >
+                  Import from Backloggd
+                </Link>
+                <Link
+                  href="/perfil/settings/import/mal"
+                  className="inline-block bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
+                >
+                  Import from MyAnimeList
+                </Link>
+              </div>
             </div>
           </div>
         ) : (
