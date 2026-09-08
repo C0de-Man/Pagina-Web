@@ -17,8 +17,7 @@ export default function BooksDeUsuario() {
 
   useEffect(() => {
     if (!username) return;
-
-    fetch(`${API_URL}/users/${encodeURIComponent(username)}/watched?tipo=COMIC`, {
+    fetch(`${API_URL}/users/${encodeURIComponent(username)}/watched?tipo=LIBRO`, {
       cache: 'no-store',
     })
       .then((res) => {

@@ -9,8 +9,8 @@ datasource db {
 enum MediaType {
   PELICULA
   SERIE
-  ANIME
   MANGA
+  LIBRO
   VIDEOJUEGO
   COMIC
 }
@@ -28,6 +28,8 @@ model Media {
   remakeOfTmdbId Int?
   remakeChecked  Boolean @default(false)
   igdbId    Int?      @unique // un juego solo puede tener UNA fila (evita duplicados como los que tuvimos que limpiar a mano)
+  googleBooksId String? @unique // id de Google Books
+  mangaDexId    String? @unique // id de MangaDex (UUID, string)
   sinopsisTraducciones Json? // caché: { "es-ES": "texto ya traducido", "fr-FR": "..." }
   createdAt DateTime  @default(now())
   gameLogs  GameLog[]
@@ -51,36 +53,25 @@ model User {
   seguidores Follow[] @relation("Seguidores") // quién me sigue a mí (yo soy followingId)
 }
 
-// --- SEGUIR USUARIOS ("Friends") ---
-// Directo (estado ACCEPTED automático) si el destino tiene cuenta pública;
-// si el destino es privado, se crea en PENDING y hace falta que él la
-// acepte/rechace (ver /follow-requests/:followerId/accept|decline) antes de
-// contar como seguidor de verdad para nada (ni contador, ni ver contenido).
 model Follow {
   id          Int      @id @default(autoincrement())
-  followerId  Int // quien sigue
-  followingId Int // a quien se sigue
-  estado      String   @default("ACCEPTED") // "PENDING" | "ACCEPTED"
+  followerId  Int
+  followingId Int
+  estado      String   @default("ACCEPTED")
   createdAt   DateTime @default(now())
 
   follower  User @relation("Siguiendo", fields: [followerId], references: [id], onDelete: Cascade)
   following User @relation("Seguidores", fields: [followingId], references: [id], onDelete: Cascade)
 
-  @@unique([followerId, followingId]) // no puedes seguir dos veces al mismo usuario
+  @@unique([followerId, followingId])
 }
 
-// --- NOTIFICACIONES (campana del navbar) ---
-// Sin relación formal a User/List en el schema (a propósito, igual que
-// Follow/ListLike hacen con userId suelto en otros sitios) — se resuelve el
-// nombre/avatar del actor y el nombre de la lista consultando aparte en el
-// endpoint, así una notificación puede sobrevivir aunque luego se borre la
-// lista en cuestión (solo pierde el enlace, no la notificación en sí).
 model Notification {
   id        Int      @id @default(autoincrement())
-  userId    Int      // quién LA RECIBE
-  tipo      String   // 'FOLLOW' | 'LIST_LIKE'
-  actorId   Int      // quién la generó (quien sigue / quien da like)
-  listId    Int?     // solo rellenado si tipo = 'LIST_LIKE'
+  userId    Int
+  tipo      String
+  actorId   Int
+  listId    Int?
   leida     Boolean  @default(false)
   createdAt DateTime @default(now())
 }
@@ -93,23 +84,23 @@ model UserMedia {
   watched       Boolean  @default(false)
   liked         Boolean  @default(false)
   watchlist     Boolean  @default(false)
-  rating        Int?     // Nota personal, ej. de 1 a 10
-  customPoster  String?  // Portada elegida por ESTE usuario para este medio (no afecta a los demás)
-  customBackdrop String? // Banner elegido por ESTE usuario para este medio (no afecta a los demás)
-  playStatus    String?  // Juegos: "PLAYING"|"COMPLETED"|"RETIRED"|"SHELVED"|"ABANDONED" — Series: "WATCHING"|"PAUSED"|"ABANDONED"
+  rating        Int?
+  customPoster  String?
+  customBackdrop String?
+  playStatus    String?
   updatedAt     DateTime @updatedAt
 
-  @@unique([userId, mediaId]) // Un usuario solo puede tener UN estado por película
+  @@unique([userId, mediaId])
 }
 
 model List {
   id        Int        @id @default(autoincrement())
   userId    Int
   nombre    String
-  privada   Boolean    @default(false) // si true, SOLO el dueño puede verla — ni siquiera tus seguidores aceptados
-  modo      String     @default("GRID") // "RANKED" | "GRID" — Ranked numera las posiciones, Grid no
-  ordenPor  String     @default("MANUAL") // "MANUAL" (orden que arrastras a mano) | "NOMBRE" | "FECHA" (fecha en que se añadió) | "NOTA_MEDIA" | "MI_NOTA"
-  ordenDireccion String @default("DESC") // "ASC" | "DESC"
+  privada   Boolean    @default(false)
+  modo      String     @default("GRID")
+  ordenPor  String     @default("MANUAL")
+  ordenDireccion String @default("DESC")
   createdAt DateTime   @default(now())
   items     ListItem[]
   likes     ListLike[]
@@ -119,27 +110,22 @@ model ListItem {
   id        Int      @id @default(autoincrement())
   listId    Int
   mediaId   Int
-  orden     Int      @default(0) // posición cuando ordenPor = "MANUAL" (arrastrar y soltar)
-  createdAt DateTime @default(now()) // para poder ordenar por "fecha en que se añadió"
+  orden     Int      @default(0)
+  createdAt DateTime @default(now())
   list      List     @relation(fields: [listId], references: [id], onDelete: Cascade)
 
-  @@unique([listId, mediaId]) // No repetir la misma película en la misma lista
+  @@unique([listId, mediaId])
 }
 
-// --- "ME GUSTA" EN LISTAS DE OTROS USUARIOS ---
-// Le da el corazón a una lista ajena para que aparezca en tu propio "My
-// Lists", en un apartado nuevo aparte de las que tú has creado. No borra ni
-// copia nada de la lista original — sigue siendo de su dueño, tú solo
-// guardas una referencia a ella.
 model ListLike {
   id        Int      @id @default(autoincrement())
-  userId    Int      // quien le ha dado al corazón
+  userId    Int
   listId    Int
   createdAt DateTime @default(now())
 
   list List @relation(fields: [listId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, listId]) // no puedes darle al corazón dos veces a la misma lista
+  @@unique([userId, listId])
 }
 
 model Favorite {
@@ -161,8 +147,8 @@ model GameLog {
   propiedad   String?
   fechaInicio DateTime?
   fechaFin    DateTime?
-  edicion     String?   // "Edition played" (Standard, Deluxe, GOTY... texto libre)
-  minutosJugados Int?   // "total played", guardado en minutos (horas/minutos se combinan en el frontend)
+  edicion     String?
+  minutosJugados Int?
   rating      Int?
   review      String?
   spoilers    Boolean   @default(false)
@@ -173,17 +159,9 @@ model GameLog {
   media Media @relation(fields: [mediaId], references: [id])
 }
 
-// --- COLECCIONES DE VIDEOJUEGOS CURADAS A MANO ---
-// La primera vez que se pide la saga de un juego (GET /igdb/collection/:igdbId)
-// y no existe todavía ninguna CuratedCollection para él, se calcula igual que
-// hasta ahora a partir de IGDB y el resultado se guarda aquí como semilla. A
-// partir de ese momento, esa saga siempre se sirve desde estas tablas (ya no
-// se vuelve a consultar IGDB para ella), y solo un administrador puede
-// editarla: borrar juegos, reordenarlos (arrastrar y soltar) o añadir otros
-// nuevos con el buscador.
 model CuratedCollection {
   id        Int                     @id @default(autoincrement())
-  nombre    String                  // nombre de la saga, p. ej. "Resident Evil"
+  nombre    String
   createdAt DateTime                @default(now())
   items     CuratedCollectionItem[]
 }
@@ -191,36 +169,24 @@ model CuratedCollection {
 model CuratedCollectionItem {
   id           Int      @id @default(autoincrement())
   collectionId Int
-  igdbId       Int      // id del juego en IGDB (no siempre estará ya guardado en Media)
+  igdbId       Int
   titulo       String
   anio         Int?
   portada      String?
-  cancelado    Boolean  @default(false) // true = va en el apartado "Cancelados"
-  esOtro       Boolean  @default(false) // true = va en el apartado "Other" (grupo libre definido a mano por el admin)
-  orden        Int      @default(0)     // controla el orden dentro de la saga (arrastrar y soltar)
+  cancelado    Boolean  @default(false)
+  esOtro       Boolean  @default(false)
+  orden        Int      @default(0)
   createdAt    DateTime @default(now())
 
   collection CuratedCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
 
-  @@unique([collectionId, igdbId]) // un juego no puede estar repetido dentro de la misma saga
+  @@unique([collectionId, igdbId])
 }
 
-// --- COLECCIONES DE PELÍCULAS/SERIES CURADAS A MANO (sagas sueltas, tipo
-// "Regreso al futuro" o "Terminator") ---
-// Mismo concepto que CuratedCollection para juegos, pero para las Collections
-// crudas de TMDB (belongs_to_collection) y para sagas de series sin
-// Collection propia en TMDB. La primera vez que se pide una Collection
-// (GET /tmdb/collection/:tmdbId) y no existe todavía ninguna
-// CuratedMovieCollection para ella, se calcula desde TMDB tal cual siempre
-// se hizo, y el resultado se guarda aquí como semilla. A partir de ese
-// momento se sirve y se edita desde esta tabla — nunca se vuelve a
-// recalcular sola desde TMDB. Deliberadamente SEPARADA de CinematicUniverse:
-// esto es para sagas normales de precuela/secuela, no para agrupar varias
-// sagas bajo un paraguas más grande (eso sigue siendo cosa de Universos).
 model CuratedMovieCollection {
   id               Int      @id @default(autoincrement())
-  tmdbCollectionId Int?     @unique // null si es una saga de SERIES sin Collection de TMDB (usa tmdbSeriesId en su lugar)
-  tmdbSeriesId     Int?     @unique // solo relleno para sagas de series ancladas a una serie concreta, sin Collection real de TMDB
+  tmdbCollectionId Int?     @unique
+  tmdbSeriesId     Int?     @unique
   nombre           String
   createdAt        DateTime @default(now())
   items            CuratedMovieCollectionItem[]
@@ -229,48 +195,41 @@ model CuratedMovieCollection {
 model CuratedMovieCollectionItem {
   id           Int      @id @default(autoincrement())
   collectionId Int
-  tmdbId       Int      // id de la película/serie en TMDB (no siempre estará ya guardado en Media)
-  tipo         String   @default("PELICULA") // "PELICULA" | "SERIE"
+  tmdbId       Int
+  tipo         String   @default("PELICULA")
   titulo       String
   anio         Int?
   portada      String?
-  orden        Int      @default(0) // controla el orden dentro de la saga (arrastrar y soltar)
+  orden        Int      @default(0)
   createdAt    DateTime @default(now())
 
   collection CuratedMovieCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
 
-  @@unique([collectionId, tmdbId, tipo]) // un título no puede estar repetido dentro de la misma saga
+  @@unique([collectionId, tmdbId, tipo])
 }
 
-// Agrupa varias Collections de TMDB (que por separado son sagas sueltas,
-// ej. "Iron Man Collection", "Thor Collection") bajo un universo más
-// grande (ej. "Marvel Cinematic Universe"). Curado a mano, igual que
-// CuratedCollection para juegos, pero gestionado desde Prisma Studio.
 model CinematicUniverse {
   id        Int                          @id @default(autoincrement())
-  nombre    String                       // "Marvel Cinematic Universe"
+  nombre    String
   createdAt DateTime                     @default(now())
   items     CinematicUniverseItem[]
   fuentes   CinematicUniverseSource[]
   fases     CinematicUniversePhase[]
 }
-// Igual que CuratedCollectionItem para juegos: se siembra automáticamente la
-// primera vez que un admin añade una colección de TMDB a un universo (se
-// copian todas sus películas aquí), y a partir de ahí se sirve y se edita
-// desde esta tabla — nunca se vuelve a recalcular sola desde TMDB.
+
 model CinematicUniverseItem {
   id            Int       @id @default(autoincrement())
   universeId    Int
-  tmdbId        Int       // id de la película/serie en TMDB
-  tipo          String    @default("PELICULA") // "PELICULA" | "SERIE" — un universo puede mezclar ambos (ej. Chucky, Juego de Tronos)
+  tmdbId        Int
+  tipo          String    @default("PELICULA")
   titulo        String
   anio          Int?
-  fechaEstreno  DateTime? // fecha completa de estreno (TMDB release_date) — para ordenar de verdad por año/mes/día, no solo por año
+  fechaEstreno  DateTime?
   portada       String?
-  pestaña       String    // nombre del grupo/pestaña (nombre de la sub-colección, o "Other")
-  orden         Int       @default(0) // orden dentro de su propia pestaña (arrastrar y soltar)
-  ordenUniverso Int?      // orden manual SOLO para la pestaña mezclada del universo entero; si es null, esa pestaña sigue ordenando por fechaEstreno
-  faseId        Int?      // a qué "ventana"/fase pertenece dentro de la pestaña mezclada (null = sin asignar)
+  pestaña       String
+  orden         Int       @default(0)
+  ordenUniverso Int?
+  faseId        Int?
   fase          CinematicUniversePhase? @relation(fields: [faseId], references: [id], onDelete: SetNull)
   createdAt     DateTime  @default(now())
 
@@ -279,13 +238,10 @@ model CinematicUniverseItem {
   @@unique([universeId, tmdbId, tipo])
 }
 
-// Recuerda qué keyword/productora de TMDB se usó para sembrar un universo,
-// para poder repetir la importación más tarde (a mano con "Refresh", o
-// automáticamente) sin tener que volver a teclear el id cada vez.
 model CinematicUniverseSource {
   id         Int      @id @default(autoincrement())
   universeId Int
-  tipo       String   // "keyword" | "company"
+  tipo       String
   tmdbId     Int
   createdAt  DateTime @default(now())
 
@@ -294,9 +250,6 @@ model CinematicUniverseSource {
   @@unique([universeId, tipo, tmdbId])
 }
 
-// "Ventanas"/fases dentro de la pestaña mezclada de un universo (ej. "Phase
-// 1", "Phase 2" del UCM). Solo agrupan visualmente esa vista mezclada — no
-// afectan a las pestañas de cada sub-colección ni a su orden interno.
 model CinematicUniversePhase {
   id         Int      @id @default(autoincrement())
   universeId Int
@@ -308,58 +261,41 @@ model CinematicUniversePhase {
   items    CinematicUniverseItem[]
 }
 
-// --- REGISTROS DE VISIONADO (películas/series) ---
-// Igual que GameLog para juegos, pero simplificado: solo lo necesario para
-// el modal "Review or log..." (fecha de visionado, reseña libre, y si es un
-// rewatch). Permite varios registros por usuario+película, para poder marcar
-// varios visionados en fechas distintas.
 model WatchLog {
   id          Int       @id @default(autoincrement())
   userId      Int
   mediaId     Int
-  fechaVisto  DateTime  @default(now()) // "Watched on"
-  review      String?                   // "Add a review..."
-  rewatch     Boolean   @default(false) // "I've watched this before"
+  fechaVisto  DateTime  @default(now())
+  review      String?
+  rewatch     Boolean   @default(false)
   createdAt   DateTime  @default(now())
 
   user  User  @relation(fields: [userId], references: [id])
   media Media @relation(fields: [mediaId], references: [id])
 }
 
-// --- PROGRESO POR TEMPORADA (series) ---
-// Las temporadas no tienen su propia fila en Media (son sub-entidades de
-// TMDB colgando del tmdbId de la serie) así que su estado de visionado vive
-// aparte, igual que WatchLog vive aparte de UserMedia. Un registro por
-// usuario+serie+número de temporada.
-// NOTA: se mantiene independiente de UserEpisodeWatch a propósito — el
-// "visto"/nota de aquí es una valoración de la temporada como conjunto, no
-// se recalcula sola a partir de los episodios (evita sorpresas si alguien
-// quiere puntuar la temporada sin marcar episodio a episodio).
 model UserSeasonWatch {
   id           Int       @id @default(autoincrement())
   userId       Int
-  mediaId      Int       // el id de Media de la SERIE (no de la temporada)
+  mediaId      Int
   seasonNumber Int
   watched      Boolean   @default(false)
-  rating       Int?      // nota personal de esta temporada, 1-10 (se muestra en medias estrellas en la UI)
-  customPoster String?   // póster de ESTA temporada elegido por el usuario, entre las alternativas de TMDB (no afecta a otros usuarios)
+  rating       Int?
+  customPoster String?
   fechaVisto   DateTime?
   createdAt    DateTime  @default(now())
 
   @@unique([userId, mediaId, seasonNumber])
 }
 
-// --- PROGRESO POR EPISODIO (series) ---
-// Igual que UserSeasonWatch pero un nivel más abajo. Un registro por
-// usuario+serie+temporada+episodio.
 model UserEpisodeWatch {
   id            Int       @id @default(autoincrement())
   userId        Int
-  mediaId       Int       // el id de Media de la SERIE
+  mediaId       Int
   seasonNumber  Int
   episodeNumber Int
   watched       Boolean   @default(false)
-  rating        Int?      // nota personal de este episodio, 1-10
+  rating        Int?
   fechaVisto    DateTime?
   createdAt     DateTime  @default(now())
 

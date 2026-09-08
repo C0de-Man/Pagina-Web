@@ -2296,6 +2296,203 @@ app.post('/media/igdb', async (req, res) => {
   }
 });
 
+// --- BUSCAR LIBROS EN GOOGLE BOOKS ---
+app.get('/googlebooks/buscar', async (req, res) => {
+  try {
+    const searchQuery = req.query.q;
+    if (!searchQuery) return res.status(400).json({ error: 'Falta término' });
+
+    const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+    // getLang(req) devuelve algo como "es-ES" — Google Books solo entiende
+    // el código de dos letras (langRestrict=es), así que nos quedamos con
+    // la primera parte.
+    const idiomaDosLetras = getLang(req).split('-')[0];
+    const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=40&langRestrict=${idiomaDosLetras}&key=${apiKey}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    const resultados = (data.items || []).map((item) => {
+      const info = item.volumeInfo || {};
+      const portada = info.imageLinks?.thumbnail
+        ? info.imageLinks.thumbnail.replace('http://', 'https://')
+        : null;
+      return {
+        googleBooksId: item.id,
+        titulo: info.title || 'Sin título',
+        autores: info.authors || [],
+        anio: info.publishedDate ? parseInt(info.publishedDate.slice(0, 4), 10) : null,
+        portada,
+        sinopsis: info.description || null,
+        idioma: info.language || null,
+      };
+    });
+
+    // langRestrict de Google Books es un filtro "blando" — bastantes
+    // entradas antiguas/escaneadas no tienen bien puesto el idioma y se
+    // cuelan igual. Reordenamos para que las que SÍ coincidan con tu idioma
+    // salgan primero, sin descartar el resto.
+    resultados.sort((a, b) => {
+      const aCoincide = a.idioma === idiomaDosLetras ? 0 : 1;
+      const bCoincide = b.idioma === idiomaDosLetras ? 0 : 1;
+      return aCoincide - bCoincide;
+    });
+
+    res.json(resultados);
+  } catch (error) {
+    console.error('ERROR EN GET /googlebooks/buscar:', error);
+    res.status(500).json({ error: 'Error al buscar en Google Books' });
+  }
+});
+
+// --- DETALLES DE UN LIBRO: autor, editorial, páginas, categorías ---
+app.get('/googlebooks/details/:googleBooksId', async (req, res) => {
+  try {
+    const { googleBooksId } = req.params;
+    const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+    const response = await fetch(`https://www.googleapis.com/books/v1/volumes/${googleBooksId}?key=${apiKey}`);
+    const data = await response.json();
+    const info = data.volumeInfo || {};
+
+    res.json({
+      autores: info.authors || [],
+      editorial: info.publisher || null,
+      paginas: info.pageCount || null,
+      categorias: info.categories || [],
+      idioma: info.language || null,
+      isbn: (info.industryIdentifiers || []).find((i) => i.type === 'ISBN_13')?.identifier || null,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /googlebooks/details/:googleBooksId:', error);
+    res.status(500).json({ error: 'Error al obtener detalles del libro' });
+  }
+});
+
+// --- GUARDAR UN LIBRO DESDE GOOGLE BOOKS ---
+app.post('/media/googlebooks', async (req, res) => {
+  try {
+    const { googleBooksId } = req.body;
+    if (!googleBooksId) return res.status(400).json({ error: 'Falta googleBooksId' });
+
+    const existente = await prisma.media.findFirst({ where: { googleBooksId } });
+    if (existente) return res.json(existente);
+
+    const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+    const response = await fetch(`https://www.googleapis.com/books/v1/volumes/${googleBooksId}?key=${apiKey}`);
+    const data = await response.json();
+    if (!data.id) return res.status(404).json({ error: 'Libro no encontrado en Google Books' });
+
+    const info = data.volumeInfo || {};
+    const portadaUrl = info.imageLinks?.thumbnail
+      ? info.imageLinks.thumbnail.replace('http://', 'https://')
+      : null;
+
+    // Google Books devuelve la descripción con HTML simple (<p>, <b>, <br>...)
+    // — la limpiamos a texto plano, igual que el resto de sinopsis del proyecto.
+    const sinopsisLimpia = info.description
+      ? info.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      : null;
+
+    const nuevoMedia = await prisma.media.create({
+      data: {
+        googleBooksId: data.id,
+        titulo: info.title || 'Sin título',
+        tituloOriginal: info.title || 'Sin título',
+        tipo: 'LIBRO',
+        anio: info.publishedDate ? parseInt(info.publishedDate.slice(0, 4), 10) : null,
+        portada: portadaUrl,
+        sinopsis: sinopsisLimpia,
+        sinopsisTraducciones: {},
+      },
+    });
+
+    res.json(nuevoMedia);
+  } catch (error) {
+    console.error('ERROR EN POST /media/googlebooks:', error);
+    res.status(500).json({ error: 'Error al guardar el libro' });
+  }
+});
+
+// --- DETALLES DE UN LIBRO: sinopsis, temas/categorías ---
+// La búsqueda no trae descripción — hace falta pedir el "work" aparte.
+app.get('/openlibrary/details/:openLibraryId', async (req, res) => {
+  try {
+    const { openLibraryId } = req.params;
+    const response = await fetch(`https://openlibrary.org/works/${openLibraryId}.json`);
+    const data = await response.json();
+
+    // La descripción a veces viene como string directo, a veces como
+    // { type: "...", value: "..." } — Open Library no es consistente aquí.
+    let sinopsis = null;
+    if (typeof data.description === 'string') {
+      sinopsis = data.description;
+    } else if (data.description?.value) {
+      sinopsis = data.description.value;
+    }
+
+    res.json({
+      sinopsis,
+      categorias: data.subjects || [],
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /openlibrary/details/:openLibraryId:', error);
+    res.status(500).json({ error: 'Error al obtener detalles del libro' });
+  }
+});
+
+// --- GUARDAR UN LIBRO DESDE OPEN LIBRARY ---
+// Igual que /media/igdb y /media/tmdb: solo recibe el id, y es el propio
+// backend quien vuelve a pedir los datos a la fuente — nunca se confía en lo
+// que mande el frontend.
+app.post('/media/openlibrary', async (req, res) => {
+  try {
+    const { openLibraryId } = req.body;
+    if (!openLibraryId) return res.status(400).json({ error: 'Falta openLibraryId' });
+
+    const existente = await prisma.media.findFirst({ where: { openLibraryId } });
+    if (existente) return res.json(existente);
+
+    const response = await fetch(`https://openlibrary.org/works/${openLibraryId}.json`, {
+      headers: { 'User-Agent': 'MediaTrackerApp/1.0 (proyecto personal)' },
+    });
+    const data = await response.json();
+    if (!data.key) return res.status(404).json({ error: 'Libro no encontrado en Open Library' });
+
+    let sinopsis = null;
+    if (typeof data.description === 'string') {
+      sinopsis = data.description;
+    } else if (data.description?.value) {
+      sinopsis = data.description.value;
+    }
+
+    const portadaUrl = data.covers?.[0]
+      ? `https://covers.openlibrary.org/b/id/${data.covers[0]}-L.jpg`
+      : null;
+
+    const anio = data.first_publish_date
+      ? parseInt(String(data.first_publish_date).slice(-4), 10)
+      : null;
+
+    const titulo = data.title || 'Sin título';
+
+    const nuevoMedia = await prisma.media.create({
+      data: {
+        openLibraryId,
+        titulo,
+        tituloOriginal: titulo,
+        tipo: 'LIBRO',
+        anio: Number.isNaN(anio) ? null : anio,
+        portada: portadaUrl,
+        sinopsis,
+      },
+    });
+
+    res.json(nuevoMedia);
+  } catch (error) {
+    console.error('ERROR EN POST /media/openlibrary:', error);
+    res.status(500).json({ error: 'Error al guardar el libro' });
+  }
+});
+
 // --- IMPORTAR HISTORIAL DESDE LETTERBOXD ---
 // Recibe una lista ya combinada (una entrada por película, con watched/
 // rating/review/watchlist ya unificados desde los distintos CSV de
@@ -7373,10 +7570,11 @@ app.get('/media/:id', async (req, res) => {
       }
     }
 
-    // Para juegos: traducimos el resumen (viene de IGDB, siempre en inglés) al idioma elegido.
-    // Se traduce solo la primera vez por idioma, y se guarda en caché para no volver a llamar
+    // Para juegos y libros: traducimos el resumen (viene de IGDB/Google Books,
+    // en el idioma en que se guardó) al idioma elegido. Se traduce solo la
+    // primera vez por idioma, y se guarda en caché para no volver a llamar
     // al traductor cada vez que se abre la ficha.
-    if (mediaItem.tipo === 'VIDEOJUEGO' && mediaItem.sinopsis) {
+    if ((mediaItem.tipo === 'VIDEOJUEGO' || mediaItem.tipo === 'LIBRO') && mediaItem.sinopsis) {
       if (lang.startsWith('en')) {
         sinopsisMostrada = mediaItem.sinopsis; // ya está en inglés, el idioma original
       } else {
