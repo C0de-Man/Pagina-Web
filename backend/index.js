@@ -2444,6 +2444,45 @@ app.post('/media/googlebooks', async (req, res) => {
   }
 });
 
+// --- OTRAS EDICIONES DEL MISMO LIBRO (para el selector de carátula) ---
+// Google Books no tiene una galería de alternativas por título como TMDB o
+// SteamGridDB — el rodeo es buscar por el mismo título y recoger las
+// portadas de las distintas ediciones que aparezcan (idiomas, años,
+// editoriales distintas), deduplicadas por URL de imagen.
+app.get('/googlebooks/editions/:mediaId', async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.mediaId, 10);
+    const media = await prisma.media.findUnique({ where: { id: mediaId } });
+    if (!media || !media.tituloOriginal) return res.json([]);
+
+    const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+    const url = `https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(media.tituloOriginal)}&maxResults=40&key=${apiKey}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    const tituloNormalizado = media.tituloOriginal.trim().toLowerCase();
+    const vistos = new Set();
+    const ediciones = [];
+
+    for (const item of data.items || []) {
+      const info = item.volumeInfo || {};
+      if (!info.title || info.title.trim().toLowerCase() !== tituloNormalizado) continue;
+      if (!info.imageLinks?.thumbnail) continue;
+
+      const portada = info.imageLinks.thumbnail.replace('http://', 'https://');
+      if (vistos.has(portada)) continue;
+      vistos.add(portada);
+
+      ediciones.push({ googleBooksId: item.id, portada });
+    }
+
+    res.json(ediciones);
+  } catch (error) {
+    console.error('ERROR EN GET /googlebooks/editions/:mediaId:', error);
+    res.status(500).json({ error: 'Error al buscar otras ediciones del libro' });
+  }
+});
+
 // --- IMPORTAR HISTORIAL DESDE LETTERBOXD ---
 // Recibe una lista ya combinada (una entrada por película, con watched/
 // rating/review/watchlist ya unificados desde los distintos CSV de
@@ -5526,6 +5565,32 @@ app.patch('/media/:id/poster', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('ERROR EN PATCH /media/:id/poster:', error);
     res.status(500).json({ error: "Error al actualizar la portada" });
+  }
+});
+
+// --- ACTUALIZAR MI PROGRESO DE LECTURA (capítulo/página actual y total) ---
+// Separado de PATCH /media/:id/status a propósito: el progreso no cuenta
+// como "actividad real" para lastActivityAt (no queremos que subir el
+// contador reordene Watched/Watchlist), y el total lo escribe el usuario a
+// mano — Google Books no lo da (ver conversación).
+app.patch('/media/:id/progress', requireAuth, async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id);
+    const { progresoActual, progresoTotal } = req.body;
+
+    const data = {};
+    if (progresoActual !== undefined) data.progresoActual = progresoActual;
+    if (progresoTotal !== undefined) data.progresoTotal = progresoTotal;
+
+    const status = await prisma.userMedia.upsert({
+      where: { userId_mediaId: { userId: req.userId, mediaId } },
+      update: data,
+      create: { userId: req.userId, mediaId, ...data },
+    });
+    res.json(status);
+  } catch (error) {
+    console.error('ERROR EN PATCH /media/:id/progress:', error);
+    res.status(500).json({ error: 'Error al actualizar el progreso' });
   }
 });
 

@@ -1,6 +1,6 @@
 import RatingWidget from '@/components/RatingWidget';
 import ActionButtons from '@/components/ActionButtons';
-import PosterButtonModal from '@/components/PosterButtonModal';
+import BookPosterButtonModal from '@/components/BookPosterButtonModal';
 import MediaTabs from '@/components/MediaTabs';
 import AddToListModal from '@/components/AddToListModal';
 import ReviewLogButton from '@/components/ReviewLogButton';
@@ -10,6 +10,7 @@ import { extraerIdDeSlug, urlFicha } from '@/lib/slug';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import FriendsActivityOnMedia from '@/components/FriendsActivityOnMedia';
+import ReadingProgress from '@/components/ReadingProgress';
 
 export default async function BookDetail({ params }: { params: Promise<{ slug: string }> }) {
   const resolvedParams = await params;
@@ -47,7 +48,7 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
 
           <div className="flex-shrink-0 w-48 md:w-64">
             <PosterImage mediaId={media.id} portadaDefault={media.portada} titulo={media.titulo} />
-            <PosterButtonModal tmdbId={media.tmdbId} mediaId={media.id} />
+            <BookPosterButtonModal mediaId={media.id} />
           </div>
 
           <div className="flex-grow pt-24 md:pt-32">
@@ -64,6 +65,8 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
             <div className="bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl">
               <ActionButtons mediaId={media.id} tipo={media.tipo} />
 
+              <ReadingProgress mediaId={media.id} tipo={media.tipo} className="mt-0 border-0 p-0 shadow-none bg-transparent" />
+
               <div className="border-t border-dashed border-gray-700 my-4"></div>
 
               <div className="space-y-2 mb-4">
@@ -73,8 +76,6 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
 
               <RatingWidget mediaId={media.id} />
             </div>
-
-            <FriendsActivityOnMedia mediaId={media.id} />
           </div>
 
         </div>

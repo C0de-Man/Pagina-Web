@@ -84,13 +84,15 @@ model UserMedia {
   watched       Boolean  @default(false)
   liked         Boolean  @default(false)
   watchlist     Boolean  @default(false)
-  rating        Int?
-  customPoster  String?
-  customBackdrop String?
-  playStatus    String?
+  rating        Int?     // Nota personal, ej. de 1 a 10
+  customPoster  String?  // Portada elegida por ESTE usuario para este medio (no afecta a los demás)
+  customBackdrop String? // Banner elegido por ESTE usuario para este medio (no afecta a los demás)
+  playStatus    String?  // Juegos: "PLAYING"|"COMPLETED"|"RETIRED"|"SHELVED"|"ABANDONED" — Series: "WATCHING"|"PAUSED"|"ABANDONED"
+  progresoActual Int?     // capítulo/página actual (solo se usa en libros por ahora)
+  progresoTotal  Int?     // total que TÚ has escrito (Google Books no lo da)
   updatedAt     DateTime @updatedAt
 
-  @@unique([userId, mediaId])
+  @@unique([userId, mediaId]) // Un usuario solo puede tener UN estado por película
 }
 
 model List {
