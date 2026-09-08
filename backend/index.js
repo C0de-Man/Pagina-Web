@@ -2303,15 +2303,36 @@ app.get('/googlebooks/buscar', async (req, res) => {
     if (!searchQuery) return res.status(400).json({ error: 'Falta término' });
 
     const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
-    // getLang(req) devuelve algo como "es-ES" — Google Books solo entiende
-    // el código de dos letras (langRestrict=es), así que nos quedamos con
-    // la primera parte.
-    const idiomaDosLetras = getLang(req).split('-')[0];
-    const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=40&langRestrict=${idiomaDosLetras}&key=${apiKey}`;
-    const response = await fetch(url);
-    const data = await response.json();
 
-    const resultados = (data.items || []).map((item) => {
+    const RESULTADOS_POR_PAGINA = 40;
+    const TOPE_RESULTADOS = 200;
+
+    const urlPagina = (startIndex) =>
+      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=${RESULTADOS_POR_PAGINA}&startIndex=${startIndex}&key=${apiKey}`;
+
+    const primeraRes = await fetch(urlPagina(0));
+    const primeraData = await primeraRes.json();
+    let itemsCrudos = primeraData.items || [];
+
+    const totalDisponibles = Math.min(primeraData.totalItems || 0, TOPE_RESULTADOS);
+
+    if (totalDisponibles > RESULTADOS_POR_PAGINA) {
+      const startIndicesRestantes = [];
+      for (let i = RESULTADOS_POR_PAGINA; i < totalDisponibles; i += RESULTADOS_POR_PAGINA) {
+        startIndicesRestantes.push(i);
+      }
+      const restoPaginas = await Promise.all(
+        startIndicesRestantes.map((startIndex) =>
+          fetch(urlPagina(startIndex))
+            .then((r) => r.json())
+            .then((d) => d.items || [])
+            .catch(() => [])
+        )
+      );
+      for (const pagina of restoPaginas) itemsCrudos = itemsCrudos.concat(pagina);
+    }
+
+    const resultados = itemsCrudos.map((item) => {
       const info = item.volumeInfo || {};
       const portada = info.imageLinks?.thumbnail
         ? info.imageLinks.thumbnail.replace('http://', 'https://')
@@ -2327,17 +2348,30 @@ app.get('/googlebooks/buscar', async (req, res) => {
       };
     });
 
-    // langRestrict de Google Books es un filtro "blando" — bastantes
-    // entradas antiguas/escaneadas no tienen bien puesto el idioma y se
-    // cuelan igual. Reordenamos para que las que SÍ coincidan con tu idioma
-    // salgan primero, sin descartar el resto.
-    resultados.sort((a, b) => {
-      const aCoincide = a.idioma === idiomaDosLetras ? 0 : 1;
-      const bCoincide = b.idioma === idiomaDosLetras ? 0 : 1;
-      return aCoincide - bCoincide;
+    const vistos = new Set();
+    const sinDuplicados = resultados.filter((r) => {
+      if (vistos.has(r.googleBooksId)) return false;
+      vistos.add(r.googleBooksId);
+      return true;
     });
 
-    res.json(resultados);
+    const normalizarTituloBase = (titulo) => {
+      const separadores = /(\(|:|\s-\s|\/|\.\s)/;
+      const indice = titulo.search(separadores);
+      const base = indice === -1 ? titulo : titulo.slice(0, indice);
+      return base.trim().toLowerCase();
+    };
+
+    const gruposVistos = new Set();
+    const sinEdicionesRepetidas = sinDuplicados.filter((r) => {
+      const autorPrincipal = (r.autores[0] || '').toLowerCase();
+      const clave = `${normalizarTituloBase(r.titulo)}|${autorPrincipal}`;
+      if (gruposVistos.has(clave)) return false;
+      gruposVistos.add(clave);
+      return true;
+    });
+
+    res.json(sinEdicionesRepetidas);
   } catch (error) {
     console.error('ERROR EN GET /googlebooks/buscar:', error);
     res.status(500).json({ error: 'Error al buscar en Google Books' });
@@ -2386,8 +2420,6 @@ app.post('/media/googlebooks', async (req, res) => {
       ? info.imageLinks.thumbnail.replace('http://', 'https://')
       : null;
 
-    // Google Books devuelve la descripción con HTML simple (<p>, <b>, <br>...)
-    // — la limpiamos a texto plano, igual que el resto de sinopsis del proyecto.
     const sinopsisLimpia = info.description
       ? info.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
       : null;
@@ -2408,87 +2440,6 @@ app.post('/media/googlebooks', async (req, res) => {
     res.json(nuevoMedia);
   } catch (error) {
     console.error('ERROR EN POST /media/googlebooks:', error);
-    res.status(500).json({ error: 'Error al guardar el libro' });
-  }
-});
-
-// --- DETALLES DE UN LIBRO: sinopsis, temas/categorías ---
-// La búsqueda no trae descripción — hace falta pedir el "work" aparte.
-app.get('/openlibrary/details/:openLibraryId', async (req, res) => {
-  try {
-    const { openLibraryId } = req.params;
-    const response = await fetch(`https://openlibrary.org/works/${openLibraryId}.json`);
-    const data = await response.json();
-
-    // La descripción a veces viene como string directo, a veces como
-    // { type: "...", value: "..." } — Open Library no es consistente aquí.
-    let sinopsis = null;
-    if (typeof data.description === 'string') {
-      sinopsis = data.description;
-    } else if (data.description?.value) {
-      sinopsis = data.description.value;
-    }
-
-    res.json({
-      sinopsis,
-      categorias: data.subjects || [],
-    });
-  } catch (error) {
-    console.error('ERROR EN GET /openlibrary/details/:openLibraryId:', error);
-    res.status(500).json({ error: 'Error al obtener detalles del libro' });
-  }
-});
-
-// --- GUARDAR UN LIBRO DESDE OPEN LIBRARY ---
-// Igual que /media/igdb y /media/tmdb: solo recibe el id, y es el propio
-// backend quien vuelve a pedir los datos a la fuente — nunca se confía en lo
-// que mande el frontend.
-app.post('/media/openlibrary', async (req, res) => {
-  try {
-    const { openLibraryId } = req.body;
-    if (!openLibraryId) return res.status(400).json({ error: 'Falta openLibraryId' });
-
-    const existente = await prisma.media.findFirst({ where: { openLibraryId } });
-    if (existente) return res.json(existente);
-
-    const response = await fetch(`https://openlibrary.org/works/${openLibraryId}.json`, {
-      headers: { 'User-Agent': 'MediaTrackerApp/1.0 (proyecto personal)' },
-    });
-    const data = await response.json();
-    if (!data.key) return res.status(404).json({ error: 'Libro no encontrado en Open Library' });
-
-    let sinopsis = null;
-    if (typeof data.description === 'string') {
-      sinopsis = data.description;
-    } else if (data.description?.value) {
-      sinopsis = data.description.value;
-    }
-
-    const portadaUrl = data.covers?.[0]
-      ? `https://covers.openlibrary.org/b/id/${data.covers[0]}-L.jpg`
-      : null;
-
-    const anio = data.first_publish_date
-      ? parseInt(String(data.first_publish_date).slice(-4), 10)
-      : null;
-
-    const titulo = data.title || 'Sin título';
-
-    const nuevoMedia = await prisma.media.create({
-      data: {
-        openLibraryId,
-        titulo,
-        tituloOriginal: titulo,
-        tipo: 'LIBRO',
-        anio: Number.isNaN(anio) ? null : anio,
-        portada: portadaUrl,
-        sinopsis,
-      },
-    });
-
-    res.json(nuevoMedia);
-  } catch (error) {
-    console.error('ERROR EN POST /media/openlibrary:', error);
     res.status(500).json({ error: 'Error al guardar el libro' });
   }
 });
@@ -5085,7 +5036,7 @@ app.get('/media/playing', requireAuth, async (req, res) => {
   try {
     // "En curso" ahora cubre tanto juegos (PLAYING) como series (WATCHING)
     const entries = await prisma.userMedia.findMany({
-      where: { userId: req.userId, playStatus: { in: ['PLAYING', 'WATCHING'] } },
+      where: { userId: req.userId, playStatus: { in: ['PLAYING', 'WATCHING', 'READING'] } },
       orderBy: { lastActivityAt: 'desc' }
     });
 

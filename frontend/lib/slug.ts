@@ -73,7 +73,11 @@ export function extraerIdDeSlug(slug: string): number | null {
 }
 
 export function urlFicha(media: MediaParaSlug): string {
-  const base = media.tipo === 'VIDEOJUEGO' ? '/game' : media.tipo === 'SERIE' ? '/series' : '/movie';
+  const base =
+    media.tipo === 'VIDEOJUEGO' ? '/game' :
+    media.tipo === 'SERIE' ? '/series' :
+    media.tipo === 'LIBRO' ? '/book' :
+    '/movie';
   return `${base}/${generarSlug(media)}`;
 }
 

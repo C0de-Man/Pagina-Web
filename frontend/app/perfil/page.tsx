@@ -52,7 +52,7 @@ export default function Perfil() {
           setUsername(data.username);
           setAvatar(data.avatar || null);
         })
-        .catch(() => {});
+        .catch(() => { });
 
       fetch('http://localhost:3001/favorites', {
         headers: { Authorization: `Bearer ${token}` },
@@ -60,7 +60,7 @@ export default function Perfil() {
       })
         .then((res) => res.json())
         .then(setFavoritos)
-        .catch(() => {});
+        .catch(() => { });
 
       fetch('http://localhost:3001/media/watched', {
         headers: { Authorization: `Bearer ${token}` },
@@ -68,7 +68,7 @@ export default function Perfil() {
       })
         .then((res) => res.json())
         .then(setVistas)
-        .catch(() => {});
+        .catch(() => { });
 
       fetch('http://localhost:3001/media/playing', {
         headers: { Authorization: `Bearer ${token}` },
@@ -76,7 +76,7 @@ export default function Perfil() {
       })
         .then((res) => res.json())
         .then(setJugandoAhora)
-        .catch(() => {});
+        .catch(() => { });
     }
   }, []);
 
@@ -166,7 +166,7 @@ export default function Perfil() {
             <Link href="/perfil/movies" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Films</Link>
             <Link href="/perfil/series" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Series</Link>
             <Link href="/perfil/games" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Played</Link>
-            <Link href="/books" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Books</Link>
+            <Link href="/perfil/books" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Books</Link>
             <Link href="/perfil/lists" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Lists</Link>
             <Link href="/perfil/reviews" className="pb-3 text-sm font-semibold text-gray-400 hover:text-white transition whitespace-nowrap">Reviews</Link>
           </div>

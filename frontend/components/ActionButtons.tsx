@@ -20,6 +20,16 @@ const ESTADOS_SERIE = [
   { valor: 'ABANDONED', color: '#ef4444', label: 'Abandoned', desc: 'Stopped watching for good' },
 ];
 
+// Mismo patrón que ESTADOS_SERIE: "READ" no es un playStatus real en la
+// base de datos (solo READING/PAUSED/ABANDONED lo son) — al elegirlo se
+// guarda como watched=true con playStatus=null.
+const ESTADOS_LIBRO = [
+  { valor: 'READING', color: '#ec4899', label: 'Reading', desc: 'Currently reading' },
+  { valor: 'READ', color: '#22c55e', label: 'Read', desc: "You've finished the book" },
+  { valor: 'PAUSED', color: '#f97316', label: 'Paused', desc: 'On hold, may continue later' },
+  { valor: 'ABANDONED', color: '#ef4444', label: 'Abandoned', desc: 'Stopped reading for good' },
+];
+
 // Mismo icono de mando que el botón principal, en miniatura para el botón
 // "Mark as unplayed" del modal.
 function IconoMando({ className }: { className?: string }) {
@@ -47,6 +57,15 @@ function IconoOjoAbierto({ className }: { className?: string }) {
   );
 }
 
+// Icono de libro para el botón principal y el "Mark as unread" en libros.
+function IconoLibro({ className }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+    </svg>
+  );
+}
+
 export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo?: string }) {
   const [watched, setWatched] = useState(false);
   const [liked, setLiked] = useState(false);
@@ -57,14 +76,19 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
 
   const esJuego = tipo === 'VIDEOJUEGO';
   const esSerie = tipo === 'SERIE';
-  const tieneModalEstado = esJuego || esSerie;
-  const estados = esJuego ? ESTADOS_JUEGO : ESTADOS_SERIE;
+  const esLibro = tipo === 'LIBRO';
+  const tieneModalEstado = esJuego || esSerie || esLibro;
+  const estados = esJuego ? ESTADOS_JUEGO : esLibro ? ESTADOS_LIBRO : ESTADOS_SERIE;
 
   const estadoActual = esJuego
     ? ESTADOS_JUEGO.find((e) => e.valor === playStatus) || null
     : esSerie
     ? ESTADOS_SERIE.find((e) => e.valor === playStatus) ||
       (watched ? ESTADOS_SERIE.find((e) => e.valor === 'WATCHED') : null) ||
+      null
+    : esLibro
+    ? ESTADOS_LIBRO.find((e) => e.valor === playStatus) ||
+      (watched ? ESTADOS_LIBRO.find((e) => e.valor === 'READ') : null) ||
       null
     : null;
 
@@ -121,11 +145,12 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
     }
   };
 
-  // Unificado para juegos y series: en juegos "nuevoValor" es siempre un
-  // playStatus real (o null para "Mark as unplayed"). En series, "WATCHED"
-  // es un caso especial (no existe como playStatus en la base de datos —
-  // se guarda como watched=true + playStatus=null), y null es "Mark as
-  // unwatched" (watched=false + playStatus=null).
+  // Unificado para juegos, series y libros: en juegos "nuevoValor" es
+  // siempre un playStatus real (o null para "Mark as unplayed"). En series
+  // "WATCHED" y en libros "READ" son casos especiales (no existen como
+  // playStatus en la base de datos — se guardan como watched=true +
+  // playStatus=null), y null es "Mark as unwatched/unread" (watched=false +
+  // playStatus=null).
   const guardarEstado = async (nuevoValor: string | null) => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -138,12 +163,12 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
     setModalAbierto(false);
 
     let body: Record<string, unknown>;
-    if (esSerie && nuevoValor === 'WATCHED') {
+    if ((esSerie && nuevoValor === 'WATCHED') || (esLibro && nuevoValor === 'READ')) {
       body = { watched: true, playStatus: null };
       setPlayStatus(null);
       setWatched(true);
     } else if (nuevoValor === null) {
-      body = esSerie ? { watched: false, playStatus: null } : { playStatus: null };
+      body = (esSerie || esLibro) ? { watched: false, playStatus: null } : { playStatus: null };
       setPlayStatus(null);
       setWatched(false);
     } else {
@@ -187,6 +212,9 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
           {esJuego ? (
             // MANDO DE VIDEOJUEGO (para VIDEOJUEGO, sustituye al ojo de "Watched")
             <IconoMando className="h-6 w-6" />
+          ) : esLibro ? (
+            // LIBRO (sustituye al ojo de "Watched")
+            <IconoLibro className="h-6 w-6" />
           ) : watched ? (
             <IconoOjoAbierto className="h-6 w-6" />
           ) : (
@@ -194,7 +222,7 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
           )}
         </span>
         <span className="text-[10px] font-bold uppercase tracking-wider">
-          {esJuego ? estadoActual?.label || 'Played' : esSerie ? estadoActual?.label || 'Watched' : 'Watched'}
+          {esJuego ? estadoActual?.label || 'Played' : esSerie ? estadoActual?.label || 'Watched' : esLibro ? estadoActual?.label || 'Read' : 'Watched'}
         </span>
       </button>
       <button
@@ -216,7 +244,7 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
         <span className="text-[10px] font-bold uppercase tracking-wider">Watchlist</span>
       </button>
 
-      {/* MODAL DE ESTADO (VIDEOJUEGO o SERIE) */}
+      {/* MODAL DE ESTADO (VIDEOJUEGO, SERIE o LIBRO) */}
       {tieneModalEstado && modalAbierto && (
         <div
           className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
@@ -228,7 +256,7 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
           >
             <div className="px-4 pt-4 pb-3">
               <h3 className="text-blue-300 font-bold text-lg">
-                {esJuego ? 'Set your played status' : 'Set your watch status'}
+                {esJuego ? 'Set your played status' : esLibro ? 'Set your reading status' : 'Set your watch status'}
               </h3>
             </div>
 
@@ -238,7 +266,7 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
                   key={e.valor}
                   onClick={() => guardarEstado(e.valor)}
                   className={`w-full text-left px-4 py-3 border-t border-gray-800 flex items-start gap-3 transition cursor-pointer ${
-                    (esSerie ? estadoActual?.valor === e.valor : playStatus === e.valor) ? 'bg-[#3d4a6b]' : 'hover:bg-gray-800'
+                    (esSerie || esLibro ? estadoActual?.valor === e.valor : playStatus === e.valor) ? 'bg-[#3d4a6b]' : 'hover:bg-gray-800'
                   }`}
                 >
                   <span
@@ -258,8 +286,8 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
                 onClick={() => guardarEstado(null)}
                 className="w-full bg-[#3d4a6b] hover:bg-[#4a5980] text-white font-bold py-2.5 rounded flex items-center justify-center gap-2 transition cursor-pointer"
               >
-                {esJuego ? <IconoMando className="h-5 w-5" /> : <IconoOjoCerrado className="h-5 w-5" />}
-                {esJuego ? 'Mark as unplayed' : 'Mark as unwatched'}
+                {esJuego ? <IconoMando className="h-5 w-5" /> : esLibro ? <IconoLibro className="h-5 w-5" /> : <IconoOjoCerrado className="h-5 w-5" />}
+                {esJuego ? 'Mark as unplayed' : esLibro ? 'Mark as unread' : 'Mark as unwatched'}
               </button>
             </div>
           </div>
