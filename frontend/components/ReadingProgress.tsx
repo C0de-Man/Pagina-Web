@@ -16,13 +16,25 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
     if (tipo !== 'LIBRO') return;
     const token = localStorage.getItem('token');
     if (!token) return;
-    fetch(`http://localhost:3001/media/${mediaId}/status`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        setCapitulo({ actual: data.progresoActual ?? 0, total: data.progresoTotal ?? null });
-        setVolumen({ actual: data.progresoVolumenActual ?? 0, total: data.progresoVolumenTotal ?? null });
+
+    Promise.all([
+      fetch(`http://localhost:3001/media/${mediaId}/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then((res) => res.json()),
+      // Totales por defecto desde MAL (si este libro es un manga guardado
+      // desde ahí) — solo se usan cuando el usuario todavía no ha puesto
+      // un total a mano; en cuanto lo edite, ese valor manda siempre.
+      fetch(`http://localhost:3001/media/${mediaId}/manga-info`).then((res) => res.json()).catch(() => null),
+    ])
+      .then(([status, mangaInfo]) => {
+        setCapitulo({
+          actual: status.progresoActual ?? 0,
+          total: status.progresoTotal ?? mangaInfo?.totalCapitulos ?? null,
+        });
+        setVolumen({
+          actual: status.progresoVolumenActual ?? 0,
+          total: status.progresoVolumenTotal ?? mangaInfo?.totalVolumenes ?? null,
+        });
       })
       .catch(() => {});
   }, [mediaId, tipo]);

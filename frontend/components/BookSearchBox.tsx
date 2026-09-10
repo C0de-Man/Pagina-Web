@@ -32,7 +32,10 @@ export default function BookSearchBox() {
   };
 
   const getLocalData = (libro: any) => {
-    const campo = libro.fuente === 'mangadex' ? 'mangaDexId' : 'googleBooksId';
+    const campo =
+      libro.fuente === 'mal' ? 'malMangaId' :
+      libro.fuente === 'mangadex' ? 'mangaDexId' :
+      'googleBooksId';
     const local = myDb.find((m: any) => m[campo] === libro.origenId);
     return {
       dbId: local ? local.id : null,

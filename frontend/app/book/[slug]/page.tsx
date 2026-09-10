@@ -38,6 +38,23 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
     redirect(urlFicha(media));
   }
 
+  // Info extra de manga (vía MAL): volúmenes/capítulos totales, estado de
+  // publicación y fechas completas. Solo existe si el libro se guardó desde
+  // MAL (malMangaId); para libros de Google Books queda todo en null.
+  const resMangaInfo = await fetch(`http://localhost:3001/media/${media.id}/manga-info`, { cache: 'no-store' });
+  const mangaInfo = await resMangaInfo.json();
+
+  const formatFechaCorta = (fecha: string | null) => {
+    if (!fecha) return null;
+    const [y, m, d] = fecha.split('-');
+    const meses = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    if (!m) return y; // solo año, sin mes/día
+    return `${meses[parseInt(m, 10) - 1]}${d ? ` ${parseInt(d, 10)},` : ''} ${y}`;
+  };
+  const publicado = mangaInfo.fechaInicio
+    ? `${formatFechaCorta(mangaInfo.fechaInicio)}${mangaInfo.fechaFin ? ` - ${formatFechaCorta(mangaInfo.fechaFin)}` : mangaInfo.estado === 'Finished' ? '' : ' - ?'}`
+    : null;
+
   return (
     <main className="min-h-screen bg-gray-950 text-white font-sans pb-16">
 
@@ -55,10 +72,32 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
             <h1 className="text-4xl md:text-5xl font-extrabold text-white mb-2">{media.titulo}</h1>
             <div className="flex items-center gap-2 text-gray-400 mb-6">
               <span className="text-lg">{media.anio}</span>
-              <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">Book</span>
+              <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">
+                {mangaInfo.tipoMedia || 'Book'}
+              </span>
+              {mangaInfo.estado && (
+                <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold text-gray-300 flex-shrink-0">
+                  {mangaInfo.estado}
+                </span>
+              )}
             </div>
 
-            <MediaTabs sinopsis={media.sinopsis} detalles={null} />
+            <MediaTabs
+              sinopsis={media.sinopsis}
+              detalles={
+                mangaInfo.totalVolumenes || mangaInfo.totalCapitulos || publicado || mangaInfo.autores?.length || mangaInfo.revistas?.length
+                  ? {
+                      estudios: [],
+                      paises: [],
+                      mangaPublicado: publicado,
+                      mangaVolumenes: mangaInfo.totalVolumenes,
+                      mangaCapitulos: mangaInfo.totalCapitulos,
+                      mangaAutores: mangaInfo.autores || [],
+                      mangaRevistas: mangaInfo.revistas || [],
+                    }
+                  : null
+              }
+            />
           </div>
 
           <div className="flex-shrink-0 w-full md:w-72 pt-24 md:pt-32">

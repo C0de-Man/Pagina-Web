@@ -25,9 +25,11 @@ export default function BookCard({ libro, dbId, customPoster, fullWidth }: { lib
   // Si no, a la resolvedora que corresponda según de dónde vino el resultado.
   const href = dbId
     ? urlFicha({ ...libro, id: dbId, tipo: 'LIBRO' })
-    : libro.fuente === 'mangadex'
-      ? `/book/mangadex/${libro.origenId}`
-      : `/book/googlebooks/${libro.origenId}`;
+    : libro.fuente === 'mal'
+      ? `/book/mal/${libro.origenId}`
+      : libro.fuente === 'mangadex'
+        ? `/book/mangadex/${libro.origenId}`
+        : `/book/googlebooks/${libro.origenId}`;
 
   const posterUrl = miCustomPoster || libro.portada || null;
   const titulo = libro.titulo;

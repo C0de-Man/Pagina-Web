@@ -29,7 +29,8 @@ model Media {
   remakeChecked  Boolean @default(false)
   igdbId    Int?      @unique // un juego solo puede tener UNA fila (evita duplicados como los que tuvimos que limpiar a mano)
   googleBooksId String? @unique // id de Google Books
-  mangaDexId    String? @unique // id de MangaDex (UUID, string)
+  mangaDexId    String? @unique // id de MangaDex (UUID, string) — se mantiene como respaldo
+  malMangaId    Int?    @unique // id de manga en MyAnimeList (API oficial v2)
   sinopsisTraducciones Json? // caché: { "es-ES": "texto ya traducido", "fr-FR": "..." }
   createdAt DateTime  @default(now())
   gameLogs  GameLog[]

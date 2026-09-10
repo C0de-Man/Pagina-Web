@@ -910,6 +910,139 @@ app.get('/igdb/catalogo/page/:page', async (req, res) => {
   }
 });
 
+// --- MAL API OFICIAL v2 — MANGA ---
+// A diferencia de Jikan (wrapper no oficial, descartado antes por timeouts/
+// rate-limiting), esto es la API propia de MyAnimeList. Para lectura pública
+// (búsqueda/detalle) basta con el Client ID como header, sin OAuth completo.
+const MAL_API_BASE = 'https://api.myanimelist.net/v2';
+
+function headersMal() {
+  return { 'X-MAL-CLIENT-ID': process.env.MAL_CLIENT_ID };
+}
+
+async function buscarMangaMalApi(query, limit = 20) {
+  const url = `${MAL_API_BASE}/manga?q=${encodeURIComponent(query)}&limit=${limit}&fields=id,title,main_picture,authors{first_name,last_name},start_date`;
+  const response = await fetch(url, { headers: headersMal() });
+  if (!response.ok) throw new Error(`MAL respondió ${response.status}`);
+  const data = await response.json();
+  return (data.data || []).map((item) => item.node);
+}
+
+async function obtenerDetalleMangaMal(malMangaId) {
+  const url = `${MAL_API_BASE}/manga/${malMangaId}?fields=id,title,main_picture,synopsis,num_volumes,num_chapters,authors{first_name,last_name,role},status,start_date,end_date,mean,num_scoring_users,media_type,serialization{id,name}`;
+  const response = await fetch(url, { headers: headersMal() });
+  if (!response.ok) throw new Error(`MAL respondió ${response.status}`);
+  return response.json();
+}
+
+// --- FOTO DE UN AUTOR (endpoint de personas de MAL, aparte del de manga) ---
+async function obtenerFotoAutorMal(personaId) {
+  try {
+    const url = `${MAL_API_BASE}/people/${personaId}?fields=main_picture`;
+    const response = await fetch(url, { headers: headersMal() });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.main_picture?.medium || data.main_picture?.large || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// --- FOTO DE UN AUTOR (endpoint de personas de MAL, aparte del de manga) ---
+async function obtenerFotoAutorMal(personaId) {
+  try {
+    const url = `${MAL_API_BASE}/people/${personaId}?fields=main_picture`;
+    const response = await fetch(url, { headers: headersMal() });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.main_picture?.medium || data.main_picture?.large || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function nombreAutorMal(autoresMal) {
+  const primero = (autoresMal || [])[0]?.node;
+  if (!primero) return null;
+  return [primero.first_name, primero.last_name].filter(Boolean).join(' ') || null;
+}
+
+// --- BUSCAR MANGA EN MAL (endpoint propio, para pruebas/uso directo) ---
+app.get('/mal/manga/buscar', async (req, res) => {
+  try {
+    const searchQuery = req.query.q;
+    if (!searchQuery) return res.status(400).json({ error: 'Falta término' });
+    const resultados = await buscarMangaMalApi(searchQuery);
+    res.json(
+      resultados.map((item) => ({
+        malMangaId: item.id,
+        titulo: item.title,
+        autor: nombreAutorMal(item.authors),
+        anio: item.start_date ? parseInt(item.start_date.slice(0, 4), 10) : null,
+        portada: item.main_picture?.large || item.main_picture?.medium || null,
+      }))
+    );
+  } catch (error) {
+    console.error('ERROR EN GET /mal/manga/buscar:', error);
+    res.status(500).json({ error: 'Error al buscar manga en MAL' });
+  }
+});
+
+// --- DETALLES DE UN MANGA EN MAL: sinopsis, autor, tomos/capítulos totales ---
+app.get('/mal/manga/details/:malMangaId', async (req, res) => {
+  try {
+    const { malMangaId } = req.params;
+    const data = await obtenerDetalleMangaMal(malMangaId);
+    res.json({
+      sinopsis: data.synopsis || null,
+      autor: nombreAutorMal(data.authors),
+      estado: data.status || null,
+      totalVolumenes: data.num_volumes || null,
+      totalCapitulos: data.num_chapters || null,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /mal/manga/details/:malMangaId:', error);
+    res.status(500).json({ error: 'Error al obtener detalles del manga en MAL' });
+  }
+});
+
+// --- GUARDAR UN MANGA DESDE MAL (como tipo LIBRO — vive dentro de Books) ---
+app.post('/media/mal-manga', async (req, res) => {
+  try {
+    const { malMangaId } = req.body;
+    if (!malMangaId) return res.status(400).json({ error: 'Falta malMangaId' });
+
+    const malMangaIdNum = parseInt(malMangaId, 10);
+    const existente = await prisma.media.findFirst({ where: { malMangaId: malMangaIdNum } });
+    if (existente) return res.json(existente);
+
+    const data = await obtenerDetalleMangaMal(malMangaIdNum);
+    if (!data.id) return res.status(404).json({ error: 'Manga no encontrado en MAL' });
+
+    const portadaUrl = data.main_picture?.large || data.main_picture?.medium || null;
+
+    const nuevoMedia = await prisma.media.create({
+      data: {
+        malMangaId: malMangaIdNum,
+        titulo: data.title,
+        tituloOriginal: data.title,
+        tipo: 'LIBRO', // no MANGA — el manga vive dentro de Books, sin sección propia
+        anio: data.start_date ? parseInt(data.start_date.slice(0, 4), 10) : null,
+        portada: portadaUrl,
+        sinopsis: data.synopsis || null,
+      },
+    });
+
+    // No se guarda en Media (progresoTotal/progresoVolumenTotal viven en
+    // UserMedia, por usuario) — se manda solo en esta respuesta para que el
+    // frontend precargue el progreso al añadir el manga por primera vez.
+    res.json({ ...nuevoMedia, totalVolumenes: data.num_volumes || null, totalCapitulos: data.num_chapters || null });
+  } catch (error) {
+    console.error('ERROR EN POST /media/mal-manga:', error);
+    res.status(500).json({ error: 'Error al guardar el manga desde MAL' });
+  }
+});
+
 // --- TRADUCTOR AUTOMÁTICO (MyMemory, gratis, sin clave) ---
 // Solo se usa para juegos: es la única fuente de texto que no tenemos en varios idiomas de origen.
 async function traducirTexto(texto, idiomaDestino) {
@@ -2569,7 +2702,9 @@ app.get('/libros/buscar', async (req, res) => {
       }
     };
 
-    const buscarMangaDex = async () => {
+    // Respaldo: solo se usa si MAL falla del todo o no devuelve nada — MAL
+    // (API oficial) es la fuente principal de manga ahora.
+    const buscarMangaDexRespaldo = async () => {
       try {
         const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(searchQuery)}&limit=40&includes[]=cover_art&includes[]=author`;
         const response = await fetch(url);
@@ -2592,19 +2727,49 @@ app.get('/libros/buscar', async (req, res) => {
           };
         });
       } catch (e) {
-        console.error('Error buscando en MangaDex (búsqueda combinada):', e.message);
+        console.error('Error buscando en MangaDex (respaldo):', e.message);
         return [];
       }
     };
 
-    const [libros, manga] = await Promise.all([buscarGoogleBooks(), buscarMangaDex()]);
+    const buscarMangaMal = async () => {
+      try {
+        const resultados = await buscarMangaMalApi(searchQuery, 40);
+        if (resultados.length === 0) return buscarMangaDexRespaldo();
+        return resultados.map((item) => ({
+          fuente: 'mal',
+          origenId: item.id,
+          titulo: item.title,
+          autor: nombreAutorMal(item.authors),
+          anio: item.start_date ? parseInt(item.start_date.slice(0, 4), 10) : null,
+          portada: item.main_picture?.large || item.main_picture?.medium || null,
+        }));
+      } catch (e) {
+        console.error('Error buscando manga en MAL, usando MangaDex de respaldo:', e.message);
+        return buscarMangaDexRespaldo();
+      }
+    };
 
-    // Deduplicamos por título+autor normalizados — mismo criterio que ya
-    // usas con las ediciones de Google Books, por si el mismo título
-    // aparece en las dos fuentes a la vez.
+    const [libros, manga] = await Promise.all([buscarGoogleBooks(), buscarMangaMal()]);
+
+    // MAL (y MangaDex de respaldo) modelan cada manga como UNA obra (no por
+    // tomo). Los títulos de Google Books no siempre coinciden EXACTAMENTE
+    // con el de MAL (llevan año, edición, subtítulo suelto...), así que la
+    // igualdad estricta se queda corta — en vez de eso, se descarta
+    // cualquier resultado de Google Books cuyo título EMPIECE por el título
+    // de un manga ya encontrado en MAL (p. ej. "One Piece 1 (2018)" o "One
+    // Piece: El Guerrero..." quedan fuera si ya existe "One Piece" en MAL).
+    const normalizar = (t) => t.trim().toLowerCase();
+    const titulosManga = manga.map((m) => normalizar(m.titulo));
+
+    const librosSinSolapar = libros.filter((libro) => {
+      const tituloLibro = normalizar(libro.titulo);
+      return !titulosManga.some((tm) => tituloLibro === tm || tituloLibro.startsWith(tm));
+    });
+
     const vistos = new Set();
-    const combinados = [...libros, ...manga].filter((item) => {
-      const clave = `${item.titulo.trim().toLowerCase()}|${(item.autor || '').trim().toLowerCase()}`;
+    const combinados = [...manga, ...librosSinSolapar].filter((item) => {
+      const clave = normalizar(item.titulo);
       if (vistos.has(clave)) return false;
       vistos.add(clave);
       return true;
@@ -3442,6 +3607,58 @@ app.get('/friends/activity', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('ERROR EN GET /friends/activity:', error);
     res.status(500).json({ error: 'Error al obtener la actividad de tus amigos' });
+  }
+});
+
+// --- INFO EXTRA DE MANGA (vía MAL): volúmenes/capítulos totales, estado de
+// publicación y fechas completas de inicio/fin — MAL ya lo tiene todo en la
+// misma consulta de detalle, no hace falta ningún cálculo aparte.
+app.get('/media/:id/manga-info', async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id, 10);
+    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { malMangaId: true } });
+    if (!media?.malMangaId) return res.json({ totalVolumenes: null, totalCapitulos: null, estado: null, fechaInicio: null, fechaFin: null });
+
+    const ESTADOS_MANGA_MAL = {
+      finished: 'Finished',
+      currently_publishing: 'Publishing',
+      not_yet_published: 'Not yet published',
+      on_hiatus: 'On hiatus',
+    };
+    const TIPOS_MEDIA_MAL = {
+      manga: 'Manga',
+      novel: 'Novel',
+      light_novel: 'Light Novel',
+      one_shot: 'One-shot',
+      doujinshi: 'Doujinshi',
+      manhwa: 'Manhwa',
+      manhua: 'Manhua',
+      oel: 'OEL',
+    };
+    const data = await obtenerDetalleMangaMal(media.malMangaId);
+    res.json({
+      tipoMedia: TIPOS_MEDIA_MAL[data.media_type] || data.media_type || null,
+      revistas: (data.serialization || [])
+        .filter((s) => s.node?.name)
+        .map((s) => ({ id: s.node.id, nombre: s.node.name })),
+      totalVolumenes: data.num_volumes || null,
+      totalCapitulos: data.num_chapters || null,
+      estado: ESTADOS_MANGA_MAL[data.status] || data.status || null,
+      fechaInicio: data.start_date || null,
+      fechaFin: data.end_date || null,
+      autores: await Promise.all(
+        (data.authors || [])
+          .filter((a) => a.node?.first_name || a.node?.last_name)
+          .map(async (a) => ({
+            nombre: [a.node?.first_name, a.node?.last_name].filter(Boolean).join(' '),
+            rol: a.role || null,
+            foto: a.node?.id ? await obtenerFotoAutorMal(a.node.id) : null,
+          }))
+      ),
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/manga-info:', error);
+    res.status(500).json({ error: 'Error al obtener la información del manga' });
   }
 });
 
@@ -9171,7 +9388,7 @@ app.get('/media/:id/rating', async (req, res) => {
 
     let externaAvg = null;
     let externaPeso = 0; // número real de votos que respaldan esa media externa
-    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true, igdbId: true, tipo: true } });
+    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true, igdbId: true, malMangaId: true, tipo: true } });
 
     if (media?.tmdbId) {
       try {
@@ -9214,6 +9431,15 @@ app.get('/media/:id/rating', async (req, res) => {
         if (igdbData[0]?.total_rating) {
           externaAvg = igdbData[0].total_rating / 10;
           externaPeso = igdbData[0].total_rating_count || 1;
+        }
+      } catch (e) { }
+    } else if (media?.malMangaId) {
+      try {
+        const malData = await obtenerDetalleMangaMal(media.malMangaId);
+        // MAL ya usa escala 0-10, igual que el resto del proyecto.
+        if (malData.mean) {
+          externaAvg = malData.mean;
+          externaPeso = malData.num_scoring_users || 1;
         }
       } catch (e) { }
     }

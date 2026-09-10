@@ -136,6 +136,21 @@ export default function MediaTabs({
       {/* CREW */}
       {tab === 'crew' && (
         <div className="flex flex-wrap gap-x-6 gap-y-5">
+          {detalles?.mangaAutores?.length > 0 && (
+            detalles.mangaAutores.map((a: any, i: number) => (
+              <div key={i} className="w-24 text-center">
+                <div className="w-16 h-16 mx-auto rounded-full overflow-hidden bg-gray-800 mb-2 border border-gray-700 flex items-center justify-center text-gray-600 text-[10px]">
+                  {a.foto ? (
+                    <img src={a.foto} alt={a.nombre} className="w-full h-full object-cover" />
+                  ) : (
+                    'No photo'
+                  )}
+                </div>
+                <div className="text-xs font-semibold text-white leading-tight">{a.nombre}</div>
+                <div className="text-xs text-gray-500 leading-tight mt-0.5">{a.rol || 'Author'}</div>
+              </div>
+            ))
+          )}
           {detalles?.director && (
             <Link href={urlPersona(detalles.director.id, detalles.director.nombre)} className="w-20 text-center group">
               <div className="w-16 h-16 mx-auto rounded-full overflow-hidden bg-gray-800 mb-2 border border-gray-700 group-hover:border-gray-400 transition">
@@ -162,9 +177,11 @@ export default function MediaTabs({
               <div className="text-xs text-gray-500 leading-tight mt-0.5">Writer</div>
             </Link>
           ))}
-          {!detalles?.director && (!detalles?.guionistas || detalles.guionistas.length === 0) && (
-            <p className="text-gray-500 text-sm">No crew information available.</p>
-          )}
+          {(!detalles?.mangaAutores || detalles.mangaAutores.length === 0) &&
+            !detalles?.director &&
+            (!detalles?.guionistas || detalles.guionistas.length === 0) && (
+              <p className="text-gray-500 text-sm">No crew information available.</p>
+            )}
         </div>
       )}
 
@@ -172,9 +189,13 @@ export default function MediaTabs({
       {tab === 'mas' && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 text-sm pb-10">
           <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Studio</div>
+            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">
+              {detalles?.mangaRevistas !== undefined ? 'Magazines' : 'Studio'}
+            </div>
             <div className="text-gray-200">
-              {detalles?.estudios?.length > 0 ? (
+              {detalles?.mangaRevistas?.length > 0 ? (
+                detalles.mangaRevistas.map((r: any) => r.nombre).join(', ')
+              ) : detalles?.estudios?.length > 0 ? (
                 detalles.estudios.map((e: any, i: number) => (
                   <span key={e.id ?? i}>
                     {e.id ? (
@@ -196,6 +217,12 @@ export default function MediaTabs({
             <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Country</div>
             <div className="text-gray-200">{detalles?.paises?.length > 0 ? detalles.paises.join(', ') : 'Not available'}</div>
           </div>
+          {detalles?.mangaPublicado && (
+            <div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Published</div>
+              <div className="text-gray-200">{detalles.mangaPublicado}</div>
+            </div>
+          )}
           {seriesInfo && (
             <div>
               <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Total episodes</div>
