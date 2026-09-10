@@ -7051,6 +7051,12 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
 
     // En pelis el director sale en credits.crew con job "Director". En
     // series TMDB no lo pone ahí — el creador va aparte, en created_by.
+    // TMDB devuelve genre_ids solo en listados; en la ficha de detalle (esta
+    // misma consulta) ya viene el array "genres" completo con {id, name}, así
+    // que no hace falta pedir nada aparte. 99 = Documentary, mismo id tanto
+    // para /movie como para /tv.
+    const esDocumental = (data.genres || []).some((g) => g.id === 99);
+
     const director = esSerie
       ? (data.created_by?.[0]
         ? { name: data.created_by[0].name, id: data.created_by[0].id, profile_path: data.created_by[0].profile_path }
@@ -7074,6 +7080,7 @@ app.get('/tmdb/details/:tmdbId', async (req, res) => {
       fechaEstreno: data.release_date || data.first_air_date || null,
       numeroTemporadas: esSerie ? (data.number_of_seasons || null) : null,
       estadoSerie: esSerie ? (data.status || null) : null, // "Returning Series" | "Ended" | "Canceled"...
+      esDocumental,
       presupuesto: data.budget || 0,
       ganancias: data.revenue || 0,
       // Antes solo el nombre (string). Ahora {id, nombre}: hace falta el id

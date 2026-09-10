@@ -110,6 +110,11 @@ export default async function SeriesDetail({ params }: { params: Promise<{ slug:
                                     {detalles.estadoSerie}
                                 </span>
                             )}
+                            {detalles?.esDocumental && (
+                                <span className="bg-blue-900/60 border border-blue-700 px-2 py-1 rounded text-xs font-semibold text-blue-300 flex-shrink-0">
+                                    Documentary
+                                </span>
+                            )}
                         </div>
 
                         <MediaTabs sinopsis={media.sinopsis} detalles={detalles} tmdbId={media.tmdbId} mediaId={media.id} tipo={media.tipo} />

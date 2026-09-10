@@ -86,12 +86,18 @@ export default async function MediaDetail({ params }: { params: Promise<{ slug: 
             <div className="flex items-center gap-2 text-gray-400 mb-6">
               <span className="text-lg">{fechaCompleta || media.anio}</span>
               {duracion && <span className="text-lg text-gray-500">({duracion})</span>}
-              <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{ETIQUETA_TIPO[media.tipo] || media.tipo}</span>
+              {detalles?.esDocumental ? (
+                <span className="bg-blue-900/60 border border-blue-700 px-2 py-1 rounded text-xs font-semibold text-blue-300 flex-shrink-0">
+                  Documentary
+                </span>
+              ) : (
+                <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">{ETIQUETA_TIPO[media.tipo] || media.tipo}</span>
+              )}
             </div>
 
             <RemakeOfBadge remakeOf={media.remakeOf} />
 
-            <MediaTabs sinopsis={media.sinopsis} detalles={detalles} />
+            <MediaTabs sinopsis={media.sinopsis} detalles={detalles} tmdbId={media.tmdbId} mediaId={media.id} tipo={media.tipo} />
           </div>
 
           <div className="flex-shrink-0 w-full md:w-72 pt-24 md:pt-32">
