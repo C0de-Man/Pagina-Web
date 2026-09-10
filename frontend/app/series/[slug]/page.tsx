@@ -112,7 +112,7 @@ export default async function SeriesDetail({ params }: { params: Promise<{ slug:
                             )}
                         </div>
 
-                        <MediaTabs sinopsis={media.sinopsis} detalles={detalles} />
+                        <MediaTabs sinopsis={media.sinopsis} detalles={detalles} tmdbId={media.tmdbId} mediaId={media.id} tipo={media.tipo} />
 
                         <SeasonsList mediaId={media.id} tmdbId={media.tmdbId} />
                     </div>

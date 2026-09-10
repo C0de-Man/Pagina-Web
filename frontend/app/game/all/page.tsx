@@ -38,6 +38,7 @@ export default async function TodosLosJuegos({
   const resolvedParams = await searchParams;
   const currentPage = parseInt(resolvedParams.page || '1');
   const esPopulares = resolvedParams.tipo === 'popular';
+  const esTop = resolvedParams.tipo === 'top';
 
   // Querystring con TODOS los filtros activos: se reenvía al backend y también
   // se usa para no perderlos al cambiar de página
@@ -52,17 +53,30 @@ export default async function TodosLosJuegos({
   if (resolvedParams.ratingMin) filtros.set('ratingMin', resolvedParams.ratingMin);
   if (resolvedParams.ratingMax) filtros.set('ratingMax', resolvedParams.ratingMax);
 
-  const modo = esPopulares ? 'popular' : 'year';
-  const paramsBackend = new URLSearchParams(filtros);
-  paramsBackend.set('modo', modo);
-  if (!resolvedParams.anio && !resolvedParams.estado && modo === 'year') {
-    paramsBackend.set('anio', String(currentYear));
-  }
+  let juegos: any[] = [];
+  let totalPaginas = 1;
 
-  const res = await fetch(`http://localhost:3001/igdb/catalogo/page/${currentPage}?${paramsBackend.toString()}`, { cache: 'no-store' });
-  const data = await res.json();
-  const juegos = data.results || [];
-  const totalPaginas = data.totalPaginas || 1;
+  if (esTop) {
+    // /igdb/top/page/:page no calcula un total real (mismo patrón simple que
+    // las rutas equivalentes de movies/series) — se trata como "desconocido"
+    // y la barra de paginación nunca deshabilita "Next", igual que en esas.
+    const res = await fetch(`http://localhost:3001/igdb/top/page/${currentPage}`, { cache: 'no-store' });
+    const data = await res.json();
+    juegos = data.results || [];
+    totalPaginas = currentPage + 6; // ventana de paginación sin tope real conocido
+  } else {
+    const modo = esPopulares ? 'popular' : 'year';
+    const paramsBackend = new URLSearchParams(filtros);
+    paramsBackend.set('modo', modo);
+    if (!resolvedParams.anio && !resolvedParams.estado && modo === 'year') {
+      paramsBackend.set('anio', String(currentYear));
+    }
+
+    const res = await fetch(`http://localhost:3001/igdb/catalogo/page/${currentPage}?${paramsBackend.toString()}`, { cache: 'no-store' });
+    const data = await res.json();
+    juegos = data.results || [];
+    totalPaginas = data.totalPaginas || 1;
+  }
 
   // TU base de datos local
   const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
@@ -80,9 +94,16 @@ export default async function TodosLosJuegos({
     };
   };
 
-  // Listas para los desplegables del sidebar
-  const resFiltros = await fetch('http://localhost:3001/igdb/filtros', { cache: 'no-store' });
-  const { generos, plataformas } = await resFiltros.json();
+  // Listas para los desplegables del sidebar — no hace falta pedirlas en
+  // modo Top, ya que ahí no se muestra el sidebar.
+  let generos: any[] = [];
+  let plataformas: any[] = [];
+  if (!esTop) {
+    const resFiltros = await fetch('http://localhost:3001/igdb/filtros', { cache: 'no-store' });
+    const data = await resFiltros.json();
+    generos = data.generos || [];
+    plataformas = data.plataformas || [];
+  }
 
   const sufijoTipo = filtros.toString() ? `&${filtros.toString()}` : '';
   const urlPagina = (p: number) => `/game/all?page=${p}${sufijoTipo}`;
@@ -94,14 +115,14 @@ export default async function TodosLosJuegos({
 
         <div className="border-b border-gray-800 pb-4 mb-6 flex justify-between items-center">
           <h1 className="text-2xl font-bold tracking-wide">
-            {esPopulares ? 'Popular' : `Games ${currentYear}`}
+            {esTop ? 'Top Rated' : esPopulares ? 'Popular' : `Games ${currentYear}`}
             <span className="text-sm font-normal text-gray-500 ml-3 bg-gray-900 px-2 py-1 rounded">Page {currentPage}</span>
           </h1>
           <span className="text-sm text-gray-500 font-semibold">Showing {juegos.length} titles</span>
         </div>
 
         <div className="flex flex-col lg:flex-row gap-6">
-          <FiltersSidebar generos={generos || []} plataformas={plataformas || []} />
+          {!esTop && <FiltersSidebar generos={generos || []} plataformas={plataformas || []} />}
 
           <div className="flex-grow">
             {/* CUADRÍCULA */}

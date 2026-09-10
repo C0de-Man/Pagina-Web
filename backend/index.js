@@ -580,6 +580,102 @@ app.get('/igdb/popular', async (req, res) => {
   }
 });
 
+// --- TOP JUEGOS: misma idea que arriba pero con IGDB (total_rating, escala
+// 0-100, se pasa a 0-10 para combinar con la escala local) ---
+const M_BAYESIANO_GAME = 200; // en número de votos (total_rating_count)
+
+// --- POOL DE CANDIDATOS PARA TOP JUEGOS ---
+// IGDB admite hasta 500 resultados por consulta, así que no hace falta
+// paginar como con TMDB: dos consultas grandes (más votados + mejor
+// puntuados con un mínimo) bastan como pool de candidatos. Mismo filtro de
+// "solo juegos base" que ya tenías: fuera DLCs, expansiones, bundles/
+// colecciones, remasters, ports, updates y ediciones/SKUs concretos.
+async function obtenerPoolTopGames() {
+  const token = await getIgdbToken();
+  const headers = {
+    'Client-ID': process.env.IGDB_CLIENT_ID,
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'text/plain',
+  };
+  const filtroBase = 'total_rating != null & version_parent = null & (game_type = null | game_type = 0 | game_type = 8)';
+  const bodyPorVotos = `fields name,cover.url,first_release_date,summary,total_rating,total_rating_count; where ${filtroBase}; sort total_rating_count desc; limit 500;`;
+  const bodyPorNota = `fields name,cover.url,first_release_date,summary,total_rating,total_rating_count; where ${filtroBase} & total_rating_count >= 30; sort total_rating desc; limit 500;`;
+
+  const [rv, rn] = await Promise.all([
+    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: bodyPorVotos }),
+    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: bodyPorNota }),
+  ]);
+  const [dv, dn] = await Promise.all([rv.json(), rn.json()]);
+  const porId = new Map();
+  for (const g of [...(dv || []), ...(dn || [])]) porId.set(g.id, g);
+  return Array.from(porId.values()).map(arreglarCoverIgdb);
+}
+
+async function calcularRatingCombinadoIgdb(juegos) {
+  const igdbIds = juegos.map((j) => j.id).filter(Boolean);
+  if (igdbIds.length === 0) return juegos.map((j) => ({ ...j, ratingCombinado: (j.total_rating || 0) / 10 }));
+
+  const mediaLocal = await prisma.media.findMany({
+    where: { igdbId: { in: igdbIds } },
+    select: { id: true, igdbId: true },
+  });
+  const mediaIdPorIgdbId = new Map(mediaLocal.map((m) => [m.igdbId, m.id]));
+  const mediaIds = mediaLocal.map((m) => m.id);
+
+  const ratingsLocales = mediaIds.length > 0
+    ? await prisma.userMedia.findMany({
+      where: { mediaId: { in: mediaIds }, rating: { not: null } },
+      select: { mediaId: true, rating: true },
+    })
+    : [];
+  const sumaLocalPorMediaId = new Map();
+  const countLocalPorMediaId = new Map();
+  for (const r of ratingsLocales) {
+    sumaLocalPorMediaId.set(r.mediaId, (sumaLocalPorMediaId.get(r.mediaId) || 0) + r.rating);
+    countLocalPorMediaId.set(r.mediaId, (countLocalPorMediaId.get(r.mediaId) || 0) + 1);
+  }
+
+  return juegos.map((juego) => {
+    const mediaId = mediaIdPorIgdbId.get(juego.id);
+    const sumaLocal = mediaId ? (sumaLocalPorMediaId.get(mediaId) || 0) : 0;
+    const countLocal = mediaId ? (countLocalPorMediaId.get(mediaId) || 0) : 0;
+    const externaAvg = (juego.total_rating || 0) / 10;
+    const externaPeso = juego.total_rating_count || 0;
+    const totalVotos = countLocal + externaPeso;
+    const ratingCombinado = totalVotos > 0 ? (sumaLocal + externaAvg * externaPeso) / totalVotos : 0;
+    return { ...juego, ratingCombinado };
+  });
+}
+
+// --- TOP JUEGOS, PAGINADO DE 42 EN 42 (nota bayesiana, ver arriba) ---
+app.get('/igdb/top/page/:page', async (req, res) => {
+  try {
+    const page = parseInt(req.params.page) || 1;
+    const itemsPerPage = 42;
+
+    const pool = await obtenerPoolTopGames();
+    if (pool.length === 0) return res.json({ page, results: [] });
+
+    const conRatingCombinado = await calcularRatingCombinadoIgdb(pool);
+    const mediaGlobal = conRatingCombinado.reduce((acc, j) => acc + ((j.total_rating || 0) / 10), 0) / conRatingCombinado.length;
+
+    const conBayesiano = conRatingCombinado.map((j) => ({
+      ...j,
+      scoreBayesiano: calcularBayesiano(j.total_rating_count || 0, j.ratingCombinado, M_BAYESIANO_GAME, mediaGlobal),
+    }));
+    conBayesiano.sort((a, b) => b.scoreBayesiano - a.scoreBayesiano);
+
+    const startIndex = (page - 1) * itemsPerPage;
+    const pagina = conBayesiano.slice(startIndex, startIndex + itemsPerPage);
+
+    const final = await mezclarCaratulasJuegos(pagina, getUserIdOpcional(req));
+    res.json({ page, results: final });
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/top/page:', error);
+    res.status(500).json({ error: 'Error al obtener el top de juegos' });
+  }
+});
+
 // --- POPULARES HISTÓRICOS, PAGINADOS DE 42 EN 42 ---
 app.get('/igdb/popular/page/:page', async (req, res) => {
   try {
@@ -2426,7 +2522,7 @@ app.get('/libros/buscar', async (req, res) => {
 
     const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
 
-        const buscarGoogleBooks = async () => {
+    const buscarGoogleBooks = async () => {
       try {
         const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=40&key=${apiKey}`;
         const response = await fetch(url);
@@ -3346,6 +3442,50 @@ app.get('/friends/activity', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('ERROR EN GET /friends/activity:', error);
     res.status(500).json({ error: 'Error al obtener la actividad de tus amigos' });
+  }
+});
+
+// --- INFO EXTRA DE SERIE: total de episodios, duración total real, cuántos
+// de TUS usuarios la tienen en cada estado, y los episodios mejor/peor
+// valorados según la nota media que le hayan puesto (UserEpisodeWatch.rating) ---
+app.get('/media/:id/series-info', async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id, 10);
+    const media = await prisma.media.findUnique({ where: { id: mediaId } });
+    if (!media || media.tipo !== 'SERIE' || !media.tmdbId) {
+      return res.status(404).json({ error: 'No es una serie válida' });
+    }
+
+    const apiKey = process.env.TMDB_API_KEY;
+    const seriesRes = await fetch(`https://api.themoviedb.org/3/tv/${media.tmdbId}?api_key=${apiKey}`);
+    const seriesData = await seriesRes.json();
+    const temporadas = (seriesData.seasons || []).filter((s) => s.season_number > 0);
+
+    // Duración/episodios reales: se recorren todas las temporadas (mismo
+    // patrón que calcularDuracionMediaEpisodios) para sumar minutos y contar
+    // episodios de verdad, no una estimación por temporada.
+    const detallesTemporadas = await Promise.all(
+      temporadas.map((s) =>
+        fetch(`https://api.themoviedb.org/3/tv/${media.tmdbId}/season/${s.season_number}?api_key=${apiKey}`)
+          .then((r) => r.json())
+          .catch(() => null)
+      )
+    );
+
+    let totalEpisodios = 0;
+    let totalMinutos = 0;
+    for (const det of detallesTemporadas) {
+      if (!det?.episodes) continue;
+      for (const ep of det.episodes) {
+        totalEpisodios++;
+        if (ep.runtime) totalMinutos += ep.runtime;
+      }
+    }
+
+    res.json({ totalEpisodios, totalMinutos });
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/series-info:', error);
+    res.status(500).json({ error: 'Error al obtener la información de la serie' });
   }
 });
 
@@ -4960,6 +5100,33 @@ function getRegion(req) {
   return req.query.region || 'ES';
 }
 
+// --- CARÁTULAS EN INGLÉS PARA TOP (pelis/series) ---
+// A diferencia de conCaratulasIngles (que reconstruye la URL de una página
+// concreta), aquí el pool viene de combinar varias búsquedas distintas — no
+// hay una única "URL de origen" que reconstruir. Se pide el póster/backdrop
+// en inglés item por item, pero SOLO para los 42 de la página final que se
+// va a mostrar, no para los ~400 candidatos del pool completo.
+async function conCaratulasInglesPorItem(items, apiKey, tipoTmdb) {
+  return Promise.all(
+    items.map(async (item) => {
+      try {
+        const r = await fetch(`https://api.themoviedb.org/3/${tipoTmdb}/${item.id}?api_key=${apiKey}&language=en-US`);
+        const d = await r.json();
+        if (d && !d.status_code) {
+          return {
+            ...item,
+            poster_path: d.poster_path || item.poster_path,
+            backdrop_path: d.backdrop_path || item.backdrop_path,
+          };
+        }
+        return item;
+      } catch (e) {
+        return item;
+      }
+    })
+  );
+}
+
 // --- CARÁTULAS/BANNERS DE CATÁLOGO SIEMPRE EN INGLÉS, AUNQUE EL TÍTULO/
 // SINOPSIS RESPETEN TU IDIOMA ---
 // TMDB devuelve una imagen distinta según el "language" que le pidas (a
@@ -5919,6 +6086,38 @@ function construirFiltrosDiscoverTv(query) {
   return params;
 }
 
+// --- TOP SERIES, PAGINADO DE 42 EN 42 (nota bayesiana, ver arriba) ---
+app.get('/tmdb/tv/top/page/:page', async (req, res) => {
+  try {
+    const page = parseInt(req.params.page) || 1;
+    const apiKey = process.env.TMDB_API_KEY;
+    const lang = getLang(req);
+    const itemsPerPage = 42;
+
+    const pool = await obtenerPoolTopTv(apiKey, lang);
+    if (pool.length === 0) return res.json({ page, results: [] });
+
+    const conRatingCombinado = await calcularRatingCombinadoTmdb(pool, 'SERIE');
+    const mediaGlobal = conRatingCombinado.reduce((acc, s) => acc + (s.vote_average || 0), 0) / conRatingCombinado.length;
+
+    const conBayesiano = conRatingCombinado.map((s) => ({
+      ...s,
+      scoreBayesiano: calcularBayesiano(s.vote_count || 0, s.ratingCombinado, M_BAYESIANO_TV, mediaGlobal),
+    }));
+    conBayesiano.sort((a, b) => b.scoreBayesiano - a.scoreBayesiano);
+
+    const startIndex = (page - 1) * itemsPerPage;
+    const pagina = conBayesiano.slice(startIndex, startIndex + itemsPerPage);
+    const paginaConCaratulas = await conCaratulasInglesPorItem(pagina, apiKey, 'tv');
+
+    const resultadoFinal = await mezclarCustomPosters(paginaConCaratulas, getUserIdOpcional(req));
+    res.json({ page, results: resultadoFinal });
+  } catch (error) {
+    console.error('ERROR EN GET /tmdb/tv/top/page:', error);
+    res.status(500).json({ error: 'Error al obtener el top de series' });
+  }
+});
+
 // --- SERIES MÁS POPULARES DE LA HISTORIA, PAGINADAS DE 42 EN 42 ---
 app.get('/tmdb/tv/popular-historico/page/:page', async (req, res) => {
   try {
@@ -6027,6 +6226,138 @@ app.get('/tmdb/popular-historico', async (req, res) => {
     res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: "Error al obtener las populares históricas" });
+  }
+});
+
+// --- TOP PELÍCULAS/SERIES: ordenadas por la nota COMBINADA (community +
+// externa), la MISMA fórmula que ya usa GET /media/:id/rating. Se parte de
+// las mejor valoradas en TMDB (vote_average, con un mínimo de votos para
+// que una única valoración de 10 no encabece la lista) y, sobre esa página
+// ya traída, se recalcula la nota combinando tus propios usuarios y se
+// reordena antes de devolver — la misma fórmula que la ficha, aplicada en
+// lote a toda la página.
+
+// Umbral alto a propósito: con pocos votos, un título muy reciente con
+// unas pocas valoraciones entusiastas puede inflar la media por encima de
+// clásicos con miles de votos reales — mismo problema que en juegos.
+// --- TOP: nota ponderada tipo IMDB (media bayesiana) ---
+// Sin esto, un título con 2 votos de 10 le ganaba a otro con 1000 votos
+// entre 9 y 10 — la media simple no distingue "pocos votos perfectos" de
+// "muchísimos votos muy buenos". La fórmula pondera cada nota según cuántos
+// votos la respaldan: con pocos votos, el resultado se acerca a la media
+// general del catálogo (C); con muchos votos, se acerca a su propia nota (R).
+function calcularBayesiano(v, R, m, C) {
+  if (v + m === 0) return 0;
+  return (v / (v + m)) * R + (m / (v + m)) * C;
+}
+
+const M_BAYESIANO_MOVIE = 1000; // votos que hacen falta para que la nota propia pese tanto como la media general
+const M_BAYESIANO_TV = 300;
+
+// --- POOL DE CANDIDATOS PARA TOP PELÍCULAS ---
+// Se combinan dos búsquedas (más votadas + mejor puntuadas con un mínimo de
+// votos) para no perder ni los clásicos con miles de votos ni las joyas con
+// menos volumen pero buena nota — luego se puntúan y ordenan todas juntas
+// con la fórmula de arriba.
+async function obtenerPoolTopMovies(apiKey, lang) {
+  const PAGINAS = 10; // 10 páginas x 20 = 200 por búsqueda, 400 combinadas como máximo
+  const porVotos = [];
+  const porNota = [];
+  for (let p = 1; p <= PAGINAS; p++) {
+    const urlVotos = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${lang}&sort_by=vote_count.desc&page=${p}`;
+    const urlNota = `https://api.themoviedb.org/3/discover/movie?api_key=${apiKey}&language=${lang}&sort_by=vote_average.desc&vote_count.gte=50&page=${p}`;
+    const [rv, rn] = await Promise.all([fetch(urlVotos), fetch(urlNota)]);
+    const [dv, dn] = await Promise.all([rv.json(), rn.json()]);
+    if (dv.results) porVotos.push(...dv.results);
+    if (dn.results) porNota.push(...dn.results);
+  }
+  const porId = new Map();
+  for (const m of [...porVotos, ...porNota]) porId.set(m.id, m);
+  return Array.from(porId.values());
+}
+
+async function obtenerPoolTopTv(apiKey, lang) {
+  const PAGINAS = 10;
+  const porVotos = [];
+  const porNota = [];
+  for (let p = 1; p <= PAGINAS; p++) {
+    const urlVotos = `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&language=${lang}&sort_by=vote_count.desc&page=${p}`;
+    const urlNota = `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&language=${lang}&sort_by=vote_average.desc&vote_count.gte=50&page=${p}`;
+    const [rv, rn] = await Promise.all([fetch(urlVotos), fetch(urlNota)]);
+    const [dv, dn] = await Promise.all([rv.json(), rn.json()]);
+    if (dv.results) porVotos.push(...dv.results);
+    if (dn.results) porNota.push(...dn.results);
+  }
+  const porId = new Map();
+  for (const s of [...porVotos, ...porNota]) porId.set(s.id, s);
+  return Array.from(porId.values());
+}
+
+async function calcularRatingCombinadoTmdb(items, tipoFijo) {
+  const tmdbIds = items.map((i) => i.id).filter(Boolean);
+  if (tmdbIds.length === 0) return items.map((i) => ({ ...i, ratingCombinado: i.vote_average || 0 }));
+
+  const mediaLocal = await prisma.media.findMany({
+    where: { tmdbId: { in: tmdbIds }, tipo: tipoFijo },
+    select: { id: true, tmdbId: true },
+  });
+  const mediaIdPorTmdbId = new Map(mediaLocal.map((m) => [m.tmdbId, m.id]));
+  const mediaIds = mediaLocal.map((m) => m.id);
+
+  const ratingsLocales = mediaIds.length > 0
+    ? await prisma.userMedia.findMany({
+      where: { mediaId: { in: mediaIds }, rating: { not: null } },
+      select: { mediaId: true, rating: true },
+    })
+    : [];
+  const sumaLocalPorMediaId = new Map();
+  const countLocalPorMediaId = new Map();
+  for (const r of ratingsLocales) {
+    sumaLocalPorMediaId.set(r.mediaId, (sumaLocalPorMediaId.get(r.mediaId) || 0) + r.rating);
+    countLocalPorMediaId.set(r.mediaId, (countLocalPorMediaId.get(r.mediaId) || 0) + 1);
+  }
+
+  return items.map((item) => {
+    const mediaId = mediaIdPorTmdbId.get(item.id);
+    const sumaLocal = mediaId ? (sumaLocalPorMediaId.get(mediaId) || 0) : 0;
+    const countLocal = mediaId ? (countLocalPorMediaId.get(mediaId) || 0) : 0;
+    const externaAvg = item.vote_average || 0;
+    const externaPeso = item.vote_count || 0;
+    const totalVotos = countLocal + externaPeso;
+    const ratingCombinado = totalVotos > 0 ? (sumaLocal + externaAvg * externaPeso) / totalVotos : 0;
+    return { ...item, ratingCombinado };
+  });
+}
+
+// --- TOP PELÍCULAS, PAGINADO DE 42 EN 42 (nota bayesiana, ver arriba) ---
+app.get('/tmdb/top/page/:page', async (req, res) => {
+  try {
+    const page = parseInt(req.params.page) || 1;
+    const apiKey = process.env.TMDB_API_KEY;
+    const lang = getLang(req);
+    const itemsPerPage = 42;
+
+    const pool = await obtenerPoolTopMovies(apiKey, lang);
+    if (pool.length === 0) return res.json({ page, results: [] });
+
+    const conRatingCombinado = await calcularRatingCombinadoTmdb(pool, 'PELICULA');
+    const mediaGlobal = conRatingCombinado.reduce((acc, m) => acc + (m.vote_average || 0), 0) / conRatingCombinado.length;
+
+    const conBayesiano = conRatingCombinado.map((m) => ({
+      ...m,
+      scoreBayesiano: calcularBayesiano(m.vote_count || 0, m.ratingCombinado, M_BAYESIANO_MOVIE, mediaGlobal),
+    }));
+    conBayesiano.sort((a, b) => b.scoreBayesiano - a.scoreBayesiano);
+
+    const startIndex = (page - 1) * itemsPerPage;
+    const pagina = conBayesiano.slice(startIndex, startIndex + itemsPerPage);
+    const paginaConCaratulas = await conCaratulasInglesPorItem(pagina, apiKey, 'movie');
+
+    const resultadoFinal = await mezclarCustomPosters(paginaConCaratulas, getUserIdOpcional(req));
+    res.json({ page, results: resultadoFinal });
+  } catch (error) {
+    console.error('ERROR EN GET /tmdb/top/page:', error);
+    res.status(500).json({ error: 'Error al obtener el top de películas' });
   }
 });
 

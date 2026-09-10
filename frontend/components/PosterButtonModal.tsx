@@ -70,15 +70,24 @@ export default function PosterButtonModal({ tmdbId, mediaId, tipo }: { tmdbId: n
             alert('Tienes que iniciar sesión para guardar tu carátula.');
             return;
         }
-        await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
-            method: 'PATCH',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ newPosterUrl: url }),
-        });
-        window.location.reload();
+        try {
+            const res = await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ newPosterUrl: url }),
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || `El servidor respondió ${res.status}`);
+            }
+            window.location.reload();
+        } catch (error) {
+            console.error('Error al guardar la carátula', error);
+            alert('No se pudo guardar la carátula. Revisa la consola del backend para más detalles.');
+        }
     };
 
     const guardarBannerRecortado = async (dataUrl: string) => {

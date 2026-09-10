@@ -20,20 +20,39 @@ export default function MediaTabs({
   sinopsis,
   detalles,
   tmdbId,
+  mediaId,
+  tipo,
 }: {
   sinopsis: string;
   detalles: any;
   tmdbId?: number;
+  mediaId?: number;
+  tipo?: string;
 }) {
   const [tab, setTab] = useState<'descripcion' | 'cast' | 'crew' | 'mas' | 'adaptation'>('descripcion');
   const [adaptaciones, setAdaptaciones] = useState<AdaptacionesResponse | null>(null);
   const [navegandoA, setNavegandoA] = useState<number | null>(null);
+  const [seriesInfo, setSeriesInfo] = useState<any>(null);
 
   // Enlace <a> DE VERDAD a la resolvedora de juegos — ver hrefDeJuego en
   // GameTabs.tsx para la explicación completa de por qué.
   function hrefDeJuego(juego: JuegoAdaptacion) {
     return `/game/igdb/${juego.igdbId}`;
   }
+
+  useEffect(() => {
+    if (tipo !== 'SERIE' || !mediaId) return;
+    let cancelado = false;
+    fetch(`${API_URL}/media/${mediaId}/series-info`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelado) setSeriesInfo(d);
+      })
+      .catch((err) => console.error('Error cargando info de la serie', err));
+    return () => {
+      cancelado = true;
+    };
+  }, [tipo, mediaId]);
 
   useEffect(() => {
     if (!tmdbId) return;
@@ -71,11 +90,10 @@ export default function MediaTabs({
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`pb-3 text-sm font-semibold transition cursor-pointer ${
-              tab === t.key
-                ? 'text-white border-b-2 border-white'
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
+            className={`pb-3 text-sm font-semibold transition cursor-pointer ${tab === t.key
+              ? 'text-white border-b-2 border-white'
+              : 'text-gray-500 hover:text-gray-300'
+              }`}
           >
             {t.label}
           </button>
@@ -178,6 +196,20 @@ export default function MediaTabs({
             <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Country</div>
             <div className="text-gray-200">{detalles?.paises?.length > 0 ? detalles.paises.join(', ') : 'Not available'}</div>
           </div>
+          {seriesInfo && (
+            <div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Total episodes</div>
+              <div className="text-gray-200">{seriesInfo.totalEpisodios}</div>
+              {seriesInfo.totalMinutos > 0 && (
+                <>
+                  <div className="text-gray-500 uppercase text-xs tracking-wide mb-1 mt-3">Total watch time</div>
+                  <div className="text-gray-200">
+                    {Math.floor(seriesInfo.totalMinutos / 60)}h {seriesInfo.totalMinutos % 60}m
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {!!(detalles?.presupuesto || detalles?.ganancias) && (
             <div className="flex flex-col gap-4">
               {detalles?.presupuesto ? (
@@ -200,6 +232,13 @@ export default function MediaTabs({
           )}
         </div>
       )}
+
+      {/* INFO EXTRA DE SERIE: episodios/duración total, show tracking, ranking de episodios */}
+      {tab === 'mas' && tipo === 'SERIE' && seriesInfo && (
+        <div className="pb-10">
+        </div>
+      )}
+
       {/* ADAPTATION */}
       {tab === 'adaptation' && adaptaciones && (
         <div>

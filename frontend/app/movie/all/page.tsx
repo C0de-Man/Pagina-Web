@@ -13,6 +13,7 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
   const resolvedParams = await searchParams;
   const currentPage = parseInt(resolvedParams.page || '1');
   const esPopulares = resolvedParams.tipo === 'popular';
+  const esTop = resolvedParams.tipo === 'top';
   const anioFiltro = resolvedParams.anio || String(currentYear);
 
   // Querystring con TODOS los filtros activos: se reenvía al backend y también
@@ -43,10 +44,13 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
   const sufijoBackend = `?${filtrosBackend.toString()}`;
 
   // Según de dónde vengamos, pedimos el catálogo del año (el elegido en el
-  // filtro, o el actual por defecto) o el histórico de populares
-  const url = esPopulares
-    ? `http://localhost:3001/tmdb/popular-historico/page/${currentPage}${sufijoBackend}`
-    : `http://localhost:3001/tmdb/year/${anioFiltro}/page/${currentPage}${sufijoBackend}`;
+  // filtro, o el actual por defecto), el histórico de populares, o el Top
+  // ordenado por nota combinada (community + externa).
+  const url = esTop
+    ? `http://localhost:3001/tmdb/top/page/${currentPage}${sufijoBackend}`
+    : esPopulares
+      ? `http://localhost:3001/tmdb/popular-historico/page/${currentPage}${sufijoBackend}`
+      : `http://localhost:3001/tmdb/year/${anioFiltro}/page/${currentPage}${sufijoBackend}`;
 
   const res = await fetch(url, { cache: 'no-store' });
   const data = await res.json();
@@ -77,14 +81,14 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
         
         <div className="border-b border-gray-800 pb-4 mb-6 flex justify-between items-center">
           <h1 className="text-2xl font-bold tracking-wide">
-            {esPopulares ? 'Popular' : `Movies ${anioFiltro}`}
+            {esTop ? 'Top Rated' : esPopulares ? 'Popular' : `Movies ${anioFiltro}`}
             <span className="text-sm font-normal text-gray-500 ml-3 bg-gray-900 px-2 py-1 rounded">Page {currentPage}</span>
           </h1>
           <span className="text-sm text-gray-500 font-semibold">Showing {peliculas.length} titles</span>
         </div>
 
         <div className="flex flex-col lg:flex-row gap-6">
-          <MovieFiltersSidebar currentYear={currentYear} />
+          {!esTop && <MovieFiltersSidebar currentYear={currentYear} />}
 
           <div className="flex-grow">
             {/* CUADRÍCULA */}

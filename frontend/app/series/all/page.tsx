@@ -8,6 +8,7 @@ export default async function TodasLasSeries({ searchParams }: { searchParams: P
   const resolvedParams = await searchParams;
   const currentPage = parseInt(resolvedParams.page || '1');
   const esPopulares = resolvedParams.tipo === 'popular';
+  const esTop = resolvedParams.tipo === 'top';
   const anioFiltro = resolvedParams.anio || String(currentYear);
 
   const filtros = new URLSearchParams();
@@ -26,9 +27,11 @@ export default async function TodasLasSeries({ searchParams }: { searchParams: P
   if (resolvedParams.orden) filtrosBackend.set('orden', resolvedParams.orden);
   const sufijoBackend = filtrosBackend.toString() ? `?${filtrosBackend.toString()}` : '';
 
-  const url = esPopulares
-    ? `http://localhost:3001/tmdb/tv/popular-historico/page/${currentPage}${sufijoBackend}`
-    : `http://localhost:3001/tmdb/tv/year/${anioFiltro}/page/${currentPage}${sufijoBackend}`;
+  const url = esTop
+    ? `http://localhost:3001/tmdb/tv/top/page/${currentPage}${sufijoBackend}`
+    : esPopulares
+      ? `http://localhost:3001/tmdb/tv/popular-historico/page/${currentPage}${sufijoBackend}`
+      : `http://localhost:3001/tmdb/tv/year/${anioFiltro}/page/${currentPage}${sufijoBackend}`;
 
   const res = await fetch(url, { cache: 'no-store' });
   const data = await res.json();
@@ -54,14 +57,14 @@ export default async function TodasLasSeries({ searchParams }: { searchParams: P
 
         <div className="border-b border-gray-800 pb-4 mb-6 flex justify-between items-center">
           <h1 className="text-2xl font-bold tracking-wide">
-            {esPopulares ? 'Popular' : `Series ${anioFiltro}`}
+            {esTop ? 'Top Rated' : esPopulares ? 'Popular' : `Series ${anioFiltro}`}
             <span className="text-sm font-normal text-gray-500 ml-3 bg-gray-900 px-2 py-1 rounded">Page {currentPage}</span>
           </h1>
           <span className="text-sm text-gray-500 font-semibold">Showing {series.length} titles</span>
         </div>
 
         <div className="flex flex-col lg:flex-row gap-6">
-          <SeriesFiltersSidebar currentYear={currentYear} />
+          {!esTop && <SeriesFiltersSidebar currentYear={currentYear} />}
 
           <div className="flex-grow">
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4 pt-2">

@@ -73,7 +73,7 @@ export default function Navbar() {
     return '';
   }
 
-    const borrarNotificacion = async (e: React.MouseEvent, notiId: number) => {
+  const borrarNotificacion = async (e: React.MouseEvent, notiId: number) => {
     e.preventDefault(); // no navegar al hacer clic en la "×"
     e.stopPropagation();
     const token = localStorage.getItem('token');
@@ -220,8 +220,7 @@ export default function Navbar() {
                     <div className="absolute left-0 top-full pt-2 w-40 z-50">
                       <div className="bg-[#2c3440] rounded-md shadow-2xl border border-gray-700 py-2">
                         <Link href="/perfil/movies" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Films</Link>
-                        <Link href="/perfil/watchlist" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Watchlist</Link>
-                        <Link href="/perfil/likes" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Likes</Link>
+                        <Link href="/movie/all?tipo=top" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Top</Link>
                       </div>
                     </div>
                   )}
@@ -238,8 +237,7 @@ export default function Navbar() {
                     <div className="absolute left-0 top-full pt-2 w-40 z-50">
                       <div className="bg-[#2c3440] rounded-md shadow-2xl border border-gray-700 py-2">
                         <Link href="/perfil/series" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Watched</Link>
-                        <Link href="/perfil/watchlist" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Watchlist</Link>
-                        <Link href="/perfil/likes" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Likes</Link>
+                        <Link href="/series/all?tipo=top" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Top</Link>
                       </div>
                     </div>
                   )}
@@ -257,8 +255,7 @@ export default function Navbar() {
                     <div className="absolute left-0 top-full pt-2 w-40 z-50">
                       <div className="bg-[#2c3440] rounded-md shadow-2xl border border-gray-700 py-2">
                         <Link href="/perfil/games" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Played</Link>
-                        <Link href="/perfil/watchlist" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Watchlist</Link>
-                        <Link href="/perfil/likes" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Likes</Link>
+                        <Link href="/game/all?tipo=top" className="block px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 hover:text-white transition">Top</Link>
                       </div>
                     </div>
                   )}

@@ -349,14 +349,16 @@ export default function GameTabs({
                   { label: 'Hastily', valor: timeToBeat.hastily },
                   { label: 'Normally', valor: timeToBeat.normally },
                   { label: 'Completely', valor: timeToBeat.completely },
-                ].map(({ label, valor }) => (
-                  <div key={label} className="text-center">
-                    <div className="text-xs text-gray-400 mb-1">{label}</div>
-                    <div className="rounded bg-[#2a1a3e] py-3 text-lg font-bold text-white">
-                      {valor !== null ? `${valor} H` : '—'}
+                ]
+                  .filter(({ valor }) => valor !== null)
+                  .map(({ label, valor }) => (
+                    <div key={label} className="text-center">
+                      <div className="text-xs text-gray-400 mb-1">{label}</div>
+                      <div className="rounded bg-[#2a1a3e] py-3 text-lg font-bold text-white">
+                        {valor} H
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </div>
             </div>
           )}
