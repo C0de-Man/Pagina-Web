@@ -20,12 +20,19 @@ export default function BookCard({ libro, dbId, customPoster, fullWidth }: { lib
       .catch(() => { });
   }, [dbId, customPoster]);
 
-  const href = dbId ? urlFicha({ ...libro, id: dbId }) : `/book/googlebooks/${libro.googleBooksId}`;
+  // Si ya está guardado, vamos directo a su ficha (siempre /book/..., tanto
+  // si vino de Google Books como de MangaDex — ambos se guardan como LIBRO).
+  // Si no, a la resolvedora que corresponda según de dónde vino el resultado.
+  const href = dbId
+    ? urlFicha({ ...libro, id: dbId, tipo: 'LIBRO' })
+    : libro.fuente === 'mangadex'
+      ? `/book/mangadex/${libro.origenId}`
+      : `/book/googlebooks/${libro.origenId}`;
 
   const posterUrl = miCustomPoster || libro.portada || null;
   const titulo = libro.titulo;
   const anio = libro.anio || '';
-  const autor = (libro.autores || [])[0] || '';
+  const autor = libro.autor || (libro.autores || [])[0] || '';
 
   return (
     <Link href={href} className={`${fullWidth ? 'w-full' : 'flex-shrink-0 w-32 md:w-40'} group cursor-pointer relative block`}>

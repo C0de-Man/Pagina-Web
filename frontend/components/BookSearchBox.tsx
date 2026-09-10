@@ -1,7 +1,6 @@
 'use client';
 import { useState } from 'react';
 import BookCard from '@/components/BookCard';
-import { withLangRegion } from '@/lib/preferences';
 
 export default function BookSearchBox() {
   const [query, setQuery] = useState('');
@@ -18,7 +17,7 @@ export default function BookSearchBox() {
     setBuscadoYa(true);
     try {
       const [resLibros, resDb] = await Promise.all([
-        fetch(withLangRegion(`http://localhost:3001/googlebooks/buscar?q=${encodeURIComponent(query)}`), { cache: 'no-store' }),
+        fetch(`http://localhost:3001/libros/buscar?q=${encodeURIComponent(query)}`, { cache: 'no-store' }),
         fetch('http://localhost:3001/media', { cache: 'no-store' }),
       ]);
       const libros = await resLibros.json();
@@ -32,8 +31,9 @@ export default function BookSearchBox() {
     setBuscando(false);
   };
 
-  const getLocalData = (googleBooksId: string) => {
-    const local = myDb.find((m: any) => m.googleBooksId === googleBooksId);
+  const getLocalData = (libro: any) => {
+    const campo = libro.fuente === 'mangadex' ? 'mangaDexId' : 'googleBooksId';
+    const local = myDb.find((m: any) => m[campo] === libro.origenId);
     return {
       dbId: local ? local.id : null,
       customPoster: local ? local.portada : null,
@@ -47,7 +47,7 @@ export default function BookSearchBox() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search for a book..."
+          placeholder="Buscar un libro o manga..."
           className="flex-grow bg-[#2c3440] text-white text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-500"
         />
         <button
@@ -63,13 +63,13 @@ export default function BookSearchBox() {
         buscando ? (
           <p className="text-gray-500 text-sm">Buscando...</p>
         ) : resultados.length === 0 ? (
-          <p className="text-gray-500 text-sm">No se encontraron libros para "{query}".</p>
+          <p className="text-gray-500 text-sm">No se encontraron resultados para "{query}".</p>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
             {resultados.map((libro: any) => {
-              const { dbId, customPoster } = getLocalData(libro.googleBooksId);
+              const { dbId, customPoster } = getLocalData(libro);
               return (
-                <BookCard key={libro.googleBooksId} libro={libro} dbId={dbId} customPoster={customPoster} />
+                <BookCard key={`${libro.fuente}-${libro.origenId}`} libro={libro} dbId={dbId} customPoster={customPoster} />
               );
             })}
           </div>

@@ -1033,6 +1033,43 @@ const EXCLUSIONES_FRANQUICIA_MANUAL = new Set([
   345678, // LEGO Marvel Super Heroes
 ]);
 
+// --- TIME TO BEAT DE UN JUEGO (endpoint propio de IGDB — API oficial y
+// estable, NO el scraping de HowLongToBeat.com que se descartó antes) ---
+async function getIgdbTimeToBeat(igdbId) {
+  const token = await getIgdbToken();
+  const headers = {
+    'Client-ID': process.env.IGDB_CLIENT_ID,
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'text/plain',
+  };
+  const body = `fields hastily, normally, completely; where game_id = ${igdbId};`;
+  const resp = await fetchIgdb('https://api.igdb.com/v4/game_time_to_beats', { method: 'POST', headers, body });
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  const item = data[0];
+  if (!item) return null;
+
+  // IGDB da los tiempos en SEGUNDOS — se convierten a horas redondeadas.
+  const aHoras = (segundos) => (segundos ? Math.round(segundos / 3600) : null);
+  return {
+    hastily: aHoras(item.hastily),
+    normally: aHoras(item.normally),
+    completely: aHoras(item.completely),
+  };
+}
+
+app.get('/igdb/time-to-beat/:igdbId', async (req, res) => {
+  try {
+    const igdbId = parseInt(req.params.igdbId, 10);
+    if (Number.isNaN(igdbId)) return res.status(400).json({ error: 'igdbId inválido' });
+    const resultado = await getIgdbTimeToBeat(igdbId);
+    res.json(resultado || { hastily: null, normally: null, completely: null });
+  } catch (err) {
+    console.error('ERROR EN GET /igdb/time-to-beat/:igdbId:', err);
+    res.status(500).json({ error: 'Error al obtener el tiempo de juego' });
+  }
+});
+
 async function getIgdbDlcsUpdates(igdbId) {
   const token = await getIgdbToken();
 
@@ -2378,6 +2415,112 @@ app.get('/googlebooks/buscar', async (req, res) => {
   }
 });
 
+// --- BÚSQUEDA COMBINADA: LIBROS (Google Books) + MANGA (MangaDex) ---
+// Todo se guarda como tipo LIBRO — el manga no tiene sección propia,
+// vive dentro de Books. "fuente" le dice al frontend a qué resolvedora
+// mandar el clic (/book/googlebooks/... o /book/mangadex/...).
+app.get('/libros/buscar', async (req, res) => {
+  try {
+    const searchQuery = req.query.q;
+    if (!searchQuery) return res.status(400).json({ error: 'Falta término' });
+
+    const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+
+        const buscarGoogleBooks = async () => {
+      try {
+        const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(searchQuery)}&maxResults=40&key=${apiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        // Google Books indexa cada TOMO de un manga como un libro aparte
+        // ("Naruto no 01/72", "Naruto no 02/72"...) — quitamos ese sufijo de
+        // volumen para poder agrupar todos los tomos bajo la misma obra y
+        // quedarnos solo con uno.
+        const limpiarTituloVolumen = (titulo) =>
+          titulo
+            .replace(/\bn[oº]\.?\s*\d+\s*\/\s*\d+\b/gi, '') // "no 01/72"
+            .replace(/\b(vol(?:ume|umen)?\.?|tomo)\s*\d+\b/gi, '') // "Vol. 1", "Tomo 3"
+            .replace(/#\s*\d+\b/g, '') // "#1"
+            .replace(/[,:\-]\s*$/, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        const crudos = (data.items || []).map((item) => {
+          const info = item.volumeInfo || {};
+          const portada = info.imageLinks?.thumbnail
+            ? info.imageLinks.thumbnail.replace('http://', 'https://')
+            : null;
+          return {
+            fuente: 'googlebooks',
+            origenId: item.id,
+            titulo: limpiarTituloVolumen(info.title || 'Sin título'),
+            autor: (info.authors || [])[0] || null,
+            anio: info.publishedDate ? parseInt(info.publishedDate.slice(0, 4), 10) : null,
+            portada,
+          };
+        });
+
+        const vistos = new Set();
+        return crudos.filter((r) => {
+          const clave = `${r.titulo.toLowerCase()}|${(r.autor || '').toLowerCase()}`;
+          if (vistos.has(clave)) return false;
+          vistos.add(clave);
+          return true;
+        });
+      } catch (e) {
+        console.error('Error buscando en Google Books (búsqueda combinada):', e.message);
+        return [];
+      }
+    };
+
+    const buscarMangaDex = async () => {
+      try {
+        const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(searchQuery)}&limit=40&includes[]=cover_art&includes[]=author`;
+        const response = await fetch(url);
+        const data = await response.json();
+        return (data.data || []).map((item) => {
+          const attrs = item.attributes || {};
+          const titulo = attrs.title?.en || Object.values(attrs.title || {})[0] || 'Sin título';
+          const coverRel = (item.relationships || []).find((r) => r.type === 'cover_art');
+          const portada = coverRel?.attributes?.fileName
+            ? `https://uploads.mangadex.org/covers/${item.id}/${coverRel.attributes.fileName}.512.jpg`
+            : null;
+          const autorRel = (item.relationships || []).find((r) => r.type === 'author');
+          return {
+            fuente: 'mangadex',
+            origenId: item.id,
+            titulo,
+            autor: autorRel?.attributes?.name || null,
+            anio: attrs.year || null,
+            portada,
+          };
+        });
+      } catch (e) {
+        console.error('Error buscando en MangaDex (búsqueda combinada):', e.message);
+        return [];
+      }
+    };
+
+    const [libros, manga] = await Promise.all([buscarGoogleBooks(), buscarMangaDex()]);
+
+    // Deduplicamos por título+autor normalizados — mismo criterio que ya
+    // usas con las ediciones de Google Books, por si el mismo título
+    // aparece en las dos fuentes a la vez.
+    const vistos = new Set();
+    const combinados = [...libros, ...manga].filter((item) => {
+      const clave = `${item.titulo.trim().toLowerCase()}|${(item.autor || '').trim().toLowerCase()}`;
+      if (vistos.has(clave)) return false;
+      vistos.add(clave);
+      return true;
+    });
+
+    res.json(combinados);
+  } catch (error) {
+    console.error('ERROR EN GET /libros/buscar:', error);
+    res.status(500).json({ error: 'Error al buscar libros y manga' });
+  }
+});
+
 // --- DETALLES DE UN LIBRO: autor, editorial, páginas, categorías ---
 app.get('/googlebooks/details/:googleBooksId', async (req, res) => {
   try {
@@ -2441,6 +2584,117 @@ app.post('/media/googlebooks', async (req, res) => {
   } catch (error) {
     console.error('ERROR EN POST /media/googlebooks:', error);
     res.status(500).json({ error: 'Error al guardar el libro' });
+  }
+});
+
+// --- BUSCAR MANGA EN MANGADEX ---
+app.get('/mangadex/buscar', async (req, res) => {
+  try {
+    const searchQuery = req.query.q;
+    if (!searchQuery) return res.status(400).json({ error: 'Falta término' });
+
+    const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(searchQuery)}&limit=40&includes[]=cover_art&includes[]=author`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    const resultados = (data.data || []).map((item) => {
+      const attrs = item.attributes || {};
+      // El título viene como mapa de idiomas ({ en: "...", ja: "..." }) —
+      // preferimos inglés, y si no hay, el primero que encontremos.
+      const titulo = attrs.title?.en || Object.values(attrs.title || {})[0] || 'Sin título';
+
+      const coverRel = (item.relationships || []).find((r) => r.type === 'cover_art');
+      const portada = coverRel?.attributes?.fileName
+        ? `https://uploads.mangadex.org/covers/${item.id}/${coverRel.attributes.fileName}.512.jpg`
+        : null;
+
+      const autorRel = (item.relationships || []).find((r) => r.type === 'author');
+
+      return {
+        mangaDexId: item.id,
+        titulo,
+        autor: autorRel?.attributes?.name || null,
+        anio: attrs.year || null,
+        portada,
+        estado: attrs.status || null, // "ongoing" | "completed" | "hiatus" | "cancelled"
+      };
+    });
+
+    res.json(resultados);
+  } catch (error) {
+    console.error('ERROR EN GET /mangadex/buscar:', error);
+    res.status(500).json({ error: 'Error al buscar en MangaDex' });
+  }
+});
+
+// --- DETALLES DE UN MANGA: sinopsis, tags, estado ---
+app.get('/mangadex/details/:mangaDexId', async (req, res) => {
+  try {
+    const { mangaDexId } = req.params;
+    const url = `https://api.mangadex.org/manga/${mangaDexId}?includes[]=author&includes[]=artist`;
+    const response = await fetch(url);
+    const data = await response.json();
+    const attrs = data.data?.attributes || {};
+
+    const sinopsis = attrs.description?.en || Object.values(attrs.description || {})[0] || null;
+    const tags = (attrs.tags || []).map((t) => t.attributes?.name?.en).filter(Boolean);
+
+    const autores = (data.data?.relationships || [])
+      .filter((r) => r.type === 'author' || r.type === 'artist')
+      .map((r) => r.attributes?.name)
+      .filter(Boolean);
+
+    res.json({
+      sinopsis,
+      tags,
+      estado: attrs.status || null,
+      autores: [...new Set(autores)],
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /mangadex/details/:mangaDexId:', error);
+    res.status(500).json({ error: 'Error al obtener detalles del manga' });
+  }
+});
+
+// --- GUARDAR UN MANGA DESDE MANGADEX (como tipo LIBRO — vive dentro de Books) ---
+app.post('/media/mangadex', async (req, res) => {
+  try {
+    const { mangaDexId } = req.body;
+    if (!mangaDexId) return res.status(400).json({ error: 'Falta mangaDexId' });
+
+    const existente = await prisma.media.findFirst({ where: { mangaDexId } });
+    if (existente) return res.json(existente);
+
+    const url = `https://api.mangadex.org/manga/${mangaDexId}?includes[]=cover_art`;
+    const response = await fetch(url);
+    const data = await response.json();
+    if (!data.data) return res.status(404).json({ error: 'Manga no encontrado en MangaDex' });
+
+    const attrs = data.data.attributes || {};
+    const titulo = attrs.title?.en || Object.values(attrs.title || {})[0] || 'Sin título';
+    const sinopsis = attrs.description?.en || Object.values(attrs.description || {})[0] || null;
+
+    const coverRel = (data.data.relationships || []).find((r) => r.type === 'cover_art');
+    const portadaUrl = coverRel?.attributes?.fileName
+      ? `https://uploads.mangadex.org/covers/${mangaDexId}/${coverRel.attributes.fileName}.512.jpg`
+      : null;
+
+    const nuevoMedia = await prisma.media.create({
+      data: {
+        mangaDexId,
+        titulo,
+        tituloOriginal: titulo,
+        tipo: 'LIBRO', // no MANGA — el manga vive dentro de Books, sin sección propia
+        anio: attrs.year || null,
+        portada: portadaUrl,
+        sinopsis,
+      },
+    });
+
+    res.json(nuevoMedia);
+  } catch (error) {
+    console.error('ERROR EN POST /media/mangadex:', error);
+    res.status(500).json({ error: 'Error al guardar el manga' });
   }
 });
 
@@ -5576,11 +5830,13 @@ app.patch('/media/:id/poster', requireAuth, async (req, res) => {
 app.patch('/media/:id/progress', requireAuth, async (req, res) => {
   try {
     const mediaId = parseInt(req.params.id);
-    const { progresoActual, progresoTotal } = req.body;
+    const { progresoActual, progresoTotal, progresoVolumenActual, progresoVolumenTotal } = req.body;
 
     const data = {};
     if (progresoActual !== undefined) data.progresoActual = progresoActual;
     if (progresoTotal !== undefined) data.progresoTotal = progresoTotal;
+    if (progresoVolumenActual !== undefined) data.progresoVolumenActual = progresoVolumenActual;
+    if (progresoVolumenTotal !== undefined) data.progresoVolumenTotal = progresoVolumenTotal;
 
     const status = await prisma.userMedia.upsert({
       where: { userId_mediaId: { userId: req.userId, mediaId } },

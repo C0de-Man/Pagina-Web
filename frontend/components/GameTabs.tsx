@@ -30,6 +30,7 @@ export default function GameTabs({
   const [tab, setTab] = useState<'descripcion' | 'mas' | 'dlcs'>('descripcion');
   const [dlcsData, setDlcsData] = useState<DlcsUpdatesResponse | null>(null);
   const [modalAbierto, setModalAbierto] = useState(false);
+  const [timeToBeat, setTimeToBeat] = useState<{ hastily: number | null; normally: number | null; completely: number | null } | null>(null);
 
   // igdbIds cuya carátula ha fallado al cargar (URL rota) — se tratan igual
   // que si no tuvieran portada, en vez de dejar un hueco vacío.
@@ -83,6 +84,20 @@ export default function GameTabs({
         }
       })
       .catch((err) => console.error('Error cargando DLCs/updates', err));
+    return () => {
+      cancelado = true;
+    };
+  }, [igdbId]);
+
+  useEffect(() => {
+    if (!igdbId) return;
+    let cancelado = false;
+    fetch(`${API_URL}/igdb/time-to-beat/${igdbId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelado) setTimeToBeat(d);
+      })
+      .catch((err) => console.error('Error cargando time to beat', err));
     return () => {
       cancelado = true;
     };
@@ -272,57 +287,79 @@ export default function GameTabs({
 
       {/* MAS */}
       {tab === 'mas' && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 text-sm">
-          <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Platforms</div>
-            <div className="text-gray-200">{detalles?.plataformas?.length > 0 ? detalles.plataformas.join(', ') : 'Not available'}</div>
-          </div>
-          <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Genres</div>
-            <div className="text-gray-200">{detalles?.generos?.length > 0 ? detalles.generos.join(', ') : 'Not available'}</div>
-          </div>
-          <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Developer</div>
-            <div className="text-gray-200">
-              {detalles?.desarrolladoras?.length > 0 ? (
-                detalles.desarrolladoras.map((d: any, i: number) => (
-                  <span key={`${d.id ?? 'sin-id'}-${i}`}>
-                    {d.id ? (
-                      <Link href={`/developer/${d.id}`} className="hover:underline hover:text-white transition">
-                        {d.nombre}
-                      </Link>
-                    ) : (
-                      d.nombre
-                    )}
-                    {i < detalles.desarrolladoras.length - 1 && ', '}
-                  </span>
-                ))
-              ) : (
-                'Not available'
-              )}
+        <div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 text-sm">
+            <div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Platforms</div>
+              <div className="text-gray-200">{detalles?.plataformas?.length > 0 ? detalles.plataformas.join(', ') : 'Not available'}</div>
+            </div>
+            <div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Genres</div>
+              <div className="text-gray-200">{detalles?.generos?.length > 0 ? detalles.generos.join(', ') : 'Not available'}</div>
+            </div>
+            <div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Developer</div>
+              <div className="text-gray-200">
+                {detalles?.desarrolladoras?.length > 0 ? (
+                  detalles.desarrolladoras.map((d: any, i: number) => (
+                    <span key={`${d.id ?? 'sin-id'}-${i}`}>
+                      {d.id ? (
+                        <Link href={`/developer/${d.id}`} className="hover:underline hover:text-white transition">
+                          {d.nombre}
+                        </Link>
+                      ) : (
+                        d.nombre
+                      )}
+                      {i < detalles.desarrolladoras.length - 1 && ', '}
+                    </span>
+                  ))
+                ) : (
+                  'Not available'
+                )}
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Publisher</div>
+              <div className="text-gray-200">
+                {detalles?.distribuidoras?.length > 0 ? (
+                  detalles.distribuidoras.map((d: any, i: number) => (
+                    <span key={`${d.id ?? 'sin-id'}-${i}`}>
+                      {d.id ? (
+                        <Link href={`/developer/${d.id}`} className="hover:underline hover:text-white transition">
+                          {d.nombre}
+                        </Link>
+                      ) : (
+                        d.nombre
+                      )}
+                      {i < detalles.distribuidoras.length - 1 && ', '}
+                    </span>
+                  ))
+                ) : (
+                  'Not available'
+                )}
+              </div>
             </div>
           </div>
-          <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Publisher</div>
-            <div className="text-gray-200">
-              {detalles?.distribuidoras?.length > 0 ? (
-                detalles.distribuidoras.map((d: any, i: number) => (
-                  <span key={`${d.id ?? 'sin-id'}-${i}`}>
-                    {d.id ? (
-                      <Link href={`/developer/${d.id}`} className="hover:underline hover:text-white transition">
-                        {d.nombre}
-                      </Link>
-                    ) : (
-                      d.nombre
-                    )}
-                    {i < detalles.distribuidoras.length - 1 && ', '}
-                  </span>
-                ))
-              ) : (
-                'Not available'
-              )}
+
+          {timeToBeat && (timeToBeat.hastily || timeToBeat.normally || timeToBeat.completely) && (
+            <div className="mt-8">
+              <h3 className="text-lg font-bold text-white mb-3">Time to beat</h3>
+              <div className="grid grid-cols-3 gap-3 max-w-md">
+                {[
+                  { label: 'Hastily', valor: timeToBeat.hastily },
+                  { label: 'Normally', valor: timeToBeat.normally },
+                  { label: 'Completely', valor: timeToBeat.completely },
+                ].map(({ label, valor }) => (
+                  <div key={label} className="text-center">
+                    <div className="text-xs text-gray-400 mb-1">{label}</div>
+                    <div className="rounded bg-[#2a1a3e] py-3 text-lg font-bold text-white">
+                      {valor !== null ? `${valor} H` : '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

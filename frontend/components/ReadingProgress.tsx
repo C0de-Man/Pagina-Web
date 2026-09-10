@@ -1,10 +1,15 @@
 'use client';
 import { useState, useEffect } from 'react';
 
+type Contador = {
+  actual: number;
+  total: number | null;
+};
+
 export default function ReadingProgress({ mediaId, tipo, className }: { mediaId: number; tipo?: string; className?: string }) {
-  const [actual, setActual] = useState<number | null>(null);
-  const [total, setTotal] = useState<number | null>(null);
-  const [editandoTotal, setEditandoTotal] = useState(false);
+  const [capitulo, setCapitulo] = useState<Contador | null>(null);
+  const [volumen, setVolumen] = useState<Contador | null>(null);
+  const [editando, setEditando] = useState<'capitulo' | 'volumen' | null>(null);
   const [totalInput, setTotalInput] = useState('');
 
   useEffect(() => {
@@ -16,20 +21,23 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
     })
       .then((res) => res.json())
       .then((data) => {
-        setActual(data.progresoActual ?? 0);
-        setTotal(data.progresoTotal ?? null);
+        setCapitulo({ actual: data.progresoActual ?? 0, total: data.progresoTotal ?? null });
+        setVolumen({ actual: data.progresoVolumenActual ?? 0, total: data.progresoVolumenTotal ?? null });
       })
       .catch(() => {});
   }, [mediaId, tipo]);
 
-  const guardar = async (nuevoActual: number, nuevoTotal: number | null) => {
+  const guardar = async (campo: 'capitulo' | 'volumen', nuevoActual: number, nuevoTotal: number | null) => {
     const token = localStorage.getItem('token');
     if (!token) return;
 
-    const actualAnterior = actual;
-    const totalAnterior = total;
-    setActual(nuevoActual);
-    setTotal(nuevoTotal);
+    const anterior = campo === 'capitulo' ? capitulo : volumen;
+    const setter = campo === 'capitulo' ? setCapitulo : setVolumen;
+    setter({ actual: nuevoActual, total: nuevoTotal });
+
+    const body = campo === 'capitulo'
+      ? { progresoActual: nuevoActual, progresoTotal: nuevoTotal }
+      : { progresoVolumenActual: nuevoActual, progresoVolumenTotal: nuevoTotal };
 
     try {
       const res = await fetch(`http://localhost:3001/media/${mediaId}/progress`, {
@@ -38,73 +46,79 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ progresoActual: nuevoActual, progresoTotal: nuevoTotal }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error('fallo al guardar');
     } catch {
-      setActual(actualAnterior);
-      setTotal(totalAnterior);
+      setter(anterior);
     }
   };
 
-  if (tipo !== 'LIBRO' || actual === null) return null;
+  if (tipo !== 'LIBRO' || !capitulo || !volumen) return null;
 
-  const restar = () => guardar(Math.max(0, actual - 1), total);
-  const sumar = () => guardar(total !== null ? Math.min(total, actual + 1) : actual + 1, total);
-
-  const confirmarTotal = () => {
+  const confirmarTotal = (campo: 'capitulo' | 'volumen') => {
+    const actual = campo === 'capitulo' ? capitulo : volumen;
     const n = parseInt(totalInput, 10);
-    guardar(actual, Number.isNaN(n) || n <= 0 ? null : n);
-    setEditandoTotal(false);
+    guardar(campo, actual.actual, Number.isNaN(n) || n <= 0 ? null : n);
+    setEditando(null);
   };
 
-  return (
-    <div className={className ?? 'bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl mt-4'}>
-      <h3 className="text-sm font-bold text-white mb-3">Reading progress</h3>
-
-      <div className="flex items-center justify-center gap-4">
+  const Fila = ({ campo, etiqueta, contador }: { campo: 'capitulo' | 'volumen'; etiqueta: string; contador: Contador }) => (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-xs text-gray-400 uppercase tracking-wide">{etiqueta}</span>
+      <div className="flex items-center gap-2">
         <button
-          onClick={restar}
-          disabled={actual <= 0}
-          className="w-8 h-8 rounded bg-[#2c3440] hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold transition cursor-pointer"
+          onClick={() => guardar(campo, Math.max(0, contador.actual - 1), contador.total)}
+          disabled={contador.actual <= 0}
+          className="w-6 h-6 rounded bg-[#2c3440] hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-sm transition cursor-pointer"
         >
           −
         </button>
 
-        <div className="text-2xl font-extrabold text-white min-w-[80px] text-center">
-          {actual}
+        <div className="text-base font-extrabold text-white min-w-[56px] text-center">
+          {contador.actual}
           <span className="text-gray-500"> / </span>
-          {editandoTotal ? (
+          {editando === campo ? (
             <input
               type="number"
               min={1}
               autoFocus
               value={totalInput}
               onChange={(e) => setTotalInput(e.target.value)}
-              onBlur={confirmarTotal}
-              onKeyDown={(e) => e.key === 'Enter' && confirmarTotal()}
-              className="w-14 bg-[#2c3440] border border-gray-600 rounded text-center text-lg font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-600"
+              onBlur={() => confirmarTotal(campo)}
+              onKeyDown={(e) => e.key === 'Enter' && confirmarTotal(campo)}
+              className="w-10 bg-[#2c3440] border border-gray-600 rounded text-center text-sm font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-600"
             />
           ) : (
             <button
               onClick={() => {
-                setTotalInput(total ? String(total) : '');
-                setEditandoTotal(true);
+                setTotalInput(contador.total ? String(contador.total) : '');
+                setEditando(campo);
               }}
               className="text-gray-400 hover:text-white transition cursor-pointer"
             >
-              {total ?? '?'}
+              {contador.total ?? '?'}
             </button>
           )}
         </div>
 
         <button
-          onClick={sumar}
-          disabled={total !== null && actual >= total}
-          className="w-8 h-8 rounded bg-[#2c3440] hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold transition cursor-pointer"
+          onClick={() => guardar(campo, contador.total !== null ? Math.min(contador.total, contador.actual + 1) : contador.actual + 1, contador.total)}
+          disabled={contador.total !== null && contador.actual >= contador.total}
+          className="w-6 h-6 rounded bg-[#2c3440] hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-sm transition cursor-pointer"
         >
           +
         </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={className ?? 'bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl mt-4'}>
+      <h3 className="text-sm font-bold text-white mb-3">Reading progress</h3>
+      <div className="space-y-2">
+        <Fila campo="capitulo" etiqueta="Chapter" contador={capitulo} />
+        <Fila campo="volumen" etiqueta="Volume" contador={volumen} />
       </div>
     </div>
   );

@@ -88,8 +88,10 @@ model UserMedia {
   customPoster  String?  // Portada elegida por ESTE usuario para este medio (no afecta a los demás)
   customBackdrop String? // Banner elegido por ESTE usuario para este medio (no afecta a los demás)
   playStatus    String?  // Juegos: "PLAYING"|"COMPLETED"|"RETIRED"|"SHELVED"|"ABANDONED" — Series: "WATCHING"|"PAUSED"|"ABANDONED"
-  progresoActual Int?     // capítulo/página actual (solo se usa en libros por ahora)
-  progresoTotal  Int?     // total que TÚ has escrito (Google Books no lo da)
+  progresoActual Int?     // CAPÍTULO actual (libros/manga)
+  progresoTotal  Int?     // CAPÍTULO total, escrito a mano por ti
+  progresoVolumenActual Int? // VOLUMEN actual (solo relevante en manga)
+  progresoVolumenTotal  Int? // VOLUMEN total, escrito a mano por ti
   updatedAt     DateTime @updatedAt
 
   @@unique([userId, mediaId]) // Un usuario solo puede tener UN estado por película
