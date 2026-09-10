@@ -5820,6 +5820,7 @@ async function construirResenas(userId) {
         portada: pers?.customPoster || item.portada,
         review: g.review,
         rating: g.rating ?? null, // nota de ESTE log concreto (GameLog sí la guarda por log)
+        notaGeneral: pers?.rating ?? null, // nota general del juego (UserMedia), independiente del log
         liked: pers?.liked ?? false,
         watchlist: pers?.watchlist ?? false,
         logNombre: g.nombre,

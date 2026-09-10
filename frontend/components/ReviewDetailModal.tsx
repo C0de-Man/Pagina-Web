@@ -160,6 +160,12 @@ export default function ReviewDetailModal({
 
         {resena.tipo === 'VIDEOJUEGO' && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3 text-xs px-5 pt-4">
+            {resena.notaGeneral != null && (
+              <div>
+                <div className="text-gray-500 uppercase tracking-wide mb-0.5">Your Rating</div>
+                <Estrellas rating={resena.notaGeneral} />
+              </div>
+            )}
             {resena.plataforma && (
               <div>
                 <div className="text-gray-500 uppercase tracking-wide mb-0.5">Platform</div>

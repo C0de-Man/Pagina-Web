@@ -104,9 +104,19 @@ export default function MisResenas() {
                   </div>
 
                   <div className="flex items-center gap-2 mb-2">
-                    {r.rating != null && <Estrellas rating={r.rating} />}
+                    {(() => {
+                      // Para juegos, la nota que importa aquí es la general
+                      // del título (notaGeneral, UserMedia) — r.rating es la
+                      // nota de ESTE log concreto, que casi nunca se rellena.
+                      const notaAMostrar = r.tipo === 'VIDEOJUEGO' ? r.notaGeneral : r.rating;
+                      return notaAMostrar != null && <Estrellas rating={notaAMostrar} />;
+                    })()}
                     {r.liked && <span className="text-pink-500 text-sm">♥</span>}
-                    <span className="text-gray-500 text-xs">{formatFecha(r.fecha)}</span>
+                    <span className="text-gray-500 text-xs">
+                      {r.tipo === 'VIDEOJUEGO' && r.fechaInicio && r.fechaFin
+                        ? `${formatFecha(r.fechaInicio)} - ${formatFecha(r.fechaFin)}`
+                        : formatFecha(r.fecha)}
+                    </span>
                     {r.logNombre && <span className="text-gray-600 text-xs">· {r.logNombre}</span>}
                   </div>
 
