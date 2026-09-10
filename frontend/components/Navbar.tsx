@@ -178,10 +178,8 @@ export default function Navbar() {
   const menuLinks = [
     { label: 'Home', href: '/' },
     { label: 'Profile', href: '/perfil' },
-    { label: 'Films', href: '/perfil/movies' },
     { label: 'Watchlist', href: '/perfil/watchlist' },
     { label: 'Lists', href: '/perfil/lists' },
-    { label: 'Likes', href: '/perfil/likes' },
     { label: 'Friends', href: '/perfil/friends' },
   ];
 
