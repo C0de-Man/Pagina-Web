@@ -1263,6 +1263,49 @@ app.post('/media/comicvine', async (req, res) => {
   }
 });
 
+// --- CARÁTULAS ALTERNATIVAS DE UN CÓMIC (portadas de los issues de su
+// propio volumen en Comic Vine) — para el selector de carátula, mismo
+// papel que /googlebooks/editions o la galería de Jikan en manga. ---
+app.get('/media/:id/comicvine-images', async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id, 10);
+    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { comicVineId: true } });
+    if (!media?.comicVineId) return res.json([]);
+
+    const apiKey = process.env.COMICVINE_API_KEY;
+    const url = `${COMICVINE_API_BASE}/volume/4050-${media.comicVineId}/?api_key=${apiKey}&format=json&field_list=issues`;
+    const response = await fetch(url, { headers: { 'User-Agent': COMICVINE_USER_AGENT } });
+    if (!response.ok) return res.json([]);
+    const data = await response.json();
+    const issues = data.results?.issues || [];
+
+    // La lista de "issues" en el volumen no trae la imagen directamente —
+    // solo id/nombre/número — hay que pedir cada issue por separado para
+    // conseguir su portada. Se limita a 50 para no disparar demasiadas
+    // peticiones en volúmenes muy largos (ej. 651 issues de Amazing
+    // Spider-Man).
+    const issuesLimitados = issues.slice(0, 50);
+    const detalles = await Promise.all(
+      issuesLimitados.map((issue) =>
+        fetch(`${COMICVINE_API_BASE}/issue/4000-${issue.id}/?api_key=${apiKey}&format=json&field_list=image`, {
+          headers: { 'User-Agent': COMICVINE_USER_AGENT },
+        })
+          .then((r) => r.json())
+          .catch(() => null)
+      )
+    );
+
+    const portadas = detalles
+      .map((d) => d?.results?.image?.medium_url || d?.results?.image?.small_url)
+      .filter(Boolean);
+
+    res.json(portadas);
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/comicvine-images:', error);
+    res.status(500).json({ error: 'Error al obtener carátulas alternativas del cómic' });
+  }
+});
+
 // --- RELACIONES DE UN MANGA (secuelas/precuelas + todo lo demás) ---
 async function obtenerRelacionesMangaMal(malMangaId) {
   const url = `${MAL_API_BASE}/manga/${malMangaId}?fields=id,title,main_picture,related_manga{relation_type,relation_type_formatted,node{id,title,main_picture}}`;
