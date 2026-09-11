@@ -1,6 +1,7 @@
 import RatingWidget from '@/components/RatingWidget';
 import ActionButtons from '@/components/ActionButtons';
 import BookPosterButtonModal from '@/components/BookPosterButtonModal';
+import MangaCollectionLinks from '@/components/MangaCollectionLinks';
 import MediaTabs from '@/components/MediaTabs';
 import AddToListModal from '@/components/AddToListModal';
 import ReviewLogButton from '@/components/ReviewLogButton';
@@ -115,6 +116,8 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
 
               <RatingWidget mediaId={media.id} />
             </div>
+
+            {media.malMangaId && <MangaCollectionLinks malMangaId={media.malMangaId} />}
           </div>
 
         </div>

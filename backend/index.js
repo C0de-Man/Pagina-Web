@@ -1043,6 +1043,86 @@ app.post('/media/mal-manga', async (req, res) => {
   }
 });
 
+// --- RELACIONES DE UN MANGA (secuelas/precuelas + todo lo demás) ---
+async function obtenerRelacionesMangaMal(malMangaId) {
+  const url = `${MAL_API_BASE}/manga/${malMangaId}?fields=id,title,main_picture,related_manga{relation_type,relation_type_formatted,node{id,title,main_picture}}`;
+  const response = await fetch(url, { headers: headersMal() });
+  if (!response.ok) throw new Error(`MAL respondió ${response.status}`);
+  return response.json();
+}
+
+function nodoAMangaSimple(node) {
+  return {
+    malMangaId: node.id,
+    titulo: node.title,
+    portada: node.main_picture?.large || node.main_picture?.medium || null,
+  };
+}
+
+async function construirSagaManga(malMangaIdInicial) {
+  const cadena = [{ malMangaId: malMangaIdInicial }];
+  const idsVistos = new Set([malMangaIdInicial]);
+
+  let actualId = malMangaIdInicial;
+  for (let i = 0; i < 20; i++) {
+    const data = await obtenerRelacionesMangaMal(actualId);
+    const sequel = (data.related_manga || []).find((r) => r.relation_type === 'sequel');
+    if (!sequel || idsVistos.has(sequel.node.id)) break;
+    cadena.push(nodoAMangaSimple(sequel.node));
+    idsVistos.add(sequel.node.id);
+    actualId = sequel.node.id;
+  }
+
+  actualId = malMangaIdInicial;
+  const prefijo = [];
+  for (let i = 0; i < 20; i++) {
+    const data = await obtenerRelacionesMangaMal(actualId);
+    const prequel = (data.related_manga || []).find((r) => r.relation_type === 'prequel');
+    if (!prequel || idsVistos.has(prequel.node.id)) break;
+    prefijo.unshift(nodoAMangaSimple(prequel.node));
+    idsVistos.add(prequel.node.id);
+    actualId = prequel.node.id;
+  }
+
+  const completa = [...prefijo, ...cadena];
+  const indiceInicial = prefijo.length;
+  if (!completa[indiceInicial].titulo) {
+    const dataInicial = await obtenerRelacionesMangaMal(malMangaIdInicial);
+    completa[indiceInicial] = nodoAMangaSimple({ id: dataInicial.id, title: dataInicial.title, main_picture: dataInicial.main_picture });
+  }
+
+  return completa;
+}
+
+app.get('/mal/manga/:malMangaId/relations', async (req, res) => {
+  try {
+    const malMangaId = parseInt(req.params.malMangaId, 10);
+    if (Number.isNaN(malMangaId)) return res.status(400).json({ error: 'malMangaId inválido' });
+
+    const [saga, dataActual] = await Promise.all([
+      construirSagaManga(malMangaId),
+      obtenerRelacionesMangaMal(malMangaId),
+    ]);
+
+    const grupos = {};
+    for (const rel of dataActual.related_manga || []) {
+      if (rel.relation_type === 'sequel' || rel.relation_type === 'prequel') continue;
+      const etiqueta = rel.relation_type_formatted || 'Other';
+      if (!grupos[etiqueta]) grupos[etiqueta] = [];
+      grupos[etiqueta].push(nodoAMangaSimple(rel.node));
+    }
+
+    res.json({
+      saga: saga.length > 1 ? saga : [],
+      indiceActual: saga.length > 1 ? saga.findIndex((s) => s.malMangaId === malMangaId) : -1,
+      moreContent: grupos,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /mal/manga/:malMangaId/relations:', error);
+    res.status(500).json({ error: 'Error al obtener las relaciones del manga' });
+  }
+});
+
 // --- TRADUCTOR AUTOMÁTICO (MyMemory, gratis, sin clave) ---
 // Solo se usa para juegos: es la única fuente de texto que no tenemos en varios idiomas de origen.
 async function traducirTexto(texto, idiomaDestino) {

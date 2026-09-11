@@ -23,17 +23,22 @@ export default function BackdropImage({
       .then((data) => {
         if (data.customBackdrop) setBackdrop(data.customBackdrop);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [mediaId]);
 
-  return backdrop ? (
+  // Sin backdrop, no queremos ni la franja gris ni el texto "SIN BACKDROP"
+  // — pero el layout de la página usa un margen negativo pensado para que
+  // el contenido "suba" sobre el backdrop, así que un simple `return null`
+  // deja el título pegado al navbar. Este espaciador da algo de aire sin
+  // ocupar tanto como el backdrop real.
+  if (!backdrop) {
+    return <div className="w-full h-40 md:h-56" />;
+  }
+
+  return (
     <div className="w-full h-64 md:h-80 relative border-b border-gray-800 overflow-hidden">
       <img src={backdrop} alt="Backdrop" className="w-full h-full object-cover opacity-60" />
       <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/20 to-transparent" />
-    </div>
-  ) : (
-    <div className="w-full h-64 md:h-80 bg-gradient-to-b from-gray-800 to-gray-950 flex items-center justify-center border-b border-gray-800">
-      <span className="text-gray-600 font-bold tracking-widest">SIN BACKDROP</span>
     </div>
   );
 }

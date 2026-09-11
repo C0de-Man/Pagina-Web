@@ -34,7 +34,7 @@ export default function PosterImage({
     <img
       src={portada}
       alt={titulo}
-      className="w-full rounded-lg shadow-2xl border-2 border-gray-800 object-cover aspect-[2/3]"
+      className="w-full rounded-lg shadow-2xl border-2 border-gray-800 object-contain aspect-[2/3] bg-gray-900"
     />
   ) : (
     <div className="w-full aspect-[2/3] bg-gray-800 rounded-lg shadow-2xl border-2 border-gray-800 flex items-center justify-center">

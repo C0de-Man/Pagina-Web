@@ -3,30 +3,67 @@ import { useState, useEffect } from 'react';
 
 export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [ediciones, setEdiciones] = useState<{ googleBooksId: string; portada: string }[]>([]);
+  const [imagenes, setImagenes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [fuente, setFuente] = useState<'googlebooks' | 'mal' | null>(null);
+  // null = todavía no sabemos si hay imágenes; el botón se queda oculto
+  // hasta confirmar que SÍ hay algo que mostrar.
+  const [hayImagenes, setHayImagenes] = useState<boolean | null>(null);
 
-  const loadEditions = async () => {
+  const obtenerImagenes = async (): Promise<string[]> => {
+    const resMedia = await fetch(`http://localhost:3001/media/${mediaId}`);
+    const media = await resMedia.json();
+
+    if (media.malMangaId) {
+      setFuente('mal');
+      const res = await fetch(`http://localhost:3001/mal/manga/${media.malMangaId}/images`);
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } else {
+      setFuente('googlebooks');
+      const res = await fetch(`http://localhost:3001/googlebooks/editions/${mediaId}`);
+      const data = await res.json();
+      return Array.isArray(data) ? data.map((e: any) => e.portada) : [];
+    }
+  };
+
+  // Precomprobación silenciosa al montar: si no hay ninguna imagen
+  // alternativa, el botón ni se muestra — evita el modal vacío con el aviso
+  // de "no se encontraron imágenes" que resultaba confuso.
+  useEffect(() => {
+    let cancelado = false;
+    obtenerImagenes()
+      .then((imgs) => {
+        if (!cancelado) setHayImagenes(imgs.length > 0);
+      })
+      .catch(() => {
+        if (!cancelado) setHayImagenes(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [mediaId]);
+
+  const handleOpen = async () => {
+    setIsModalOpen(true);
     setLoading(true);
     setErrorMsg('');
     try {
-      const res = await fetch(`http://localhost:3001/googlebooks/editions/${mediaId}`);
-      const data = await res.json();
-      setEdiciones(Array.isArray(data) ? data : []);
-      if (!Array.isArray(data) || data.length === 0) {
-        setErrorMsg('No se encontraron otras ediciones de este libro en Google Books.');
+      const imgs = await obtenerImagenes();
+      setImagenes(imgs);
+      if (imgs.length === 0) {
+        setErrorMsg(
+          fuente === 'mal'
+            ? 'No se encontraron imágenes alternativas para este manga.'
+            : 'No se encontraron otras ediciones de este libro en Google Books.'
+        );
       }
     } catch (error) {
-      console.error('Error cargando ediciones de Google Books', error);
+      console.error('Error cargando imágenes alternativas', error);
       setErrorMsg('Error de conexión con el servidor');
     }
     setLoading(false);
-  };
-
-  const handleOpen = () => {
-    setIsModalOpen(true);
-    loadEditions();
   };
 
   const seleccionar = async (portada: string) => {
@@ -35,17 +72,21 @@ export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) 
       alert('Tienes que iniciar sesión para guardar tu carátula.');
       return;
     }
-    // Mismo endpoint genérico que ya usa PosterButtonModal — solo guarda
-    // la URL, sin importar de qué fuente venga.
-    await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ newPosterUrl: portada }),
-    });
-    window.location.reload();
+    try {
+      const res = await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ newPosterUrl: portada }),
+      });
+      if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
+      window.location.reload();
+    } catch (error) {
+      console.error('Error al guardar la carátula', error);
+      alert('No se pudo guardar la carátula. Revisa la consola del backend para más detalles.');
+    }
   };
 
   useEffect(() => {
@@ -56,6 +97,8 @@ export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isModalOpen]);
+
+  if (!hayImagenes) return null;
 
   return (
     <>
@@ -77,28 +120,25 @@ export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) 
           >
             <div className="flex justify-between items-center px-6 py-4 border-b border-gray-700 flex-shrink-0">
               <span className="text-sm font-bold uppercase tracking-wider text-white">
-                Otras ediciones ({ediciones.length})
+                {fuente === 'mal' ? 'Otras imágenes' : 'Otras ediciones'} ({imagenes.length})
               </span>
               <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white text-2xl font-bold cursor-pointer">✕</button>
             </div>
 
             <div className="overflow-y-auto p-6">
-              <p className="text-xs text-gray-500 mb-4">
-                Google Books no tiene un catálogo de carátulas alternativas — estas son las portadas de otras ediciones (idioma, año, editorial) del mismo título que hemos encontrado.
-              </p>
               {loading ? (
-                <div className="text-center py-12 text-gray-400">Buscando otras ediciones...</div>
+                <div className="text-center py-12 text-gray-400">Buscando imágenes alternativas...</div>
               ) : errorMsg ? (
                 <div className="text-center py-12 text-red-400">{errorMsg}</div>
               ) : (
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-4">
-                  {ediciones.map((e) => (
+                  {imagenes.map((url) => (
                     <img
-                      key={e.googleBooksId}
-                      src={e.portada}
-                      onClick={() => seleccionar(e.portada)}
+                      key={url}
+                      src={url}
+                      onClick={() => seleccionar(url)}
                       className="cursor-pointer rounded-lg hover:scale-105 transition border-2 border-transparent hover:border-blue-500 object-cover aspect-[2/3] bg-gray-800"
-                      alt="Edición alternativa"
+                      alt="Imagen alternativa"
                       loading="lazy"
                     />
                   ))}
