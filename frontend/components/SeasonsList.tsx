@@ -109,10 +109,13 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
   const [selectorPosterAbierto, setSelectorPosterAbierto] = useState(false);
   const [postersAlternativos, setPostersAlternativos] = useState<PosterAlternativo[]>([]);
   const [cargandoPosters, setCargandoPosters] = useState(false);
-  // Recuerda qué valor de nota sugerida ya descartaste (con "Cancel" o
-  // "Apply"), para no repetirte el mismo aviso una y otra vez mientras nada
-  // cambie — solo reaparece si el cálculo da un valor distinto.
+  // Recuerda qué valor de nota sugerida ya descartaste EN ESTA SESIÓN (con
+  // "Cancel"), para no repetirte el aviso mientras sigas en la página.
   const [notaDescartada, setNotaDescartada] = useState<number | null>(null);
+  // Tu nota general ACTUAL de la serie (viene de /media/:id/status) — si ya
+  // coincide con la calculada, la sugerencia no tiene nada que ofrecer y no
+  // debe reaparecer al recargar la página.
+  const [notaGeneralActual, setNotaGeneralActual] = useState<number | null>(null);
 
   const idioma = getIdioma();
 
@@ -131,14 +134,21 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
           cache: 'no-store',
         }).then((r) => r.json())
         : Promise.resolve([]),
+      token
+        ? fetch(`http://localhost:3001/media/${mediaId}/status`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        }).then((r) => r.json())
+        : Promise.resolve(null),
     ])
-      .then(([temps, ests]) => {
+      .then(([temps, ests, status]) => {
         setTemporadas(Array.isArray(temps) ? temps : []);
         const mapa: Record<number, EstadoTemporada> = {};
         (Array.isArray(ests) ? ests : []).forEach((e: EstadoTemporada) => {
           mapa[e.seasonNumber] = e;
         });
         setEstadosTemporadas(mapa);
+        if (status && status.rating != null) setNotaGeneralActual(status.rating);
       })
       .catch(() => { })
       .finally(() => setCargando(false));
@@ -214,6 +224,42 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
       },
     };
     await revisarSiSerieCompleta(estadosTemporadasActualizados);
+  };
+
+  // Marca como vista esta temporada Y todas las anteriores que aún no lo
+  // estuvieran — mismo criterio que marcarVistoConAnteriores, pero a nivel
+  // de temporada en vez de episodio.
+  const marcarTemporadaYAnteriores = async (numeroTemporada: number) => {
+    const numerosAMarcar = temporadas
+      .filter((t) => t.numero <= numeroTemporada && !estadosTemporadas[t.numero]?.watched)
+      .map((t) => t.numero);
+
+    const estadosActualizados = { ...estadosTemporadas };
+    for (const n of numerosAMarcar) {
+      const estadoActual = estadosTemporadas[n];
+      estadosActualizados[n] = {
+        seasonNumber: n,
+        watched: true,
+        rating: estadoActual?.rating ?? null,
+        customPoster: estadoActual?.customPoster ?? null,
+      };
+    }
+    setEstadosTemporadas(estadosActualizados);
+
+    const token = localStorage.getItem('token');
+    if (token) {
+      await Promise.all(
+        numerosAMarcar.map((n) =>
+          fetch(`http://localhost:3001/media/${mediaId}/seasons/${n}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ watched: true }),
+          }).catch(() => { })
+        )
+      );
+    }
+
+    await revisarSiSerieCompleta(estadosActualizados);
   };
 
   const marcarVistoConAnteriores = async (ep: Episodio) => {
@@ -334,7 +380,8 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
       temporadasReales.length
     )
     : null;
-  const mostrarSugerenciaNota = notaSugerida !== null && notaSugerida !== notaDescartada;
+  const mostrarSugerenciaNota =
+    notaSugerida !== null && notaSugerida !== notaDescartada && notaSugerida !== notaGeneralActual;
 
   const aplicarNotaSugerida = async () => {
     if (notaSugerida === null) return;
@@ -348,6 +395,7 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
       });
       window.dispatchEvent(new CustomEvent('mediaWatchedChanged', { detail: { mediaId, watched: true } }));
       window.dispatchEvent(new CustomEvent('media-rating-applied', { detail: { mediaId, rating: notaSugerida } }));
+      setNotaGeneralActual(notaSugerida);
     } catch { }
     setNotaDescartada(notaSugerida);
   };
@@ -432,7 +480,7 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
                     });
                   }
                   if (nuevoEstado) {
-                    await marcarTemporadaCompleta(t.numero);
+                    await marcarTemporadaYAnteriores(t.numero);
                   } else {
                     await actualizarTemporada(t.numero, { watched: false });
                   }
