@@ -31,6 +31,7 @@ model Media {
   googleBooksId String? @unique // id de Google Books
   mangaDexId    String? @unique // id de MangaDex (UUID, string) — se mantiene como respaldo
   malMangaId    Int?    @unique // id de manga en MyAnimeList (API oficial v2)
+  comicVineId   Int?    @unique // id de cómic en Comic Vine (guardado como tipo LIBRO, igual que el manga)
   sinopsisTraducciones Json? // caché: { "es-ES": "texto ya traducido", "fr-FR": "..." }
   createdAt DateTime  @default(now())
   gameLogs  GameLog[]

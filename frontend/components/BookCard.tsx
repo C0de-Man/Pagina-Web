@@ -29,7 +29,9 @@ export default function BookCard({ libro, dbId, customPoster, fullWidth }: { lib
       ? `/book/mal/${libro.origenId}`
       : libro.fuente === 'mangadex'
         ? `/book/mangadex/${libro.origenId}`
-        : `/book/googlebooks/${libro.origenId}`;
+        : libro.fuente === 'comicvine'
+          ? `/book/comicvine/${libro.origenId}`
+          : `/book/googlebooks/${libro.origenId}`;
 
   const posterUrl = miCustomPoster || libro.portada || null;
   const titulo = libro.titulo;

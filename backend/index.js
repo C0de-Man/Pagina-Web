@@ -967,6 +967,166 @@ function nombreAutorMal(autoresMal) {
   return [primero.first_name, primero.last_name].filter(Boolean).join(' ') || null;
 }
 
+// --- COMIC VINE — CÓMICS ---
+// Comic Vine exige un User-Agent propio (si no, algunas peticiones dan 420/
+// bloqueo silencioso) y la key va como query param ?api_key=, no como header.
+// Se trackea a nivel de VOLUME (la serie/run de cómics, ej. "Batman (2016)"),
+// no de issue individual — mismo nivel de granularidad que un manga en MAL.
+const COMICVINE_API_BASE = 'https://comicvine.gamespot.com/api';
+const COMICVINE_USER_AGENT = 'MediaTrackerApp/1.0 (proyecto personal)';
+
+// Red de seguridad para cuando NINGÚN resultado coincide exacto con el
+// término buscado (acentos, orden de palabras, Comic Vine no lo tiene tal
+// cual...): en vez de dejar el orden crudo de relevancia de texto de Comic
+// Vine (que puede mezclar cualquier cosa que solo comparta una palabra),
+// se ordena por parecido real al término — coincidencia exacta primero,
+// luego "empieza por", luego "contiene", y dentro de cada grupo por
+// cercanía de longitud (un título mucho más largo que la búsqueda es
+// menos probable que sea lo buscado).
+function ordenarPorParecido(volumenes, query) {
+  const normalizar = (s) =>
+    s.trim().toLowerCase().replace(/[-–:']/g, ' ').replace(/^the\s+/, '').replace(/\s+/g, ' ').trim();
+  const objetivo = normalizar(query);
+
+  // Descarta lo que ni siquiera CONTIENE el término buscado en su nombre —
+  // sin esto, el respaldo de búsqueda de texto de Comic Vine puede colar
+  // resultados sin relación real (coincidencia por sinopsis, autor, etc.),
+  // tipo "The Naval pocket-book" al buscar "Hulk".
+  const relevantes = volumenes.filter((v) => v.name && normalizar(v.name).includes(objetivo));
+  const base = relevantes.length > 0 ? relevantes : volumenes;
+
+  const puntuar = (v) => {
+    const nombre = normalizar(v.name || '');
+    if (nombre === objetivo) return 0;
+    if (nombre.startsWith(objetivo)) return 1;
+    return 2 + Math.abs(nombre.length - objetivo.length) / 100;
+  };
+
+  return [...base].sort((a, b) => puntuar(a) - puntuar(b));
+}
+
+// Con el mismo título exacto pueden convivir dos cosas distintas: distintas
+// EDICIONES de la misma obra (reimpresiones, variantes — normalmente de la
+// MISMA editorial, donde solo interesa la de más issues) y distintos
+// CÓMICS que solo comparten nombre por casualidad (ej. "Ben 10" de una
+// editorial española de 2010 y "Ben 10" de Dynamite en 2026 — obras
+// distintas de verdad). Se agrupa por editorial: dentro de cada una, solo
+// el volumen con más issues; entre editoriales distintas, se conservan
+// todas.
+// Con el mismo título exacto pueden convivir la obra original y sus
+// traducciones/recopilaciones posteriores en otras editoriales (ej.
+// "Dexter" de Marvel 2013 en inglés vs "Dexter" de Planeta DeAgostini 2014,
+// una colección traducida del mismo cómic) — Comic Vine no distingue
+// "traducción" de "obra distinta con el mismo nombre", así que se usa el
+// AÑO como criterio: la edición ORIGINAL casi siempre se publica antes que
+// cualquier traducción/recopilación. Nos quedamos con la más antigua (y, si
+// empatan en año, con la de más issues).
+// Con el mismo título exacto puede haber CÓMICS DE VERDAD DISTINTOS (ej.
+// "Ben 10" de una editorial de 2010 y "Ben 10" de Dynamite en 2026 — obras
+// diferentes, ambas deben quedarse) y, por otro lado, ediciones deluxe/
+// recopilatorios/traducciones DEL MISMO cómic (ej. "Dexter" de Planeta
+// DeAgostini, cuya propia descripción dice "Spanish trade collection of
+// Dexter..." — esa hay que descartarla y quedarnos con el original de
+// Marvel). Comic Vine no tiene un campo que distinga esto, pero SUELE
+// decirlo en la descripción o en el nombre, así que se filtra por eso.
+function filtrarEdicionesEspeciales(volumenes) {
+  const PATRONES_REEDICION = [
+    'deluxe edition', 'deluxe hardcover', 'omnibus', 'complete collection',
+    'collected edition', 'trade collection of', 'collection of',
+    'translat', // cubre "translated into", "translating", "translation" de una vez
+    'spanish edition', 'italian edition', 'french edition', 'german edition',
+    'portuguese edition', 'edición en español', 'traducción', 'traducido',
+    'reprint', 'reprints',
+    'wing of', // "Published by the German wing of Panini Comics"
+    'trade paperback', 'trade paperbacks',
+    'foreign edition', 'international edition',
+  ];
+  const esReedicion = (v) => {
+    const texto = `${v.name || ''} ${v.description || ''}`.toLowerCase();
+    return PATRONES_REEDICION.some((p) => texto.includes(p));
+  };
+
+  const sinReediciones = volumenes.filter((v) => !esReedicion(v));
+  // Red de seguridad: si por lo que sea el filtro descartara TODO (ningún
+  // volumen "limpio"), mejor mostrar los originales sin filtrar que dejar
+  // la búsqueda vacía.
+  const base = sinReediciones.length > 0 ? sinReediciones : volumenes;
+
+  // Orden por año — no colapsa nada, solo pone el más antiguo (el
+  // original, casi siempre) primero entre los que hayan sobrevivido.
+  return [...base].sort((a, b) => {
+    const anioA = a.start_year ? parseInt(a.start_year, 10) : Infinity;
+    const anioB = b.start_year ? parseInt(b.start_year, 10) : Infinity;
+    return anioA - anioB;
+  });
+}
+
+// Pide TODAS las páginas de un endpoint de Comic Vine (volumes o search),
+// no solo la primera — Comic Vine limita a 100 resultados por página, así
+// que hay que ir pidiendo página a página (offset) hasta que una página
+// devuelva menos de 100, igual que ya haces con SteamGridDB
+// (obtenerTodasLasGridsSteamGridDB). Tope de seguridad alto (20 páginas =
+// 2000 resultados) solo para evitar un bucle infinito real, nunca debería
+// llegar tan lejos en la práctica.
+const COMICVINE_MAX_PAGINAS_SEGURIDAD = 20;
+async function obtenerTodosLosResultadosComicVine(urlBase, headers) {
+  let todos = [];
+  for (let pagina = 0; pagina < COMICVINE_MAX_PAGINAS_SEGURIDAD; pagina++) {
+    const offset = pagina * 100;
+    const resp = await fetch(`${urlBase}&offset=${offset}`, { headers });
+    if (!resp.ok) break;
+    const data = await resp.json();
+    const resultados = data.results || [];
+    todos = todos.concat(resultados);
+    if (resultados.length < 100) break; // última página, no hace falta seguir
+  }
+  return todos;
+}
+
+async function buscarComicsComicVine(query, limit = 40) {
+  const apiKey = process.env.COMICVINE_API_KEY;
+  const headers = { 'User-Agent': COMICVINE_USER_AGENT };
+  const campos = 'id,name,start_year,image,publisher,count_of_issues,description';
+
+  // Se combinan SIEMPRE las dos vías (filtro por nombre + búsqueda de
+  // texto), en vez de usar una como respaldo de la otra — Comic Vine no
+  // siempre devuelve el mismo conjunto de resultados por las dos vías (por
+  // ejemplo, el volumen ORIGINAL de una saga larga a veces no aparece en
+  // una de las dos), así que juntar ambas y deduplicar por id da la
+  // cobertura más completa posible.
+  // sort=id:asc es imprescindible para que la paginación por offset sea
+  // fiable — sin un orden estable, Comic Vine puede devolver páginas que se
+  // solapan o se saltan resultados entre sí, perdiendo volúmenes por el
+  // camino (como pasaba con "The Amazing Spider-Man" 1963, que no aparecía
+  // en ninguna de las dos vías).
+  const urlFiltro = `${COMICVINE_API_BASE}/volumes/?api_key=${apiKey}&format=json&filter=name:${encodeURIComponent(query.trim())}&field_list=${campos}&sort=id:asc&limit=100`;
+  const urlBusqueda = `${COMICVINE_API_BASE}/search/?api_key=${apiKey}&format=json&query=${encodeURIComponent(query)}&resources=volume&field_list=${campos}&sort=id:asc&limit=100`;
+
+  const [porFiltro, porBusqueda] = await Promise.all([
+    obtenerTodosLosResultadosComicVine(urlFiltro, headers).catch(() => []),
+    obtenerTodosLosResultadosComicVine(urlBusqueda, headers).catch(() => []),
+  ]);
+
+  const porId = new Map();
+  for (const v of [...porFiltro, ...porBusqueda]) {
+    if (v.id != null) porId.set(v.id, v);
+  }
+  const combinados = Array.from(porId.values());
+
+  if (combinados.length === 0) return [];
+
+  return filtrarEdicionesEspeciales(ordenarPorParecido(combinados, query));
+}
+
+async function obtenerDetalleComicVineVolume(comicVineId) {
+  const apiKey = process.env.COMICVINE_API_KEY;
+  const url = `${COMICVINE_API_BASE}/volume/4050-${comicVineId}/?api_key=${apiKey}&format=json&field_list=id,name,start_year,image,publisher,count_of_issues,description`;
+  const response = await fetch(url, { headers: { 'User-Agent': COMICVINE_USER_AGENT } });
+  if (!response.ok) throw new Error(`Comic Vine respondió ${response.status}`);
+  const data = await response.json();
+  return data.results;
+}
+
 // --- BUSCAR MANGA EN MAL (endpoint propio, para pruebas/uso directo) ---
 app.get('/mal/manga/buscar', async (req, res) => {
   try {
@@ -985,6 +1145,28 @@ app.get('/mal/manga/buscar', async (req, res) => {
   } catch (error) {
     console.error('ERROR EN GET /mal/manga/buscar:', error);
     res.status(500).json({ error: 'Error al buscar manga en MAL' });
+  }
+});
+
+// --- BUSCAR CÓMICS EN COMIC VINE (endpoint propio, para pruebas/uso directo) ---
+app.get('/comicvine/comics/buscar', async (req, res) => {
+  try {
+    const searchQuery = req.query.q;
+    if (!searchQuery) return res.status(400).json({ error: 'Falta término' });
+    const resultados = await buscarComicsComicVine(searchQuery);
+    res.json(
+      resultados.map((item) => ({
+        comicVineId: item.id,
+        titulo: item.name,
+        editorial: item.publisher?.name || null,
+        anio: item.start_year ? parseInt(item.start_year, 10) : null,
+        totalIssues: item.count_of_issues || null,
+        portada: item.image?.medium_url || item.image?.small_url || null,
+      }))
+    );
+  } catch (error) {
+    console.error('ERROR EN GET /comicvine/comics/buscar:', error);
+    res.status(500).json({ error: 'Error al buscar cómics en Comic Vine' });
   }
 });
 
@@ -1040,6 +1222,44 @@ app.post('/media/mal-manga', async (req, res) => {
   } catch (error) {
     console.error('ERROR EN POST /media/mal-manga:', error);
     res.status(500).json({ error: 'Error al guardar el manga desde MAL' });
+  }
+});
+
+// --- GUARDAR UN CÓMIC DESDE COMIC VINE (como tipo LIBRO — vive dentro de Books) ---
+app.post('/media/comicvine', async (req, res) => {
+  try {
+    const { comicVineId } = req.body;
+    if (!comicVineId) return res.status(400).json({ error: 'Falta comicVineId' });
+
+    const comicVineIdNum = parseInt(comicVineId, 10);
+    const existente = await prisma.media.findFirst({ where: { comicVineId: comicVineIdNum } });
+    if (existente) return res.json(existente);
+
+    const data = await obtenerDetalleComicVineVolume(comicVineIdNum);
+    if (!data?.id) return res.status(404).json({ error: 'Cómic no encontrado en Comic Vine' });
+
+    const portadaUrl = data.image?.medium_url || data.image?.small_url || null;
+    const sinopsisLimpia = data.description
+      ? data.description.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      : null;
+
+    const nuevoMedia = await prisma.media.create({
+      data: {
+        comicVineId: comicVineIdNum,
+        titulo: data.name,
+        tituloOriginal: data.name,
+        tipo: 'LIBRO', // no COMIC — el cómic vive dentro de Books, sin sección propia (mismo criterio que el manga)
+        anio: data.start_year ? parseInt(data.start_year, 10) : null,
+        portada: portadaUrl,
+        sinopsis: sinopsisLimpia,
+        sinopsisTraducciones: {},
+      },
+    });
+
+    res.json({ ...nuevoMedia, totalIssues: data.count_of_issues || null });
+  } catch (error) {
+    console.error('ERROR EN POST /media/comicvine:', error);
+    res.status(500).json({ error: 'Error al guardar el cómic desde Comic Vine' });
   }
 });
 
@@ -2769,8 +2989,19 @@ app.get('/libros/buscar', async (req, res) => {
           };
         });
 
+        // Google Books ordena por relevancia interna (contenido, autor,
+        // editorial...), no por coincidencia de título — sin este filtro
+        // colaban resultados que ni siquiera tienen el término buscado en
+        // el título (p. ej. "Navy List" o "Cases Eastern Districts Court"
+        // al buscar "Hulk", porque "hulk" aparece en su contenido/notas,
+        // no en el nombre del libro).
+        const terminoNormalizado = searchQuery.trim().toLowerCase();
+        const conTituloRelevante = crudos.filter((r) =>
+          r.titulo.toLowerCase().includes(terminoNormalizado)
+        );
+
         const vistos = new Set();
-        return crudos.filter((r) => {
+        return conTituloRelevante.filter((r) => {
           const clave = `${r.titulo.toLowerCase()}|${(r.autor || '').toLowerCase()}`;
           if (vistos.has(clave)) return false;
           vistos.add(clave);
@@ -2830,7 +3061,24 @@ app.get('/libros/buscar', async (req, res) => {
       }
     };
 
-    const [libros, manga] = await Promise.all([buscarGoogleBooks(), buscarMangaMal()]);
+    const buscarComics = async () => {
+      try {
+        const resultados = await buscarComicsComicVine(searchQuery, 40);
+        return resultados.map((item) => ({
+          fuente: 'comicvine',
+          origenId: item.id,
+          titulo: item.name,
+          autor: item.publisher?.name || null,
+          anio: item.start_year ? parseInt(item.start_year, 10) : null,
+          portada: item.image?.medium_url || item.image?.small_url || null,
+        }));
+      } catch (e) {
+        console.error('Error buscando cómics en Comic Vine (búsqueda combinada):', e.message);
+        return [];
+      }
+    };
+
+    const [libros, manga, comics] = await Promise.all([buscarGoogleBooks(), buscarMangaMal(), buscarComics()]);
 
     // MAL (y MangaDex de respaldo) modelan cada manga como UNA obra (no por
     // tomo). Los títulos de Google Books no siempre coinciden EXACTAMENTE
@@ -2842,14 +3090,36 @@ app.get('/libros/buscar', async (req, res) => {
     const normalizar = (t) => t.trim().toLowerCase();
     const titulosManga = manga.map((m) => normalizar(m.titulo));
 
+    // Comic Vine también indexa manga traducido (ej. "Batman: The Jiro
+    // Kuwata Batmanga") — si ya lo tenemos cubierto por MAL, se descarta
+    // aquí para que MAL sea siempre la fuente de manga, nunca Comic Vine.
+    const comicsSinSolapar = comics.filter((comic) => {
+      const tituloComic = normalizar(comic.titulo);
+      return !titulosManga.some((tm) => tituloComic === tm || tituloComic.startsWith(tm));
+    });
+
+    const titulosComics = comicsSinSolapar.map((c) => normalizar(c.titulo));
+    const titulosExcluidos = [...titulosManga, ...titulosComics];
+
     const librosSinSolapar = libros.filter((libro) => {
       const tituloLibro = normalizar(libro.titulo);
-      return !titulosManga.some((tm) => tituloLibro === tm || tituloLibro.startsWith(tm));
+      return !titulosExcluidos.some((tm) => tituloLibro === tm || tituloLibro.startsWith(tm));
     });
 
     const vistos = new Set();
-    const combinados = [...manga, ...librosSinSolapar].filter((item) => {
-      const clave = normalizar(item.titulo);
+    const combinados = [...manga, ...comicsSinSolapar, ...librosSinSolapar].filter((item) => {
+      // Antes la clave era solo el título normalizado, así que un manga y un
+      // cómic con el mismo nombre genérico (ej. "Batman") se pisaban entre
+      // sí como si fueran duplicados — se incluye la fuente para que solo
+      // se deduplique dentro de la MISMA fuente, nunca entre manga/cómic/
+      // libro. PERO en Comic Vine es normal y deseado que varios volúmenes
+      // DISTINTOS compartan el mismo título exacto (ej. "Ben 10" de IDW
+      // 2013, IDW 2014, El País 2010, Dynamite 2026 — cuatro cómics reales
+      // y diferentes, no ediciones del mismo) — para esos se deduplica por
+      // origenId en vez de por título, así los cuatro sobreviven.
+      const clave = item.fuente === 'comicvine'
+        ? `comicvine|${item.origenId}`
+        : `${item.fuente}|${normalizar(item.titulo)}`;
       if (vistos.has(clave)) return false;
       vistos.add(clave);
       return true;
