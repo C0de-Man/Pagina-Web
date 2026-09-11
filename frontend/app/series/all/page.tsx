@@ -41,7 +41,7 @@ export default async function TodasLasSeries({ searchParams }: { searchParams: P
   const myDb = await resDb.json();
 
   const getLocalData = (tmdbId: number) => {
-    const local = myDb.find((m: any) => m.tmdbId === tmdbId);
+    const local = myDb.find((m: any) => m.tmdbId === tmdbId && m.tipo === 'SERIE');
     return {
       dbId: local ? local.id : null,
       customPoster: null
@@ -72,11 +72,11 @@ export default async function TodasLasSeries({ searchParams }: { searchParams: P
                 const { dbId, customPoster } = getLocalData(serie.id);
                 return (
                   <div key={`all-${serie.id}`} className="w-full">
-                     <SeriesCard
-                       serie={serie}
-                       dbId={dbId}
-                       customPoster={customPoster}
-                     />
+                    <SeriesCard
+                      serie={serie}
+                      dbId={dbId}
+                      customPoster={customPoster}
+                    />
                   </div>
                 );
               })}
@@ -99,11 +99,10 @@ export default async function TodasLasSeries({ searchParams }: { searchParams: P
                   <Link
                     key={n}
                     href={`/series/all?page=${n}${sufijoTipo}`}
-                    className={`w-9 h-9 flex items-center justify-center rounded text-sm font-bold transition ${
-                      n === currentPage
+                    className={`w-9 h-9 flex items-center justify-center rounded text-sm font-bold transition ${n === currentPage
                         ? 'bg-blue-600 text-white'
                         : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white'
-                    }`}
+                      }`}
                   >
                     {n}
                   </Link>

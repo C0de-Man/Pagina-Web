@@ -36,7 +36,7 @@ export default function GameCard({ juego, dbId, customPoster, fullWidth }: { jue
         <img
           src={posterUrl}
           alt={titulo}
-          className="w-full aspect-[2/3] object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition duration-300 shadow-lg"
+          className="w-full aspect-[2/3] object-cover rounded-md border border-gray-700 group-hover:border-gray-400 transition duration-300 shadow-lg bg-gray-900"
         />
       ) : (
         <div className="w-full aspect-[2/3] bg-gray-800 rounded-md border border-gray-700 flex items-center justify-center text-xs text-center p-2 group-hover:border-gray-400 transition shadow-lg">

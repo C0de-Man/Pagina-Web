@@ -350,8 +350,8 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA', tituloActua
 
   const modoSaga = !hayUniversos && !!collection.collection;
 
-  const getLocalData = (id: number) => {
-    const local = myDb.find((m: any) => m.tmdbId === id);
+  const getLocalData = (id: number, tipoItem: string) => {
+    const local = myDb.find((m: any) => m.tmdbId === id && m.tipo === tipoItem);
     const dbId = local?.id || null;
     const miPersonalizacion = dbId ? personalizaciones[dbId] : undefined;
     return {
@@ -384,7 +384,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA', tituloActua
 
   const renderItem = (item: ItemSaga | null, label: string) => {
     if (!item) return null;
-    const { dbId, customPoster } = getLocalData(item.tmdbId);
+    const { dbId, customPoster } = getLocalData(item.tmdbId, item.tipo);
     const posterUrl = customPoster || item.portada;
     const mostrarImagen = posterUrl && !fallosImagen.has(item.tmdbId);
 
@@ -415,7 +415,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA', tituloActua
   };
 
   const renderSagaCard = (item: ItemSaga) => {
-    const { dbId, customPoster } = getLocalData(item.tmdbId);
+    const { dbId, customPoster } = getLocalData(item.tmdbId, item.tipo);
     const posterUrl = customPoster || item.portada;
     const esActual = item.tmdbId === tmdbId;
     const mostrarImagen = posterUrl && !fallosImagen.has(item.tmdbId);
@@ -1093,7 +1093,7 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA', tituloActua
 
   function renderTarjetaUniverso(it: UniverseItem) {
     const esActual = it.tmdbId === tmdbId;
-    const local = myDb.find((m: any) => m.tmdbId === it.tmdbId);
+    const local = myDb.find((m: any) => m.tmdbId === it.tmdbId && m.tipo === it.tipo);
     const miPersonalizacion = local ? personalizaciones[local.id] : undefined;
     const portadaReal = miPersonalizacion?.customPoster || local?.portada || it.portada;
     return (

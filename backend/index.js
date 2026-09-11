@@ -3924,7 +3924,7 @@ function getUserIdOpcional(req) {
 // Ahora se aplican los DOS niveles, en orden: tu personalización (si
 // existe) > la portada compartida ya guardada (si el título existe en tu
 // base de datos) > lo que traiga TMDB en crudo (si no está guardado todavía).
-async function mezclarCustomPosters(items, userId) {
+async function mezclarCustomPosters(items, userId, tipoForzado) {
   if (!items || items.length === 0) return items;
 
   const tmdbIds = items.map((i) => i.id).filter(Boolean);
@@ -3944,7 +3944,7 @@ async function mezclarCustomPosters(items, userId) {
   });
   if (mediaLocal.length === 0) return items;
 
-  const tipoEsperado = (mediaType) => (mediaType === 'tv' ? 'SERIE' : 'PELICULA');
+  const tipoEsperado = (mediaType) => (tipoForzado || (mediaType === 'tv' ? 'SERIE' : 'PELICULA'));
   const claveDe = (tmdbId, tipo) => `${tmdbId}-${tipo}`;
 
   const mediaIdPorClave = new Map(mediaLocal.map((m) => [claveDe(m.tmdbId, m.tipo), m.id]));
@@ -6440,7 +6440,7 @@ app.get('/tmdb/tv/top/page/:page', async (req, res) => {
     const pagina = conBayesiano.slice(startIndex, startIndex + itemsPerPage);
     const paginaConCaratulas = await conCaratulasInglesPorItem(pagina, apiKey, 'tv');
 
-    const resultadoFinal = await mezclarCustomPosters(paginaConCaratulas, getUserIdOpcional(req));
+    const resultadoFinal = await mezclarCustomPosters(paginaConCaratulas, getUserIdOpcional(req), 'SERIE');
     res.json({ page, results: resultadoFinal });
   } catch (error) {
     console.error('ERROR EN GET /tmdb/tv/top/page:', error);
@@ -6473,7 +6473,7 @@ app.get('/tmdb/tv/popular-historico/page/:page', async (req, res) => {
 
     const offsetDentroDeCombined = startIndex - (startTmdbPage - 1) * 20;
     const resultado = combined.slice(offsetDentroDeCombined, offsetDentroDeCombined + itemsPerPage);
-    const resultadoFinal = await mezclarCustomPosters(resultado, getUserIdOpcional(req));
+    const resultadoFinal = await mezclarCustomPosters(resultado, getUserIdOpcional(req), 'SERIE');
 
     res.json({ results: resultadoFinal });
   } catch (error) {
@@ -6508,7 +6508,7 @@ app.get('/tmdb/tv/year/:year/page/:page', async (req, res) => {
 
     const offsetDentroDeCombined = startIndex - (startTmdbPage - 1) * 20;
     const resultado = combined.slice(offsetDentroDeCombined, offsetDentroDeCombined + itemsPerPage);
-    const resultadoFinal = await mezclarCustomPosters(resultado, getUserIdOpcional(req));
+    const resultadoFinal = await mezclarCustomPosters(resultado, getUserIdOpcional(req), 'SERIE');
 
     res.json({ results: resultadoFinal });
   } catch (error) {
@@ -6751,7 +6751,7 @@ app.get('/tmdb/tv/year/:year', async (req, res) => {
     const response = await fetch(url);
     const data = await response.json();
     const conIngles = await conCaratulasIngles(url, data.results || []);
-    const resultado = await mezclarCustomPosters(conIngles, getUserIdOpcional(req));
+    const resultado = await mezclarCustomPosters(conIngles, getUserIdOpcional(req), 'SERIE');
     res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: "Error al obtener series" });
@@ -6766,7 +6766,7 @@ app.get('/tmdb/tv/popular-historico', async (req, res) => {
     const response = await fetch(url);
     const data = await response.json();
     const conIngles = await conCaratulasIngles(url, data.results || []);
-    const resultado = await mezclarCustomPosters(conIngles, getUserIdOpcional(req));
+    const resultado = await mezclarCustomPosters(conIngles, getUserIdOpcional(req), 'SERIE');
     res.json(resultado);
   } catch (error) {
     res.status(500).json({ error: "Error al obtener las series populares históricas" });
