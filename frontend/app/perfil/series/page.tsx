@@ -6,6 +6,7 @@ import { urlFicha } from '@/lib/slug';
 import SortDropdown from '@/components/SortDropdown';
 import { useSortPreference } from '@/hooks/useSortPreference';
 import { OPCIONES_ORDEN_WATCHED_DISPONIBLE, ordenarItems, type Selectores } from '@/lib/ordenamiento';
+import { getIdioma } from '@/lib/preferences';
 
 const selectoresSeries: Selectores<any> = {
   nombre: (i) => i.titulo,
@@ -40,7 +41,7 @@ export default function MisSeries() {
     if (!token) return;
     setLogueado(true);
 
-    fetch('http://localhost:3001/media/watched', {
+    fetch(`http://localhost:3001/media/watched?language=${getIdioma()}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })

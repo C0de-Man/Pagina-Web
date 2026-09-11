@@ -5,6 +5,7 @@ import { urlFicha } from '@/lib/slug';
 import SortDropdown from '@/components/SortDropdown';
 import { useSortPreference } from '@/hooks/useSortPreference';
 import { OPCIONES_ORDEN_WATCHLIST_DISPONIBLE, ordenarItems, type Selectores } from '@/lib/ordenamiento';
+import { getIdioma } from '@/lib/preferences';
 
 // El backend no devuelve una fecha de "añadido a watchlist" en cada item,
 // pero SÍ entrega el array ya ordenado (primero añadido → último añadido).
@@ -36,7 +37,7 @@ export default function Watchlist() {
     if (!token) return;
     setLogueado(true);
 
-    fetch('http://localhost:3001/media/watchlist', {
+    fetch(`http://localhost:3001/media/watchlist?language=${getIdioma()}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })

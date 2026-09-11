@@ -5397,6 +5397,32 @@ function getRegion(req) {
   return req.query.region || 'ES';
 }
 
+// --- TÍTULO EN VIVO, EN TU IDIOMA (compartido por varias rutas) ---
+// Media.titulo se guarda en el idioma que estuviera activo la primera vez
+// que ese título se añadió, y no se actualiza solo. Esto pide el título
+// real en el idioma pedido, con caché por tmdbId+tipo para no repetir la
+// misma llamada si varios items de la lista comparten título.
+function crearResolverTituloEnVivo(idioma) {
+  const apiKey = process.env.TMDB_API_KEY;
+  const cache = new Map();
+  return async function obtenerTituloEnVivo(item) {
+    if (!item.tmdbId || item.tipo === 'VIDEOJUEGO' || item.tipo === 'LIBRO') return item.titulo;
+    const clave = `${item.tmdbId}-${item.tipo}`;
+    if (cache.has(clave)) return cache.get(clave);
+    try {
+      const endpointTmdb = item.tipo === 'SERIE' ? 'tv' : 'movie';
+      const r = await fetch(`https://api.themoviedb.org/3/${endpointTmdb}/${item.tmdbId}?api_key=${apiKey}&language=${idioma}`);
+      const d = await r.json();
+      const tituloTraducido = d.title || d.name;
+      const resultado = tituloTraducido && tituloTraducido.trim() ? tituloTraducido : item.titulo;
+      cache.set(clave, resultado);
+      return resultado;
+    } catch (e) {
+      return item.titulo;
+    }
+  };
+}
+
 // --- CARÁTULAS EN INGLÉS PARA TOP (pelis/series) ---
 // A diferencia de conCaratulasIngles (que reconstruye la URL de una página
 // concreta), aquí el pool viene de combinar varias búsquedas distintas — no
@@ -5767,21 +5793,23 @@ app.get('/media/watchlist', requireAuth, async (req, res) => {
 
     const mediaIds = entries.map(e => e.mediaId);
     const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+    const obtenerTituloEnVivo = crearResolverTituloEnVivo(getLang(req));
 
-    const resultado = entries
-      .map(e => {
+    const resultado = await Promise.all(
+      entries.map(async (e) => {
         const item = mediaItems.find(m => m.id === e.mediaId);
         if (!item) return null;
         return {
           ...item,
+          titulo: await obtenerTituloEnVivo(item),
           portada: e.customPoster || item.portada,
           backdrop: e.customBackdrop || item.backdrop,
           fechaAgregado: e.lastActivityAt
         };
       })
-      .filter(Boolean);
+    );
 
-    res.json(resultado);
+    res.json(resultado.filter(Boolean));
   } catch (error) {
     console.error('ERROR EN GET WATCHLIST:', error);
     res.status(500).json({ error: 'Error al obtener la watchlist' });
@@ -5799,20 +5827,22 @@ app.get('/media/playing', requireAuth, async (req, res) => {
 
     const mediaIds = entries.map(e => e.mediaId);
     const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+    const obtenerTituloEnVivo = crearResolverTituloEnVivo(getLang(req));
 
-    const resultado = entries
-      .map(e => {
+    const resultado = await Promise.all(
+      entries.map(async (e) => {
         const item = mediaItems.find(m => m.id === e.mediaId);
         if (!item) return null;
         return {
           ...item,
+          titulo: await obtenerTituloEnVivo(item),
           portada: e.customPoster || item.portada,
           backdrop: e.customBackdrop || item.backdrop,
         };
       })
-      .filter(Boolean);
+    );
 
-    res.json(resultado);
+    res.json(resultado.filter(Boolean));
   } catch (error) {
     console.error('ERROR EN GET /media/playing:', error);
     res.status(500).json({ error: 'Error al obtener los juegos en curso' });
@@ -6059,7 +6089,7 @@ app.delete('/logs/:logId', requireAuth, async (req, res) => {
 // por fecha descendente. La usan tanto la ruta privada (/media/reviews, tu
 // propia sesión) como la pública (/users/:username/reviews, sin sesión),
 // para no duplicar la lógica de combinar+ordenar entre las dos.
-async function construirResenas(userId) {
+async function construirResenas(userId, idioma) {
   const [watchLogs, gameLogs] = await Promise.all([
     prisma.watchLog.findMany({
       where: { userId, review: { not: null } },
@@ -6078,6 +6108,7 @@ async function construirResenas(userId) {
 
   const mediaIds = [...new Set([...watchLogsConTexto.map((w) => w.mediaId), ...gameLogsConTexto.map((g) => g.mediaId)])];
   const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+  const obtenerTituloEnVivo = crearResolverTituloEnVivo(idioma || 'es-ES');
 
   const personalizaciones = await prisma.userMedia.findMany({
     where: { userId, mediaId: { in: mediaIds } },
@@ -6085,13 +6116,14 @@ async function construirResenas(userId) {
   });
   const persPorMediaId = new Map(personalizaciones.map((p) => [p.mediaId, p]));
 
-  const resenasPeliculas = watchLogsConTexto
-    .map((w) => {
+  const resenasPeliculas = await Promise.all(
+    watchLogsConTexto.map(async (w) => {
       const item = mediaItems.find((m) => m.id === w.mediaId);
       if (!item) return null;
       const pers = persPorMediaId.get(w.mediaId);
       return {
         ...item, // id, tmdbId, igdbId, tituloOriginal... todo lo que urlFicha() pueda necesitar
+        titulo: await obtenerTituloEnVivo(item),
         logId: `watchlog-${w.id}`, // clave de React única — NO usar como id de urlFicha
         mediaId: w.mediaId,
         portada: pers?.customPoster || item.portada,
@@ -6103,7 +6135,7 @@ async function construirResenas(userId) {
         fecha: w.fechaVisto,
       };
     })
-    .filter(Boolean);
+  ).then((arr) => arr.filter(Boolean));
 
   const resenasJuegos = gameLogsConTexto
     .map((g) => {
@@ -6141,7 +6173,7 @@ async function construirResenas(userId) {
 // --- MIS RESEÑAS (privado, tu propia sesión) ---
 app.get('/media/reviews', requireAuth, async (req, res) => {
   try {
-    const resenas = await construirResenas(req.userId);
+    const resenas = await construirResenas(req.userId, getLang(req));
     res.json(resenas);
   } catch (error) {
     console.error('ERROR EN GET /media/reviews:', error);
@@ -6162,7 +6194,7 @@ app.get('/users/:username/reviews', async (req, res) => {
     const puedeVer = await puedeVerContenidoPrivado(usuario, getUserIdOpcional(req));
     if (!puedeVer) return res.status(403).json({ error: 'Este perfil es privado', isPrivate: true });
 
-    const resenas = await construirResenas(usuario.id);
+    const resenas = await construirResenas(usuario.id, getLang(req));
     res.json(resenas);
   } catch (error) {
     console.error('ERROR EN GET /users/:username/reviews:', error);
@@ -9695,11 +9727,15 @@ app.get('/users/:username/lists/:listId', async (req, res) => {
     const mediaPorId = new Map(mediaItemsRaw.map((m) => [m.id, m]));
     const itemsConMedia = list.items.map((li) => ({ ...li, media: mediaPorId.get(li.mediaId) })).filter((li) => li.media);
     const ordenados = await ordenarItemsDeLista(itemsConMedia, list.ordenPor, list.ordenDireccion, usuario.id);
+    const obtenerTituloEnVivo = crearResolverTituloEnVivo(getLang(req));
 
-    const mediaItems = ordenados.map((li) => ({
-      ...li.media,
-      portada: customPosterPorMediaId.get(li.mediaId) || li.media.portada,
-    }));
+    const mediaItems = await Promise.all(
+      ordenados.map(async (li) => ({
+        ...li.media,
+        titulo: await obtenerTituloEnVivo(li.media),
+        portada: customPosterPorMediaId.get(li.mediaId) || li.media.portada,
+      }))
+    );
 
     const likesCount = await prisma.listLike.count({ where: { listId } });
 
@@ -9865,13 +9901,17 @@ app.get('/lists/:id', requireAuth, async (req, res) => {
     const itemsConMedia = list.items.map((li) => ({ ...li, media: mediaPorId.get(li.mediaId) })).filter((li) => li.media);
 
     const ordenados = await ordenarItemsDeLista(itemsConMedia, list.ordenPor, list.ordenDireccion, req.userId);
+    const obtenerTituloEnVivo = crearResolverTituloEnVivo(getLang(req));
 
-    const items = ordenados.map((li) => ({
-      ...li.media,
-      portada: customPosterPorMediaId.get(li.mediaId) || li.media.portada,
-      listItemId: li.id, // hace falta para el drag-and-drop (reordenar por ListItem, no por Media)
-      orden: li.orden,
-    }));
+    const items = await Promise.all(
+      ordenados.map(async (li) => ({
+        ...li.media,
+        titulo: await obtenerTituloEnVivo(li.media),
+        portada: customPosterPorMediaId.get(li.mediaId) || li.media.portada,
+        listItemId: li.id, // hace falta para el drag-and-drop (reordenar por ListItem, no por Media)
+        orden: li.orden,
+      }))
+    );
 
     res.json({
       id: list.id,

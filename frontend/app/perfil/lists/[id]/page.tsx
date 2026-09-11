@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import MovieCard from '@/components/MovieCard';
 import GameCard from '@/components/GameCard';
+import { getIdioma } from '@/lib/preferences';
 
 const API_URL = 'http://localhost:3001';
 
@@ -41,7 +42,7 @@ export default function ListaDetalle() {
       router.push('/login');
       return;
     }
-    fetch(`${API_URL}/lists/${listId}`, {
+    fetch(`${API_URL}/lists/${listId}?language=${getIdioma()}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })

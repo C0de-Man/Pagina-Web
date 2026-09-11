@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { urlFicha } from '@/lib/slug';
 import ReviewDetailModal from '@/components/ReviewDetailModal';
+import { getIdioma } from '@/lib/preferences';
 
 function Estrellas({ rating }: { rating: number }) {
   const sobreCinco = rating / 2;
@@ -40,7 +41,7 @@ export default function MisResenas() {
     }
     setLogueado(true);
 
-    fetch('http://localhost:3001/media/reviews', {
+    fetch(`http://localhost:3001/media/reviews?language=${getIdioma()}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { urlFicha } from '@/lib/slug';
+import { getIdioma } from '@/lib/preferences';
 
 // Convierte la nota guardada (escala 1-10) a estrellas visuales sobre 5,
 // con soporte de media estrella — igual que Letterboxd.
@@ -62,7 +63,7 @@ export default function Perfil() {
         .then(setFavoritos)
         .catch(() => { });
 
-      fetch('http://localhost:3001/media/watched', {
+      fetch(`http://localhost:3001/media/watched?language=${getIdioma()}`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       })
@@ -70,7 +71,7 @@ export default function Perfil() {
         .then(setVistas)
         .catch(() => { });
 
-      fetch('http://localhost:3001/media/playing', {
+      fetch(`http://localhost:3001/media/playing?language=${getIdioma()}`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       })
