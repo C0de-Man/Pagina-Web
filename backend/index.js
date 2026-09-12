@@ -1030,20 +1030,35 @@ function ordenarPorParecido(volumenes, query) {
 // Marvel). Comic Vine no tiene un campo que distinga esto, pero SUELE
 // decirlo en la descripción o en el nombre, así que se filtra por eso.
 function filtrarEdicionesEspeciales(volumenes) {
-  const PATRONES_REEDICION = [
+  // Patrones que solo tienen sentido buscarlos en el NOMBRE del volumen —
+  // aplicarlos contra la descripción completa da demasiados falsos
+  // positivos: la sinopsis de un cómic de éxito casi siempre menciona en
+  // algún punto que "fue recopilado en un trade paperback" o similar, sin
+  // que eso signifique que ESTE volumen concreto sea esa reedición (como
+  // pasaba con "Invincible" original, descartado por error porque su propia
+  // sinopsis menciona "collected edition"/"trade paperback" de pasada).
+  const PATRONES_SOLO_NOMBRE = [
     'deluxe edition', 'deluxe hardcover', 'omnibus', 'complete collection',
     'collected edition', 'trade collection of', 'collection of',
-    'translat', // cubre "translated into", "translating", "translation" de una vez
     'spanish edition', 'italian edition', 'french edition', 'german edition',
-    'portuguese edition', 'edición en español', 'traducción', 'traducido',
+    'portuguese edition', 'edición en español',
     'reprint', 'reprints',
-    'wing of', // "Published by the German wing of Panini Comics"
     'trade paperback', 'trade paperbacks',
     'foreign edition', 'international edition',
   ];
+  // Estos SÍ son lo bastante específicos como para buscarlos también en la
+  // descripción, sin generar falsos positivos razonables — "translated
+  // into"/"traducción" o "Published by the German wing of..." no son frases
+  // que aparezcan por casualidad describiendo el cómic original en sí.
+  const PATRONES_NOMBRE_Y_DESCRIPCION = [
+    'translat', 'traducción', 'traducido', 'wing of',
+  ];
   const esReedicion = (v) => {
-    const texto = `${v.name || ''} ${v.description || ''}`.toLowerCase();
-    return PATRONES_REEDICION.some((p) => texto.includes(p));
+    const nombre = (v.name || '').toLowerCase();
+    const descripcion = (v.description || '').toLowerCase();
+    if (PATRONES_SOLO_NOMBRE.some((p) => nombre.includes(p))) return true;
+    const textoCompleto = `${nombre} ${descripcion}`;
+    return PATRONES_NOMBRE_Y_DESCRIPCION.some((p) => textoCompleto.includes(p));
   };
 
   const sinReediciones = volumenes.filter((v) => !esReedicion(v));
@@ -1069,9 +1084,9 @@ function filtrarEdicionesEspeciales(volumenes) {
 // 2000 resultados) solo para evitar un bucle infinito real, nunca debería
 // llegar tan lejos en la práctica.
 const COMICVINE_MAX_PAGINAS_SEGURIDAD = 20;
-async function obtenerTodosLosResultadosComicVine(urlBase, headers) {
+async function obtenerTodosLosResultadosComicVine(urlBase, headers, maxPaginas = COMICVINE_MAX_PAGINAS_SEGURIDAD) {
   let todos = [];
-  for (let pagina = 0; pagina < COMICVINE_MAX_PAGINAS_SEGURIDAD; pagina++) {
+  for (let pagina = 0; pagina < maxPaginas; pagina++) {
     const offset = pagina * 100;
     const resp = await fetch(`${urlBase}&offset=${offset}`, { headers });
     if (!resp.ok) break;
@@ -1083,7 +1098,54 @@ async function obtenerTodosLosResultadosComicVine(urlBase, headers) {
   return todos;
 }
 
-async function buscarComicsComicVine(query, limit = 40) {
+// --- COLA DE PETICIONES A COMIC VINE ---
+// Su API bloquea con "Rate limit exceeded" si se lanzan demasiadas
+// peticiones seguidas (como pasaba al pedir la portada de CADA issue de un
+// volumen largo, todas en paralelo sin límite). Mismo patrón que ya usas
+// con IGDB (fetchIgdb/procesarColaIgdb): un máximo de peticiones a la vez,
+// el resto espera en cola hasta que se libera un hueco.
+const COMICVINE_MAX_CONCURRENTE = 3;
+let comicVinePeticionesEnVuelo = 0;
+const comicVineCola = [];
+
+function procesarColaComicVine() {
+  while (comicVinePeticionesEnVuelo < COMICVINE_MAX_CONCURRENTE && comicVineCola.length > 0) {
+    const tarea = comicVineCola.shift();
+    comicVinePeticionesEnVuelo++;
+    tarea().finally(() => {
+      comicVinePeticionesEnVuelo--;
+      procesarColaComicVine();
+    });
+  }
+}
+
+function fetchComicVine(url, options) {
+  return new Promise((resolve, reject) => {
+    const ejecutar = async () => {
+      try {
+        let res = await fetch(url, options);
+        let intentos = 0;
+        // Reintenta con espera creciente si aun así nos topamos con el
+        // límite (p. ej. si hay varias pestañas/peticiones de golpe).
+        while (intentos < 3) {
+          const clone = res.clone();
+          const bodyProbe = await clone.json().catch(() => null);
+          if (bodyProbe?.status_code !== 107) break; // 107 = rate limit exceeded
+          intentos++;
+          await new Promise((r) => setTimeout(r, 1500 * intentos));
+          res = await fetch(url, options);
+        }
+        resolve(res);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    comicVineCola.push(ejecutar);
+    procesarColaComicVine();
+  });
+}
+
+async function buscarComicsComicVine(query, limit = 40, maxPaginas = COMICVINE_MAX_PAGINAS_SEGURIDAD) {
   const apiKey = process.env.COMICVINE_API_KEY;
   const headers = { 'User-Agent': COMICVINE_USER_AGENT };
   const campos = 'id,name,start_year,image,publisher,count_of_issues,description';
@@ -1099,23 +1161,55 @@ async function buscarComicsComicVine(query, limit = 40) {
   // solapan o se saltan resultados entre sí, perdiendo volúmenes por el
   // camino (como pasaba con "The Amazing Spider-Man" 1963, que no aparecía
   // en ninguna de las dos vías).
+  // maxPaginas: el buscador combinado de Books (/libros/buscar) necesita
+  // sentirse instantáneo, así que le pasa un tope bajo (menos cobertura,
+  // pero rápido); si en el futuro se usa un buscador dedicado solo de
+  // cómics, puede pedir el máximo (todas las páginas) para tener la
+  // cobertura completa que ya probamos antes.
   const urlFiltro = `${COMICVINE_API_BASE}/volumes/?api_key=${apiKey}&format=json&filter=name:${encodeURIComponent(query.trim())}&field_list=${campos}&sort=id:asc&limit=100`;
   const urlBusqueda = `${COMICVINE_API_BASE}/search/?api_key=${apiKey}&format=json&query=${encodeURIComponent(query)}&resources=volume&field_list=${campos}&sort=id:asc&limit=100`;
 
   const [porFiltro, porBusqueda] = await Promise.all([
-    obtenerTodosLosResultadosComicVine(urlFiltro, headers).catch(() => []),
-    obtenerTodosLosResultadosComicVine(urlBusqueda, headers).catch(() => []),
+    obtenerTodosLosResultadosComicVine(urlFiltro, headers, maxPaginas).catch(() => []),
+    obtenerTodosLosResultadosComicVine(urlBusqueda, headers, maxPaginas).catch(() => []),
   ]);
+
+  // LOG TEMPORAL DE DIAGNÓSTICO — bórralo en cuanto encontremos el bug de "Invincible"
+  console.log(`[DEBUG comicvine] "${query}" — porFiltro: ${porFiltro.length}, porBusqueda: ${porBusqueda.length}`);
+  console.log(`[DEBUG comicvine] ¿17993 en porFiltro?`, porFiltro.some((v) => v.id === 17993));
+  console.log(`[DEBUG comicvine] ¿17993 en porBusqueda?`, porBusqueda.some((v) => v.id === 17993));
 
   const porId = new Map();
   for (const v of [...porFiltro, ...porBusqueda]) {
     if (v.id != null) porId.set(v.id, v);
   }
   const combinados = Array.from(porId.values());
+  // LOG TEMPORAL DE DIAGNÓSTICO
+  console.log(`[DEBUG comicvine] tras filtrar/combinar, ¿17993 sigue?`, combinados.some((v) => v.id === 17993));
 
   if (combinados.length === 0) return [];
 
-  return filtrarEdicionesEspeciales(ordenarPorParecido(combinados, query));
+  // LOG TEMPORAL DE DIAGNÓSTICO — bórralo en cuanto encontremos el bug de "Invincible"
+  const item17993 = combinados.find((v) => v.id === 17993);
+  const PATRONES_DEBUG = [
+    'deluxe edition', 'deluxe hardcover', 'omnibus', 'complete collection',
+    'collected edition', 'trade collection of', 'collection of',
+    'translat', 'spanish edition', 'italian edition', 'french edition',
+    'german edition', 'portuguese edition', 'edición en español', 'traducción',
+    'traducido', 'reprint', 'reprints', 'wing of', 'trade paperback',
+    'trade paperbacks', 'foreign edition', 'international edition',
+  ];
+  const textoDebug = `${item17993?.name || ''} ${item17993?.description || ''}`.toLowerCase();
+  const patronesEncontrados = PATRONES_DEBUG.filter((p) => textoDebug.includes(p));
+  console.log(`[DEBUG comicvine] patrones que coinciden en 17993:`, patronesEncontrados);
+
+  const ordenados = ordenarPorParecido(combinados, query);
+  console.log(`[DEBUG comicvine] ¿17993 en ordenados?`, ordenados.some((v) => v.id === 17993));
+
+  const finales = filtrarEdicionesEspeciales(ordenados);
+  console.log(`[DEBUG comicvine] ¿17993 en finales?`, finales.some((v) => v.id === 17993));
+
+  return finales;
 }
 
 async function obtenerDetalleComicVineVolume(comicVineId) {
@@ -1167,6 +1261,48 @@ app.get('/comicvine/comics/buscar', async (req, res) => {
   } catch (error) {
     console.error('ERROR EN GET /comicvine/comics/buscar:', error);
     res.status(500).json({ error: 'Error al buscar cómics en Comic Vine' });
+  }
+});
+
+app.get('/comicvine/debug-filtro-nombre', async (req, res) => {
+  try {
+    const apiKey = process.env.COMICVINE_API_KEY;
+    const url = `${COMICVINE_API_BASE}/volumes/?api_key=${apiKey}&format=json&filter=name:invincible&field_list=id,name,start_year,count_of_issues&sort=id:asc&limit=100&offset=0`;
+    const response = await fetch(url, { headers: { 'User-Agent': COMICVINE_USER_AGENT } });
+    const data = await response.json();
+    res.json({
+      total: data.number_of_total_results,
+      pagina: data.number_of_page_results,
+      contiene17993: (data.results || []).some((v) => v.id === 17993),
+      primeros5: (data.results || []).slice(0, 5),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// LOG TEMPORAL DE DIAGNÓSTICO — bórralo en cuanto encontremos el bug de "Invincible"
+app.get('/comicvine/debug-volumen/:id', async (req, res) => {
+  try {
+    const apiKey = process.env.COMICVINE_API_KEY;
+    const url = `${COMICVINE_API_BASE}/volume/4050-${req.params.id}/?api_key=${apiKey}&format=json&field_list=name,start_year,count_of_issues`;
+    const response = await fetch(url, { headers: { 'User-Agent': COMICVINE_USER_AGENT } });
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/comicvine/debug-buscar-invincible', async (req, res) => {
+  try {
+    const apiKey = process.env.COMICVINE_API_KEY;
+    const url = `${COMICVINE_API_BASE}/volumes/?api_key=${apiKey}&format=json&filter=name:Invincible,publisher:Image&field_list=id,name,start_year,count_of_issues,publisher`;
+    const response = await fetch(url, { headers: { 'User-Agent': COMICVINE_USER_AGENT } });
+    const data = await response.json();
+    res.json(data.results);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -1275,34 +1411,125 @@ app.get('/media/:id/comicvine-images', async (req, res) => {
     const apiKey = process.env.COMICVINE_API_KEY;
     const url = `${COMICVINE_API_BASE}/volume/4050-${media.comicVineId}/?api_key=${apiKey}&format=json&field_list=issues`;
     const response = await fetch(url, { headers: { 'User-Agent': COMICVINE_USER_AGENT } });
+    // LOG TEMPORAL DE DIAGNÓSTICO — bórralo en cuanto encontremos el bug de "comicvine-images"
+    console.log(`[DEBUG comicvine-images] media.comicVineId:`, media.comicVineId, 'response.ok:', response.ok, 'status:', response.status);
     if (!response.ok) return res.json([]);
     const data = await response.json();
     const issues = data.results?.issues || [];
+    console.log(`[DEBUG comicvine-images] issues encontrados:`, issues.length);
 
     // La lista de "issues" en el volumen no trae la imagen directamente —
     // solo id/nombre/número — hay que pedir cada issue por separado para
-    // conseguir su portada. Se limita a 50 para no disparar demasiadas
-    // peticiones en volúmenes muy largos (ej. 651 issues de Amazing
-    // Spider-Man).
-    const issuesLimitados = issues.slice(0, 50);
+    // conseguir su portada. Sin límite: se piden todas, aunque el volumen
+    // tenga cientos de issues (ej. 651 de Amazing Spider-Man) — todas las
+    // peticiones van en paralelo, así que el coste es de tiempo de espera,
+    // no de bloquear nada.
     const detalles = await Promise.all(
-      issuesLimitados.map((issue) =>
-        fetch(`${COMICVINE_API_BASE}/issue/4000-${issue.id}/?api_key=${apiKey}&format=json&field_list=image`, {
+      issues.map((issue) =>
+        fetchComicVine(`${COMICVINE_API_BASE}/issue/4000-${issue.id}/?api_key=${apiKey}&format=json&field_list=image`, {
           headers: { 'User-Agent': COMICVINE_USER_AGENT },
         })
           .then((r) => r.json())
-          .catch(() => null)
+          .catch((e) => ({ __error: e.message }))
       )
     );
+
+    // LOG TEMPORAL DE DIAGNÓSTICO — bórralo en cuanto encontremos el bug de "comicvine-images"
+    console.log(`[DEBUG comicvine-images] detalles crudos:`, JSON.stringify(detalles, null, 2).slice(0, 2000));
 
     const portadas = detalles
       .map((d) => d?.results?.image?.medium_url || d?.results?.image?.small_url)
       .filter(Boolean);
 
+    console.log(`[DEBUG comicvine-images] portadas extraídas:`, portadas.length);
+
     res.json(portadas);
   } catch (error) {
     console.error('ERROR EN GET /media/:id/comicvine-images:', error);
     res.status(500).json({ error: 'Error al obtener carátulas alternativas del cómic' });
+  }
+});
+
+// --- INFO EXTRA DE UN CÓMIC (vía Comic Vine): editorial, total de issues,
+// y un rango de fechas de publicación calculado a partir del primer y
+// último issue del volumen (Comic Vine no da un "estado" explícito como sí
+// hace MAL con el manga, así que esto es lo más parecido posible). ---
+app.get('/media/:id/comic-info', async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id, 10);
+    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { comicVineId: true } });
+    if (!media?.comicVineId) return res.json({ editorial: null, totalIssues: null, fechaInicio: null, fechaFin: null });
+
+    const apiKey = process.env.COMICVINE_API_KEY;
+    const headers = { 'User-Agent': COMICVINE_USER_AGENT };
+
+    const urlVolumen = `${COMICVINE_API_BASE}/volume/4050-${media.comicVineId}/?api_key=${apiKey}&format=json&field_list=publisher,count_of_issues,issues,description,first_issue`;
+    const respVolumen = await fetch(urlVolumen, { headers });
+    if (!respVolumen.ok) return res.json({ editorial: null, totalIssues: null, fechaInicio: null, fechaFin: null });
+    const dataVolumen = await respVolumen.json();
+    const volumen = dataVolumen.results;
+    if (!volumen) return res.json({ editorial: null, totalIssues: null, fechaInicio: null, fechaFin: null });
+
+    const issues = volumen.issues || [];
+    // La lista de issues del volumen no viene necesariamente en orden — se
+    // ordena por id (que en Comic Vine crece con el tiempo de publicación
+    // dentro de un mismo volumen) para saber cuál es el primero y el último.
+    const issuesOrdenados = [...issues].sort((a, b) => a.id - b.id);
+    const primerIssue = issuesOrdenados[0];
+    const ultimoIssue = issuesOrdenados[issuesOrdenados.length - 1];
+
+    const [fechaInicio, fechaFin, personCredits] = await Promise.all([
+      primerIssue
+        ? fetch(`${COMICVINE_API_BASE}/issue/4000-${primerIssue.id}/?api_key=${apiKey}&format=json&field_list=cover_date`, { headers })
+          .then((r) => r.json()).then((d) => d.results?.cover_date || null).catch(() => null)
+        : null,
+      ultimoIssue && ultimoIssue.id !== primerIssue?.id
+        ? fetch(`${COMICVINE_API_BASE}/issue/4000-${ultimoIssue.id}/?api_key=${apiKey}&format=json&field_list=cover_date`, { headers })
+          .then((r) => r.json()).then((d) => d.results?.cover_date || null).catch(() => null)
+        : null,
+      // Los créditos de equipo (guionista, dibujante...) no existen a nivel
+      // de VOLUMEN en Comic Vine — solo por issue. Se sacan del primer
+      // issue, que suele reflejar el equipo creativo original de la serie.
+      primerIssue
+        ? fetch(`${COMICVINE_API_BASE}/issue/4000-${primerIssue.id}/?api_key=${apiKey}&format=json&field_list=person_credits`, { headers })
+          .then((r) => r.json()).then((d) => d.results?.person_credits || []).catch(() => [])
+        : [],
+    ]);
+
+    const autores = personCredits
+      .filter((p) => p.name && p.role)
+      .map((p) => ({ nombre: p.name, rol: p.role, foto: p.image?.medium_url || p.image?.small_url || null }));
+
+    // Comic Vine no tiene un campo de "estado" explícito (ongoing/ended)
+    // como sí hace MAL con el manga, pero suele decirlo literalmente en la
+    // descripción del volumen ("Ongoing series.", "Limited series.",
+    // "One-shot."). Se extrae de ahí con las palabras clave más comunes.
+    const descripcionTexto = (volumen.description || '').toLowerCase();
+    let estado = null;
+    if (descripcionTexto.includes('ongoing series')) estado = 'Ongoing';
+    else if (descripcionTexto.includes('limited series') || descripcionTexto.includes('miniseries')) estado = 'Limited Series';
+    else if (descripcionTexto.includes('one-shot') || descripcionTexto.includes('one shot')) estado = 'One-Shot';
+    else if (fechaFin) estado = 'Ended';
+
+    // El total de issues solo se muestra si es un número YA FIJO, no uno
+    // que vaya a seguir subiendo: cuando el cómic terminó (Ended, Limited
+    // Series, One-Shot) o cuando no hemos podido determinar NINGÚN estado
+    // (en ese caso preferimos mostrar el dato que tenemos a no mostrar
+    // nada). Si está "Ongoing", se oculta — mostrarlo ahora daría una
+    // cifra que se quedaría vieja en cuanto salga el siguiente número.
+    const totalIssuesFijo = estado === 'Ongoing' ? null : volumen.count_of_issues || null;
+
+    res.json({
+      editorial: volumen.publisher?.name || null,
+      totalIssues: totalIssuesFijo,
+      fechaInicio,
+      fechaFin,
+      estado,
+      autores,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/comic-info:', error);
+    res.status(500).json({ error: 'Error al obtener la información del cómic' });
   }
 });
 
@@ -3106,7 +3333,11 @@ app.get('/libros/buscar', async (req, res) => {
 
     const buscarComics = async () => {
       try {
-        const resultados = await buscarComicsComicVine(searchQuery, 40);
+        // Tope de 2 páginas (200 resultados por vía) para que el buscador
+        // combinado de Books sea rápido — con búsquedas normales es más
+        // que suficiente; solo términos MUY genéricos con cientos de
+        // coincidencias podrían dejar algún resultado raro fuera.
+        const resultados = await buscarComicsComicVine(searchQuery, 40, 2);
         return resultados.map((item) => ({
           fuente: 'comicvine',
           origenId: item.id,
@@ -3133,13 +3364,16 @@ app.get('/libros/buscar', async (req, res) => {
     const normalizar = (t) => t.trim().toLowerCase();
     const titulosManga = manga.map((m) => normalizar(m.titulo));
 
-    // Comic Vine también indexa manga traducido (ej. "Batman: The Jiro
-    // Kuwata Batmanga") — si ya lo tenemos cubierto por MAL, se descarta
-    // aquí para que MAL sea siempre la fuente de manga, nunca Comic Vine.
-    const comicsSinSolapar = comics.filter((comic) => {
-      const tituloComic = normalizar(comic.titulo);
-      return !titulosManga.some((tm) => tituloComic === tm || tituloComic.startsWith(tm));
-    });
+    // Antes se descartaba de Comic Vine cualquier título que coincidiera
+    // EXACTO con un manga de MAL (pensado para el caso raro de manga
+    // traducido, ej. "Batman: The Jiro Kuwata Batmanga") — pero esto
+    // descartaba también cómics occidentales sin relación real que solo
+    // comparten un nombre corto y genérico con algún manga de MAL (p. ej.
+    // "Invincible" de Image, descartado porque también existe un manga
+    // llamado igual). El caso que se quería cubrir es mucho más raro que
+    // este falso positivo, así que ya no se aplica ningún filtro de
+    // solapamiento entre Comic Vine y MAL.
+    const comicsSinSolapar = comics;
 
     const titulosComics = comicsSinSolapar.map((c) => normalizar(c.titulo));
     const titulosExcluidos = [...titulosManga, ...titulosComics];

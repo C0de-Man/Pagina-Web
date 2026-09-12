@@ -74,9 +74,12 @@ export default function MediaTabs({
 
   const hayAdaptaciones = (adaptaciones?.videojuegos?.length || 0) > 0;
 
+  // "Cast" no tiene sentido para libros/manga/cómics — no son medios con
+  // reparto de actores. Se oculta directamente en vez de mostrarla vacía
+  // con "No cast information available.".
   const tabs: { key: typeof tab; label: string }[] = [
     { key: 'descripcion', label: 'Description' },
-    { key: 'cast', label: 'Cast' },
+    ...(tipo !== 'LIBRO' ? [{ key: 'cast' as const, label: 'Cast' }] : []),
     { key: 'crew', label: 'Crew' },
     { key: 'mas', label: 'Info' },
     ...(hayAdaptaciones ? [{ key: 'adaptation' as const, label: 'Adaptation' }] : []),
@@ -213,10 +216,12 @@ export default function MediaTabs({
               )}
             </div>
           </div>
-          <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Country</div>
-            <div className="text-gray-200">{detalles?.paises?.length > 0 ? detalles.paises.join(', ') : 'Not available'}</div>
-          </div>
+          {tipo !== 'LIBRO' && (
+            <div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Country</div>
+              <div className="text-gray-200">{detalles?.paises?.length > 0 ? detalles.paises.join(', ') : 'Not available'}</div>
+            </div>
+          )}
           {detalles?.mangaPublicado && (
             <div>
               <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Published</div>
