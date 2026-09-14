@@ -18,6 +18,12 @@ interface DlcsUpdatesResponse {
   mods: JuegoDlc[];
 }
 
+interface EdicionConPlataformas {
+  igdbId: number;
+  nombreVersion: string;
+  plataformas: { id: number; name: string }[];
+}
+
 export default function GameTabs({
   sinopsis,
   detalles,
@@ -28,6 +34,7 @@ export default function GameTabs({
   igdbId?: number;
 }) {
   const [tab, setTab] = useState<'descripcion' | 'mas' | 'dlcs'>('descripcion');
+  const [ediciones, setEdiciones] = useState<EdicionConPlataformas[]>([]);
   const [dlcsData, setDlcsData] = useState<DlcsUpdatesResponse | null>(null);
   const [modalAbierto, setModalAbierto] = useState(false);
   const [timeToBeat, setTimeToBeat] = useState<{ hastily: number | null; normally: number | null; completely: number | null } | null>(null);
@@ -104,7 +111,7 @@ export default function GameTabs({
     fetch(`${API_URL}/media`, { cache: 'no-store' })
       .then((r) => r.json())
       .then(setMyDb)
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -123,8 +130,22 @@ export default function GameTabs({
     })
       .then((res) => res.json())
       .then(setPersonalizaciones)
-      .catch(() => {});
+      .catch(() => { });
   }, [myDb, dlcsData]);
+
+  useEffect(() => {
+    if (!igdbId) return;
+    let cancelado = false;
+    fetch(`${API_URL}/igdb/ediciones/${igdbId}`)
+      .then((r) => r.json())
+      .then((d: EdicionConPlataformas[]) => {
+        if (!cancelado) setEdiciones(Array.isArray(d) ? d : []);
+      })
+      .catch((err) => console.error('Error cargando ediciones', err));
+    return () => {
+      cancelado = true;
+    };
+  }, [igdbId]);
 
   useEffect(() => {
     if (!igdbId) return;
@@ -326,9 +347,20 @@ export default function GameTabs({
       {tab === 'mas' && (
         <div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 text-sm">
-            <div>
+            <div className="col-span-2 sm:col-span-3">
               <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Platforms</div>
-              <div className="text-gray-200">{detalles?.plataformas?.length > 0 ? detalles.plataformas.join(', ') : 'Not available'}</div>
+              {ediciones.length > 1 ? (
+                <div className="space-y-1">
+                  {ediciones.map((ed) => (
+                    <div key={ed.igdbId} className="text-gray-200">
+                      <span className="font-semibold">{ed.nombreVersion}:</span>{' '}
+                      {ed.plataformas.length > 0 ? ed.plataformas.map((p) => p.name).join(', ') : 'Not available'}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-gray-200">{detalles?.plataformas?.length > 0 ? detalles.plataformas.join(', ') : 'Not available'}</div>
+              )}
             </div>
             <div>
               <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Genres</div>

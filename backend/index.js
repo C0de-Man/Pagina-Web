@@ -2240,15 +2240,15 @@ app.get('/igdb/ediciones/:igdbId', async (req, res) => {
       'Content-Type': 'text/plain'
     };
 
-    const queryBase = `fields name, first_release_date, platforms.id, platforms.name; where id = ${igdbId};`;
-    const queryVersiones = `fields name, game_type, first_release_date, platforms.id, platforms.name; where parent_game = ${igdbId}; limit 50;`;
+    const queryBase = `fields name, first_release_date, platforms.id, platforms.name, cover.url; where id = ${igdbId};`;
+    const queryVersiones = `fields name, game_type, first_release_date, platforms.id, platforms.name, cover.url; where parent_game = ${igdbId}; limit 50;`;
     // IGDB representa las ediciones concretas de un mismo juego (Collector's
     // Edition, GOTY Edition, Deluxe Edition...) como entradas SEPARADAS que
     // apuntan de vuelta al juego "canónico" mediante version_parent — no
     // mediante parent_game (ese campo es para DLCs/remasters/ports/bundles,
     // ver arriba). Sin esta consulta aparte, esas ediciones nunca aparecían
     // en el desplegable "Version played".
-    const queryEdicionesPorVersionParent = `fields name, game_type, platforms.id, platforms.name; where version_parent = ${igdbId}; limit 50;`;
+    const queryEdicionesPorVersionParent = `fields name, game_type, platforms.id, platforms.name, cover.url; where version_parent = ${igdbId}; limit 50;`;
 
     const [resBase, resVersiones, resEdicionesVersionParent] = await Promise.all([
       fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryBase }),
@@ -2331,7 +2331,7 @@ app.get('/igdb/ediciones/:igdbId', async (req, res) => {
       //      una edición de hace 10-15 años casi seguro es del juego
       //      original, no de un remake reciente con el mismo nombre — se
       //      descarta si la diferencia de años es mayor de 5.
-      const queryTexto = `search "${base.name}"; fields name, game_type, first_release_date, platforms.id, platforms.name, version_parent.id; limit 30;`;
+      const queryTexto = `search "${base.name}"; fields name, game_type, first_release_date, platforms.id, platforms.name, version_parent.id, cover.url; limit 30;`;
       const respTexto = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryTexto });
       if (respTexto.ok) {
         const dataTexto = await respTexto.json();
@@ -2373,9 +2373,29 @@ app.get('/igdb/ediciones/:igdbId', async (req, res) => {
       return `${nombreConAnio} — ${sufijoPlataformas}`;
     };
 
+    // Nombre sin las plataformas embutidas (para mostrar "Director's Cut
+    // (1997)" en vez de "Director's Cut (1997) — PS3, PS4") y carátula, para
+    // el bloque de "Platforms por versión" en la pestaña More y para
+    // ofrecerlas en el selector de carátula.
+    const soloNombreConAnio = (nombre, g) => {
+      const anio = g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null;
+      return anio ? `${nombre} (${anio})` : nombre;
+    };
+    const portadaDe = (g) => (g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null);
+
     const opciones = [
-      { igdbId, titulo: conPlataformas(base?.name || 'Original', base || {}), plataformas: base?.platforms || [], fechaLanzamiento: base?.first_release_date || Infinity },
-      ...versiones.map((v) => ({ igdbId: v.id, titulo: conPlataformas(v.name, v), plataformas: v.platforms || [], fechaLanzamiento: v.first_release_date || Infinity })),
+      {
+        igdbId, titulo: conPlataformas(base?.name || 'Original', base || {}),
+        nombreVersion: soloNombreConAnio(base?.name || 'Original', base || {}),
+        plataformas: base?.platforms || [], portada: portadaDe(base || {}),
+        fechaLanzamiento: base?.first_release_date || Infinity,
+      },
+      ...versiones.map((v) => ({
+        igdbId: v.id, titulo: conPlataformas(v.name, v),
+        nombreVersion: soloNombreConAnio(v.name, v),
+        plataformas: v.platforms || [], portada: portadaDe(v),
+        fechaLanzamiento: v.first_release_date || Infinity,
+      })),
     ];
 
     // De más antigua a más reciente. Las que no tienen fecha se van al final.
@@ -3021,6 +3041,33 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
     // los artworks de IGDB antes de dejar la pestaña de banner vacía del todo.
     if (heroes.length === 0) {
       heroes = await obtenerArtworksIgdb(media.igdbId);
+    }
+
+    // Carátulas de otras EDICIONES/VERSIONES de este mismo juego (remaster,
+    // port, Director's Cut, GOTY...) — se ofrecen como opciones extra en el
+    // selector, junto a las de SteamGridDB/IGDB. No se filtra por nombre
+    // aquí (a diferencia de /igdb/ediciones): tener alguna opción de más
+    // en un selector manual no hace daño, mejor pecar de mostrar de más.
+    if (media.igdbId) {
+      try {
+        const tokenEdiciones = await getIgdbToken();
+        const headersEdiciones = {
+          'Client-ID': process.env.IGDB_CLIENT_ID,
+          'Authorization': `Bearer ${tokenEdiciones}`,
+          'Content-Type': 'text/plain',
+        };
+        const queryEdiciones = `fields cover.url; where (parent_game = ${media.igdbId} | version_parent = ${media.igdbId}) & cover != null; limit 50;`;
+        const respEdiciones = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers: headersEdiciones, body: queryEdiciones });
+        if (respEdiciones.ok) {
+          const dataEdiciones = await respEdiciones.json();
+          const portadasEdiciones = (dataEdiciones || [])
+            .map((g) => (g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null))
+            .filter(Boolean);
+          covers = [...covers, ...portadasEdiciones.filter((url) => !covers.includes(url))];
+        }
+      } catch (e) {
+        console.error('No se pudieron obtener carátulas de otras ediciones', e);
+      }
     }
 
     res.json({ covers, heroes });
