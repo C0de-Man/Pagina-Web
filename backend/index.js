@@ -2287,9 +2287,13 @@ app.get('/igdb/ediciones/:igdbId', async (req, res) => {
     };
 
     const TIPOS_VERSION = [3, 9, 10, 11];
+    // Estos vienen de una relación DIRECTA (parent_game = igdbId), dato
+    // fiable de IGDB — no se exige que el nombre coincida con el del
+    // original, porque expansiones/remasters legítimos a menudo tienen un
+    // nombre totalmente distinto (ej. "Metal Slug X" es una versión
+    // ampliada de "Metal Slug 2", sin compartir ni una palabra del título).
     let versiones = (dataVersiones || [])
-      .filter((g) => TIPOS_VERSION.includes(g.game_type))
-      .filter((g) => cumplePrefijoNombre(g.name, base?.name));
+      .filter((g) => TIPOS_VERSION.includes(g.game_type));
 
     // Las ediciones encontradas por version_parent se admiten TODAS, sin
     // filtrar por game_type — a diferencia de parent_game, aquí el propio
@@ -2370,11 +2374,15 @@ app.get('/igdb/ediciones/:igdbId', async (req, res) => {
     };
 
     const opciones = [
-      { igdbId, titulo: conPlataformas(base?.name || 'Original', base || {}), plataformas: base?.platforms || [] },
-      ...versiones.map((v) => ({ igdbId: v.id, titulo: conPlataformas(v.name, v), plataformas: v.platforms || [] })),
+      { igdbId, titulo: conPlataformas(base?.name || 'Original', base || {}), plataformas: base?.platforms || [], fechaLanzamiento: base?.first_release_date || Infinity },
+      ...versiones.map((v) => ({ igdbId: v.id, titulo: conPlataformas(v.name, v), plataformas: v.platforms || [], fechaLanzamiento: v.first_release_date || Infinity })),
     ];
 
-    res.json(opciones);
+    // De más antigua a más reciente. Las que no tienen fecha se van al final.
+    opciones.sort((a, b) => a.fechaLanzamiento - b.fechaLanzamiento);
+    const opcionesFinal = opciones.map(({ fechaLanzamiento, ...resto }) => resto);
+
+    res.json(opcionesFinal);
   } catch (err) {
     console.error('ERROR EN GET /igdb/ediciones/:igdbId:', err);
     res.status(500).json({ error: 'Error al obtener las ediciones del juego' });
@@ -3061,13 +3069,28 @@ app.post('/media/igdb', async (req, res) => {
     // (el usuario siempre puede elegir uno a mano con "Cambiar carátula / banner").
     let backdropUrl = null;
     try {
-      const sgdbId = await buscarJuegoEnSteamGridDB(juego.name);
+      let sgdbId = await buscarJuegoEnSteamGridDB(juego.name);
+      // Si la búsqueda exacta no encuentra el juego (o no tiene heroes),
+      // probamos con la búsqueda flexible — mismo respaldo que ya usa el
+      // selector "Cambiar carátula/banner" (GET /steamgriddb/images), para
+      // que el banner por defecto al guardar no se quede vacío en juegos
+      // que solo aparecen en SteamGridDB con un nombre con sufijo.
       if (sgdbId) {
         const resHeroes = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbId}`, {
           headers: { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` }
         });
         const dataHeroes = await resHeroes.json();
         backdropUrl = dataHeroes?.data?.[0]?.url || null;
+      }
+      if (!backdropUrl) {
+        const sgdbIdFlexible = await buscarJuegoEnSteamGridDBFlexible(juego.name);
+        if (sgdbIdFlexible && sgdbIdFlexible !== sgdbId) {
+          const resHeroesFlex = await fetch(`https://www.steamgriddb.com/api/v2/heroes/game/${sgdbIdFlexible}`, {
+            headers: { Authorization: `Bearer ${process.env.STEAMGRIDDB_API_KEY}` }
+          });
+          const dataHeroesFlex = await resHeroesFlex.json();
+          backdropUrl = dataHeroesFlex?.data?.[0]?.url || null;
+        }
       }
       if (!backdropUrl) {
         const artworks = await obtenerArtworksIgdb(igdbId);
