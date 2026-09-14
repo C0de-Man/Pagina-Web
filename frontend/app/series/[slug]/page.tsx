@@ -119,7 +119,7 @@ export default async function SeriesDetail({ params }: { params: Promise<{ slug:
 
                         <MediaTabs sinopsis={media.sinopsis} detalles={detalles} tmdbId={media.tmdbId} mediaId={media.id} tipo={media.tipo} />
 
-                        <SeasonsList mediaId={media.id} tmdbId={media.tmdbId} />
+                        <SeasonsList mediaId={media.id} tmdbId={media.tmdbId} estadoSerie={detalles?.estadoSerie} />
                     </div>
 
                     <div className="flex-shrink-0 w-full md:w-72 pt-24 md:pt-32">

@@ -97,7 +97,7 @@ function OjoVisto({ visto, onToggle }: { visto: boolean; onToggle?: () => void }
   );
 }
 
-export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdbId: number | null }) {
+export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId: number; tmdbId: number | null; estadoSerie?: string | null }) {
   const [temporadas, setTemporadas] = useState<Temporada[]>([]);
   const [estadosTemporadas, setEstadosTemporadas] = useState<Record<number, EstadoTemporada>>({});
   const [cargando, setCargando] = useState(true);
@@ -384,8 +384,13 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
       temporadasReales.length
     )
     : null;
+  // Solo se ofrece la nota calculada si la serie ya ha terminado del todo
+  // (Ended/Canceled) — si sigue en emisión (Returning Series), puede
+  // aparecer una temporada nueva en cualquier momento, y aplicar ya una
+  // nota "final" basada solo en lo emitido hasta ahora no tendría sentido.
+  const serieYaTerminada = estadoSerie === 'Ended' || estadoSerie === 'Canceled';
   const mostrarSugerenciaNota =
-    notaSugerida !== null && notaSugerida !== notaDescartada && notaSugerida !== notaGeneralActual;
+    serieYaTerminada && notaSugerida !== null && notaSugerida !== notaDescartada && notaSugerida !== notaGeneralActual;
 
   const aplicarNotaSugerida = async () => {
     if (notaSugerida === null) return;
