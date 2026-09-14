@@ -1110,15 +1110,20 @@ export default function CollectionLinks({ tmdbId, tipo = 'PELICULA', tituloActua
       >
         <BotonBorrar item={it} />
         <a href={hrefDeItemUniverso(it)} className="block w-full rounded text-left cursor-pointer">
-          {portadaReal && (
-            <img
-              src={portadaReal}
-              alt={it.titulo}
-              draggable={esAdmin}
-              className={`w-full aspect-[2/3] object-cover rounded transition ${esActual ? 'ring-2 ring-blue-500' : 'group-hover:opacity-80 group-hover:scale-[1.02]'
-                } ${esAdmin ? 'cursor-grab active:cursor-grabbing' : ''}`}
-            />
-          )}
+          <div className={`w-full aspect-[2/3] rounded overflow-hidden bg-black transition ${esActual ? 'ring-2 ring-blue-500' : 'group-hover:opacity-80 group-hover:scale-[1.02]'}`}>
+            {portadaReal ? (
+              <img
+                src={portadaReal}
+                alt={it.titulo}
+                draggable={esAdmin}
+                className={`w-full h-full object-cover ${esAdmin ? 'cursor-grab active:cursor-grabbing' : ''}`}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-center p-2">
+                <p className="text-xs font-semibold text-white">{it.titulo}</p>
+              </div>
+            )}
+          </div>
           <p className="mt-2 text-sm font-semibold text-white select-text">{it.titulo}</p>
           <p className="text-xs text-gray-400">{it.anio}{esActual ? " · You're viewing this" : ''}</p>
         </a>
