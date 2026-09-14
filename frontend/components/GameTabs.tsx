@@ -32,6 +32,13 @@ export default function GameTabs({
   const [modalAbierto, setModalAbierto] = useState(false);
   const [timeToBeat, setTimeToBeat] = useState<{ hastily: number | null; normally: number | null; completely: number | null } | null>(null);
 
+  // Cruce con TU base de datos: si un DLC/update/mod ya está guardado con
+  // una carátula compartida distinta, o TÚ la has personalizado a mano, esa
+  // debe ganar por encima de lo que IGDB devuelva en este momento — mismo
+  // patrón que ya usa CollectionLinks.tsx para la saga.
+  const [myDb, setMyDb] = useState<any[]>([]);
+  const [personalizaciones, setPersonalizaciones] = useState<Record<number, { customPoster: string | null }>>({});
+
   // igdbIds cuya carátula ha fallado al cargar (URL rota) — se tratan igual
   // que si no tuvieran portada, en vez de dejar un hueco vacío.
   const [fallosImagen, setFallosImagen] = useState<Set<number>>(new Set());
@@ -41,12 +48,16 @@ export default function GameTabs({
   // Miniatura reutilizable: portada real si hay y carga bien, si no caja
   // negra con el título — igual que GameCollectionLinks.tsx.
   function Portada({ juego, className }: { juego: JuegoDlc; className: string }) {
-    const mostrarImagen = juego.portada && !fallosImagen.has(juego.igdbId);
+    const localMedia = myDb.find((m: any) => m.igdbId === juego.igdbId);
+    const portadaReal = (localMedia && personalizaciones[localMedia.id]?.customPoster)
+      || localMedia?.portada
+      || juego.portada;
+    const mostrarImagen = portadaReal && !fallosImagen.has(juego.igdbId);
     if (mostrarImagen) {
       return (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={juego.portada!}
+          src={portadaReal!}
           alt={juego.titulo}
           onError={() => marcarFalloImagen(juego.igdbId)}
           className={className}
@@ -88,6 +99,32 @@ export default function GameTabs({
       cancelado = true;
     };
   }, [igdbId]);
+
+  useEffect(() => {
+    fetch(`${API_URL}/media`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then(setMyDb)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token || myDb.length === 0 || !dlcsData) return;
+
+    const idsIgdb = [...dlcsData.dlcs, ...dlcsData.updates, ...dlcsData.mods].map((j) => j.igdbId);
+    const dbIds = idsIgdb
+      .map((id) => myDb.find((m: any) => m.igdbId === id)?.id)
+      .filter(Boolean);
+    if (dbIds.length === 0) return;
+
+    fetch(`${API_URL}/media/personalizaciones?ids=${[...new Set(dbIds)].join(',')}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+      .then((res) => res.json())
+      .then(setPersonalizaciones)
+      .catch(() => {});
+  }, [myDb, dlcsData]);
 
   useEffect(() => {
     if (!igdbId) return;
