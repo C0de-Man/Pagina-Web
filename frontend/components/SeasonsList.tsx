@@ -230,8 +230,12 @@ export default function SeasonsList({ mediaId, tmdbId }: { mediaId: number; tmdb
   // estuvieran — mismo criterio que marcarVistoConAnteriores, pero a nivel
   // de temporada en vez de episodio.
   const marcarTemporadaYAnteriores = async (numeroTemporada: number) => {
+    // Excluye "Especiales" (temporada 0) — no es una "temporada anterior"
+    // real, así que nunca debe marcarse solo por marcar la Temporada 1 o
+    // posteriores (mismo criterio que revisarSiSerieCompleta, que también
+    // excluye la temporada 0 al comprobar si la serie está completa).
     const numerosAMarcar = temporadas
-      .filter((t) => t.numero <= numeroTemporada && !estadosTemporadas[t.numero]?.watched)
+      .filter((t) => t.numero > 0 && t.numero <= numeroTemporada && !estadosTemporadas[t.numero]?.watched)
       .map((t) => t.numero);
 
     const estadosActualizados = { ...estadosTemporadas };
