@@ -48,13 +48,13 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
         // si el total lo debe dar siempre esa fuente (nunca a mano) o si,
         // al no tener ninguna fuente (ej. Google Books), sí se puede
         // escribir el total manualmente.
-        const esMangaConFuente = !!mangaInfo?.estado;
         // "editorial" identifica que el libro TIENE fuente Comic Vine,
         // independientemente de si totalIssues está de momento oculto
         // (ongoing) o relleno (terminado) — así "esComicConFuente" no
         // depende del propio valor que estamos intentando decidir mostrar.
         const esComicConFuente = !!(comicInfo?.editorial || comicInfo?.estado);
-        setEsComic(esComicConFuente && !esMangaConFuente);
+const esMangaConFuente = !esComicConFuente && !!mangaInfo?.estado;
+        setEsComic(esComicConFuente);
         setTotalGestionadoPorFuente({ capitulo: esMangaConFuente || esComicConFuente, volumen: esMangaConFuente });
         setCapitulo({
           actual: status.progresoActual ?? 0,
@@ -99,6 +99,25 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error('fallo al guardar');
+
+      // Si el contador principal (Issue/Chapter) llega al total, se marca
+      // automáticamente como Read (mismo cambio que hace ActionButtons al
+      // elegir "Read" a mano: watched=true, playStatus=null), reutilizando
+      // el mismo endpoint /status.
+      if (campo === 'capitulo' && nuevoTotal !== null && nuevoActual >= nuevoTotal) {
+        fetch(`http://localhost:3001/media/${mediaId}/status`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ watched: true, playStatus: null }),
+        }).then(() => {
+          window.dispatchEvent(
+            new CustomEvent('mediaWatchedChanged', { detail: { mediaId, watched: true } })
+          );
+        }).catch(() => {});
+      }
     } catch {
       setter(anterior);
     }

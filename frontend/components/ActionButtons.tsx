@@ -26,6 +26,7 @@ const ESTADOS_SERIE = [
 const ESTADOS_LIBRO = [
   { valor: 'READING', color: '#ec4899', label: 'Reading', desc: 'Currently reading' },
   { valor: 'READ', color: '#22c55e', label: 'Read', desc: "You've finished the book" },
+  { valor: 'LISTENED', color: '#a855f7', label: 'Listened', desc: 'You listened to the audiobook/audio version' },
   { valor: 'PAUSED', color: '#f97316', label: 'Paused', desc: 'On hold, may continue later' },
   { valor: 'ABANDONED', color: '#ef4444', label: 'Abandoned', desc: 'Stopped reading for good' },
 ];
