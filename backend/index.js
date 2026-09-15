@@ -2227,181 +2227,112 @@ app.get('/igdb/versiones/:igdbId', async (req, res) => {
 // (expanded_game) u 11 (port) que cuelgue de él por parent_game — el mismo
 // concepto de "es una versión del mismo juego, no contenido nuevo" que ya
 // se usa para excluirlas de "More content".
+async function calcularEdicionesJuego(igdbId) {
+  const token = await getIgdbToken();
+  const headers = {
+    'Client-ID': process.env.IGDB_CLIENT_ID,
+    'Authorization': `Bearer ${token}`,
+    'Accept': 'application/json',
+    'Content-Type': 'text/plain'
+  };
+
+  const queryBase = `fields name, first_release_date, platforms.id, platforms.name, cover.url; where id = ${igdbId};`;
+  const queryVersiones = `fields name, game_type, first_release_date, platforms.id, platforms.name, cover.url; where parent_game = ${igdbId}; limit 50;`;
+  const queryEdicionesPorVersionParent = `fields name, game_type, platforms.id, platforms.name, cover.url; where version_parent = ${igdbId}; limit 50;`;
+
+  const [resBase, resVersiones, resEdicionesVersionParent] = await Promise.all([
+    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryBase }),
+    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryVersiones }),
+    fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryEdicionesPorVersionParent }),
+  ]);
+  const dataBase = await resBase.json();
+  const dataVersiones = await resVersiones.json();
+  const dataEdicionesVersionParent = await resEdicionesVersionParent.json();
+
+  const base = dataBase[0];
+
+  const cumplePrefijoNombre = (nombreCandidato, nombreBaseReal) => {
+    if (!nombreCandidato || !nombreBaseReal) return false;
+    const candidatoNorm = nombreCandidato.toLowerCase();
+    const baseNorm = nombreBaseReal.toLowerCase();
+    if (!candidatoNorm.startsWith(baseNorm)) return false;
+    const resto = candidatoNorm.slice(baseNorm.length);
+    if (resto !== '' && /^[a-z0-9]/.test(resto)) return false;
+    if (/^\s*\d/.test(resto)) return false;
+    return true;
+  };
+
+  const TIPOS_VERSION = [3, 9, 10, 11];
+  let versiones = (dataVersiones || []).filter((g) => TIPOS_VERSION.includes(g.game_type));
+
+  const idsYaVistos = new Set(versiones.map((v) => v.id));
+  for (const ed of dataEdicionesVersionParent || []) {
+    if (!idsYaVistos.has(ed.id)) {
+      versiones.push(ed);
+      idsYaVistos.add(ed.id);
+    }
+  }
+
+  if (base?.name) {
+    const queryTexto = `search "${base.name}"; fields name, game_type, first_release_date, platforms.id, platforms.name, version_parent.id, cover.url; limit 30;`;
+    const respTexto = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryTexto });
+    if (respTexto.ok) {
+      const dataTexto = await respTexto.json();
+      const idsYaVistos2 = new Set([igdbId, ...versiones.map((v) => v.id)]);
+      const anioBase = base.first_release_date ? new Date(base.first_release_date * 1000).getFullYear() : null;
+      const candidatosTexto = (dataTexto || []).filter((g) => {
+        if (!g.name || idsYaVistos2.has(g.id) || !TIPOS_VERSION.includes(g.game_type)) return false;
+        if (g.version_parent) return g.version_parent.id === igdbId;
+        if (anioBase !== null && g.first_release_date) {
+          const anioCandidato = new Date(g.first_release_date * 1000).getFullYear();
+          if (Math.abs(anioCandidato - anioBase) > 5) return false;
+        }
+        return cumplePrefijoNombre(g.name, base?.name);
+      });
+      versiones = [...versiones, ...candidatosTexto];
+    }
+  }
+
+  const conPlataformas = (nombre, g) => {
+    const nombresPlataformas = (g.platforms || []).map((p) => p.name);
+    const anio = g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null;
+    const nombreConAnio = anio ? `${nombre} (${anio})` : nombre;
+    if (nombresPlataformas.length === 0) return nombreConAnio;
+    const primeras = nombresPlataformas.slice(0, 2).join(', ');
+    const resto = nombresPlataformas.length - 2;
+    const sufijoPlataformas = resto > 0 ? `${primeras} +${resto} more` : primeras;
+    return `${nombreConAnio} — ${sufijoPlataformas}`;
+  };
+  const soloNombreConAnio = (nombre, g) => {
+    const anio = g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null;
+    return anio ? `${nombre} (${anio})` : nombre;
+  };
+  const portadaDe = (g) => (g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null);
+
+  const opciones = [
+    {
+      igdbId, titulo: conPlataformas(base?.name || 'Original', base || {}),
+      nombreVersion: soloNombreConAnio(base?.name || 'Original', base || {}),
+      plataformas: base?.platforms || [], portada: portadaDe(base || {}),
+      fechaLanzamiento: base?.first_release_date || Infinity,
+    },
+    ...versiones.map((v) => ({
+      igdbId: v.id, titulo: conPlataformas(v.name, v),
+      nombreVersion: soloNombreConAnio(v.name, v),
+      plataformas: v.platforms || [], portada: portadaDe(v),
+      fechaLanzamiento: v.first_release_date || Infinity,
+    })),
+  ];
+
+  opciones.sort((a, b) => a.fechaLanzamiento - b.fechaLanzamiento);
+  return opciones.map((op) => ({ ...op, fechaLanzamiento: op.fechaLanzamiento === Infinity ? null : op.fechaLanzamiento }));
+}
+
 app.get('/igdb/ediciones/:igdbId', async (req, res) => {
   try {
     const igdbId = parseInt(req.params.igdbId, 10);
     if (Number.isNaN(igdbId)) return res.status(400).json({ error: 'igdbId inválido' });
-
-    const token = await getIgdbToken();
-    const headers = {
-      'Client-ID': process.env.IGDB_CLIENT_ID,
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json',
-      'Content-Type': 'text/plain'
-    };
-
-    const queryBase = `fields name, first_release_date, platforms.id, platforms.name, cover.url; where id = ${igdbId};`;
-    const queryVersiones = `fields name, game_type, first_release_date, platforms.id, platforms.name, cover.url; where parent_game = ${igdbId}; limit 50;`;
-    // IGDB representa las ediciones concretas de un mismo juego (Collector's
-    // Edition, GOTY Edition, Deluxe Edition...) como entradas SEPARADAS que
-    // apuntan de vuelta al juego "canónico" mediante version_parent — no
-    // mediante parent_game (ese campo es para DLCs/remasters/ports/bundles,
-    // ver arriba). Sin esta consulta aparte, esas ediciones nunca aparecían
-    // en el desplegable "Version played".
-    const queryEdicionesPorVersionParent = `fields name, game_type, platforms.id, platforms.name, cover.url; where version_parent = ${igdbId}; limit 50;`;
-
-    const [resBase, resVersiones, resEdicionesVersionParent] = await Promise.all([
-      fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryBase }),
-      fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryVersiones }),
-      fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryEdicionesPorVersionParent }),
-    ]);
-    const dataBase = await resBase.json();
-    const dataVersiones = await resVersiones.json();
-    const dataEdicionesVersionParent = await resEdicionesVersionParent.json();
-
-    const base = dataBase[0];
-    // 3 bundle (GOTY/Complete Edition...), 9 remaster, 10 expanded_game,
-    // 11 port. Todos comparten el mismo espíritu: son la MISMA obra jugable
-    // en distinta presentación/plataforma, no contenido nuevo — por eso
-    // tienen sentido como "versión jugada" del mismo log, junto al original.
-
-    // Criterio de nombre reutilizable: exige que el título del candidato
-    // empiece literalmente por el del juego base, con un separador (o nada)
-    // justo después — nunca pegado sin más (para no colar "Devil May Cry 5"
-    // al buscar "Devil May Cry") ni seguido de otro número (para no colar
-    // una secuela). Antes solo se aplicaba al respaldo por texto; ahora
-    // también se exige en las relaciones DIRECTAS por parent_game — IGDB
-    // puede tener enlazada una entrada con el nombre mal puesto (p. ej. un
-    // port móvil llamado solo "Devil May Cry" enlazado como versión de
-    // "Devil May Cry 3: Dante's Awakening"), y sin esta comprobación se
-    // colaba igualmente solo por venir de una relación "de confianza".
-    const cumplePrefijoNombre = (nombreCandidato, nombreBaseReal) => {
-      if (!nombreCandidato || !nombreBaseReal) return false;
-      const candidatoNorm = nombreCandidato.toLowerCase();
-      const baseNorm = nombreBaseReal.toLowerCase();
-      if (!candidatoNorm.startsWith(baseNorm)) return false;
-      const resto = candidatoNorm.slice(baseNorm.length);
-      if (resto !== '' && /^[a-z0-9]/.test(resto)) return false; // pegado sin separador
-      if (/^\s*\d/.test(resto)) return false; // "... 2", "... 3"... (secuela)
-      return true;
-    };
-
-    const TIPOS_VERSION = [3, 9, 10, 11];
-    // Estos vienen de una relación DIRECTA (parent_game = igdbId), dato
-    // fiable de IGDB — no se exige que el nombre coincida con el del
-    // original, porque expansiones/remasters legítimos a menudo tienen un
-    // nombre totalmente distinto (ej. "Metal Slug X" es una versión
-    // ampliada de "Metal Slug 2", sin compartir ni una palabra del título).
-    let versiones = (dataVersiones || [])
-      .filter((g) => TIPOS_VERSION.includes(g.game_type));
-
-    // Las ediciones encontradas por version_parent se admiten TODAS, sin
-    // filtrar por game_type — a diferencia de parent_game, aquí el propio
-    // hecho de que apunten a este juego como su version_parent ya confirma
-    // que son una edición/SKU concreta del mismo juego (Collector's Edition,
-    // GOTY Edition, Deluxe Edition, Definitive Edition...), sea cual sea su
-    // game_type (o aunque no lo tengan puesto).
-    const idsYaVistos = new Set(versiones.map((v) => v.id));
-    for (const ed of dataEdicionesVersionParent || []) {
-      if (!idsYaVistos.has(ed.id)) {
-        versiones.push(ed);
-        idsYaVistos.add(ed.id);
-      }
-    }
-
-    // Respaldo por texto: algunas ediciones/bundles tienen su parent_game en
-    // IGDB apuntando a otra cosa (un DLC, un map pack...) en vez de al juego
-    // base — mismo problema ya visto con updates/ports/remasters huérfanos.
-    // Buscamos por el nombre del juego base y nos quedamos con lo que
-    // empiece igual (mismo criterio de prefijo que getIgdbVersiones), para
-    // no colar secuelas con nombre parecido.
-    if (base?.name) {
-      // Se pide también version_parent.id y first_release_date: los
-      // remakes que comparten el MISMO nombre exacto que el juego original
-      // (p. ej. "Resident Evil 4" 2005 y 2023) hacían que este respaldo por
-      // texto colara las ediciones antiguas del original (Wii Edition,
-      // Zeebo Edition, Mobile Edition...) en la lista del remake, porque
-      // solo comprobaba que el NOMBRE empezara igual — nunca que la
-      // edición perteneciera de verdad a ESTE juego. Se comprueban dos
-      // cosas, en este orden:
-      //   1) Si tiene version_parent puesto, que apunte EXACTAMENTE a este
-      //      igdbId (el criterio más fiable, cuando está disponible).
-      //   2) Si no tiene version_parent (bastantes ediciones antiguas no lo
-      //      llevan puesto en absoluto), se compara el AÑO de lanzamiento:
-      //      una edición de hace 10-15 años casi seguro es del juego
-      //      original, no de un remake reciente con el mismo nombre — se
-      //      descarta si la diferencia de años es mayor de 5.
-      const queryTexto = `search "${base.name}"; fields name, game_type, first_release_date, platforms.id, platforms.name, version_parent.id, cover.url; limit 30;`;
-      const respTexto = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers, body: queryTexto });
-      if (respTexto.ok) {
-        const dataTexto = await respTexto.json();
-        const nombreBaseNormalizado = base.name.toLowerCase();
-        const idsYaVistos = new Set([igdbId, ...versiones.map((v) => v.id)]);
-        const anioBase = base.first_release_date ? new Date(base.first_release_date * 1000).getFullYear() : null;
-        const candidatosTexto = (dataTexto || []).filter((g) => {
-          if (!g.name || idsYaVistos.has(g.id) || !TIPOS_VERSION.includes(g.game_type)) return false;
-
-          if (g.version_parent) {
-            return g.version_parent.id === igdbId;
-          }
-
-          if (anioBase !== null && g.first_release_date) {
-            const anioCandidato = new Date(g.first_release_date * 1000).getFullYear();
-            if (Math.abs(anioCandidato - anioBase) > 5) return false;
-          }
-
-          return cumplePrefijoNombre(g.name, base?.name);
-        });
-        versiones = [...versiones, ...candidatosTexto];
-      }
-    }
-
-    // Antes se metían TODAS las plataformas seguidas en el texto de cada
-    // opción — con ediciones tipo "Franchise Pack" (6+ plataformas), el
-    // texto se volvía kilométrico y se cortaba contra el borde de la
-    // ventana en el <select> nativo (que no se puede ensanchar de forma
-    // fiable con CSS, su desplegable lo dibuja el propio navegador/SO).
-    // Ahora se muestran como mucho 2 plataformas y, si hay más, "+N more".
-    const conPlataformas = (nombre, g) => {
-      const nombresPlataformas = (g.platforms || []).map((p) => p.name);
-      const anio = g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null;
-      const nombreConAnio = anio ? `${nombre} (${anio})` : nombre;
-      if (nombresPlataformas.length === 0) return nombreConAnio;
-      const primeras = nombresPlataformas.slice(0, 2).join(', ');
-      const resto = nombresPlataformas.length - 2;
-      const sufijoPlataformas = resto > 0 ? `${primeras} +${resto} more` : primeras;
-      return `${nombreConAnio} — ${sufijoPlataformas}`;
-    };
-
-    // Nombre sin las plataformas embutidas (para mostrar "Director's Cut
-    // (1997)" en vez de "Director's Cut (1997) — PS3, PS4") y carátula, para
-    // el bloque de "Platforms por versión" en la pestaña More y para
-    // ofrecerlas en el selector de carátula.
-    const soloNombreConAnio = (nombre, g) => {
-      const anio = g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null;
-      return anio ? `${nombre} (${anio})` : nombre;
-    };
-    const portadaDe = (g) => (g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null);
-
-    const opciones = [
-      {
-        igdbId, titulo: conPlataformas(base?.name || 'Original', base || {}),
-        nombreVersion: soloNombreConAnio(base?.name || 'Original', base || {}),
-        plataformas: base?.platforms || [], portada: portadaDe(base || {}),
-        fechaLanzamiento: base?.first_release_date || Infinity,
-      },
-      ...versiones.map((v) => ({
-        igdbId: v.id, titulo: conPlataformas(v.name, v),
-        nombreVersion: soloNombreConAnio(v.name, v),
-        plataformas: v.platforms || [], portada: portadaDe(v),
-        fechaLanzamiento: v.first_release_date || Infinity,
-      })),
-    ];
-
-    // De más antigua a más reciente. Las que no tienen fecha se van al final.
-    opciones.sort((a, b) => a.fechaLanzamiento - b.fechaLanzamiento);
-    const opcionesFinal = opciones.map(({ fechaLanzamiento, ...resto }) => resto);
-
+    const opcionesFinal = await calcularEdicionesJuego(igdbId);
     res.json(opcionesFinal);
   } catch (err) {
     console.error('ERROR EN GET /igdb/ediciones/:igdbId:', err);
@@ -3050,21 +2981,29 @@ app.get('/steamgriddb/images/:mediaId', async (req, res) => {
     // en un selector manual no hace daño, mejor pecar de mostrar de más.
     if (media.igdbId) {
       try {
-        const tokenEdiciones = await getIgdbToken();
-        const headersEdiciones = {
-          'Client-ID': process.env.IGDB_CLIENT_ID,
-          'Authorization': `Bearer ${tokenEdiciones}`,
-          'Content-Type': 'text/plain',
-        };
-        const queryEdiciones = `fields cover.url; where (parent_game = ${media.igdbId} | version_parent = ${media.igdbId}) & cover != null; limit 50;`;
-        const respEdiciones = await fetchIgdb('https://api.igdb.com/v4/games', { method: 'POST', headers: headersEdiciones, body: queryEdiciones });
-        if (respEdiciones.ok) {
-          const dataEdiciones = await respEdiciones.json();
-          const portadasEdiciones = (dataEdiciones || [])
-            .map((g) => (g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null))
-            .filter(Boolean);
-          covers = [...covers, ...portadasEdiciones.filter((url) => !covers.includes(url))];
-        }
+        const edicionesJuego = await calcularEdicionesJuego(media.igdbId);
+        // Para cada edición (ya emparejada por nombre+año en calcularEdicionesJuego,
+        // que cubre el caso de versiones con nombre distinto al original —
+        // ej. "Resident Evil Archives: Resident Evil Zero") buscamos TAMBIÉN
+        // en SteamGridDB por su propio nombre — no solo nos quedamos con la
+        // única carátula oficial de IGDB, sino con todas las que tenga esa
+        // edición concreta en SteamGridDB (que pueden ser decenas).
+        const nombreLimpio = (nombreConAnio) => nombreConAnio.replace(/\s*\(\d{4}\)\s*$/, '').trim();
+        const portadasPorEdicion = await Promise.all(
+          edicionesJuego.map(async (ed) => {
+            try {
+              const nombreParaBuscar = nombreLimpio(ed.nombreVersion);
+              const sgdbIdEdicion = await buscarJuegoEnSteamGridDB(nombreParaBuscar, ed.fechaLanzamiento ? new Date(ed.fechaLanzamiento * 1000).getFullYear() : null);
+              if (!sgdbIdEdicion) return ed.portada ? [ed.portada] : [];
+              const gridsEdicion = await obtenerTodasLasGridsSteamGridDB(sgdbIdEdicion, headers, ocultarNsfw);
+              return gridsEdicion.length > 0 ? gridsEdicion : (ed.portada ? [ed.portada] : []);
+            } catch (e) {
+              return ed.portada ? [ed.portada] : [];
+            }
+          })
+        );
+        const portadasEdiciones = portadasPorEdicion.flat();
+        covers = [...covers, ...portadasEdiciones.filter((url) => !covers.includes(url))];
       } catch (e) {
         console.error('No se pudieron obtener carátulas de otras ediciones', e);
       }
