@@ -921,7 +921,7 @@ function headersMal() {
 }
 
 async function buscarMangaMalApi(query, limit = 20) {
-  const url = `${MAL_API_BASE}/manga?q=${encodeURIComponent(query)}&limit=${limit}&fields=id,title,main_picture,authors{first_name,last_name},start_date,media_type`;
+  const url = `${MAL_API_BASE}/manga?q=${encodeURIComponent(query)}&limit=${limit}&fields=id,title,main_picture,authors{first_name,last_name},start_date,media_type,alternative_titles`;
   const response = await fetch(url, { headers: headersMal() });
   if (!response.ok) throw new Error(`MAL respondió ${response.status}`);
   const data = await response.json();
@@ -1361,23 +1361,49 @@ app.get('/mal/manga/:malMangaId/images', async (req, res) => {
     // portada de MAL, aunque MangaDex sí tenga decenas de alternativas.
     if (!mangaDexIdParaImagenes && media?.titulo) {
       try {
-        const urlBusqueda = `https://api.mangadex.org/manga?title=${encodeURIComponent(media.titulo)}&limit=10`;
-        const respBusqueda = await fetch(urlBusqueda);
-        if (respBusqueda.ok) {
+        // MAL suele guardar el manga bajo un título (a veces romaji, a
+        // veces japonés) distinto al que usa MangaDex — se piden también
+        // los títulos alternativos de MAL (inglés, sinónimos, japonés) y
+        // se prueba cada uno hasta encontrar coincidencia exacta en
+        // MangaDex, en vez de depender solo del título principal guardado.
+        const urlDetalleMal = `${MAL_API_BASE}/manga/${malMangaId}?fields=title,alternative_titles`;
+        const respDetalleMal = await fetch(urlDetalleMal, { headers: headersMal() });
+        const dataDetalleMal = respDetalleMal.ok ? await respDetalleMal.json() : null;
+
+        const titulosParaProbar = [
+          media.titulo,
+          dataDetalleMal?.title,
+          dataDetalleMal?.alternative_titles?.en,
+          dataDetalleMal?.alternative_titles?.ja,
+          ...(dataDetalleMal?.alternative_titles?.synonyms || []),
+        ].filter(Boolean);
+        const titulosUnicos = [...new Set(titulosParaProbar)];
+
+        const normalizarTitulo = (t) => t.trim().toLowerCase();
+
+        for (const tituloAProbar of titulosUnicos) {
+          const urlBusqueda = `https://api.mangadex.org/manga?title=${encodeURIComponent(tituloAProbar)}&limit=10`;
+          const respBusqueda = await fetch(urlBusqueda);
+          if (!respBusqueda.ok) continue;
           const dataBusqueda = await respBusqueda.json();
+
+          const tituloNormalizado = normalizarTitulo(tituloAProbar);
           // Se exige coincidencia EXACTA de título (normalizado) — sin esto,
           // una búsqueda de texto libre en MangaDex puede devolver como
           // primer resultado un manga sin relación real que solo comparte
           // una palabra (ej. "Naruto" encontrando "Renge to Naruto!").
-          const tituloNormalizado = media.titulo.trim().toLowerCase();
           const candidatoExacto = (dataBusqueda.data || []).find((item) => {
             const titulosCandidato = Object.values(item.attributes?.title || {});
             const altTitulos = (item.attributes?.altTitles || []).flatMap((t) => Object.values(t));
             return [...titulosCandidato, ...altTitulos].some(
-              (t) => typeof t === 'string' && t.trim().toLowerCase() === tituloNormalizado
+              (t) => typeof t === 'string' && normalizarTitulo(t) === tituloNormalizado
             );
           });
-          mangaDexIdParaImagenes = candidatoExacto?.id || null;
+
+          if (candidatoExacto) {
+            mangaDexIdParaImagenes = candidatoExacto.id;
+            break;
+          }
         }
       } catch (e) {
         // si falla la búsqueda, seguimos sin mangaDexId y caemos a MAL
@@ -3418,6 +3444,16 @@ app.get('/libros/buscar', async (req, res) => {
           fuente: 'mal',
           origenId: item.id,
           titulo: item.title,
+          // Títulos alternativos (inglés, japonés, sinónimos) — se guardan
+          // aparte para poder reconocer como "el mismo manga" resultados de
+          // Google Books cuya edición traducida use uno de estos títulos en
+          // vez del principal de MAL (ej. "Sexy Cosplay Doll" como título
+          // inglés de "Sono Bisque Doll wa Koi wo Suru").
+          titulosAlternativos: [
+            item.alternative_titles?.en,
+            item.alternative_titles?.ja,
+            ...(item.alternative_titles?.synonyms || []),
+          ].filter(Boolean),
           autor: nombreAutorMal(item.authors),
           anio: item.start_date ? parseInt(item.start_date.slice(0, 4), 10) : null,
           portada: item.main_picture?.large || item.main_picture?.medium || null,
@@ -3466,7 +3502,11 @@ app.get('/libros/buscar', async (req, res) => {
     // con macrón (usadas a veces en Comic Vine) nunca casaban con las
     // mismas obras en MAL (que usa "ou" en su lugar).
     const normalizar = (t) => t.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    const titulosManga = manga.map((m) => normalizar(m.titulo));
+    // Incluye también los títulos alternativos de cada manga de MAL, no
+    // solo el principal — así un resultado de Google Books cuyo título sea
+    // un sinónimo/título inglés (ej. "Sexy Cosplay Doll") se reconoce como
+    // el mismo manga y se descarta como duplicado.
+    const titulosManga = manga.flatMap((m) => [m.titulo, ...(m.titulosAlternativos || [])].map(normalizar));
 
     // Si un título de Comic Vine coincide EXACTO con uno ya encontrado en
     // MAL, se descarta el de Comic Vine y se prefiere el de MAL — pensado
