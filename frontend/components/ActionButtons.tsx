@@ -164,7 +164,8 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
     setModalAbierto(false);
 
     let body: Record<string, unknown>;
-    if ((esSerie && nuevoValor === 'WATCHED') || (esLibro && nuevoValor === 'READ')) {
+    const marcandoLibroComoRead = esLibro && nuevoValor === 'READ';
+    if ((esSerie && nuevoValor === 'WATCHED') || marcandoLibroComoRead) {
       body = { watched: true, playStatus: null };
       setPlayStatus(null);
       setWatched(true);
@@ -188,6 +189,49 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error('fallo al guardar');
+
+      // Al marcar un libro como Read, si alguna fuente automática (MAL/
+      // Comic Vine/MangaDex/AniList) ya conoce el total de capítulos/
+      // volúmenes, se rellena el progreso al completo automáticamente —
+      // así no hace falta ir sumando uno a uno hasta el final.
+      if (marcandoLibroComoRead) {
+        try {
+          const [mangaInfo, comicInfo, mangadexInfo, anilistInfo] = await Promise.all([
+            fetch(`http://localhost:3001/media/${mediaId}/manga-info`).then((r) => r.json()).catch(() => null),
+            fetch(`http://localhost:3001/media/${mediaId}/comic-info`).then((r) => r.json()).catch(() => null),
+            fetch(`http://localhost:3001/media/${mediaId}/mangadex-info`).then((r) => r.json()).catch(() => null),
+            fetch(`http://localhost:3001/media/${mediaId}/anilist-info`).then((r) => r.json()).catch(() => null),
+          ]);
+
+          const totalCapitulos = mangaInfo?.totalCapitulos ?? comicInfo?.totalIssues ?? mangadexInfo?.totalCapitulos ?? anilistInfo?.totalCapitulos ?? null;
+          const totalVolumenes = mangaInfo?.totalVolumenes ?? mangadexInfo?.totalVolumenes ?? anilistInfo?.totalVolumenes ?? null;
+
+          if (totalCapitulos !== null || totalVolumenes !== null) {
+            const progressBody: Record<string, unknown> = {};
+            if (totalCapitulos !== null) {
+              progressBody.progresoActual = totalCapitulos;
+              progressBody.progresoTotal = totalCapitulos;
+            }
+            if (totalVolumenes !== null) {
+              progressBody.progresoVolumenActual = totalVolumenes;
+              progressBody.progresoVolumenTotal = totalVolumenes;
+            }
+
+            await fetch(`http://localhost:3001/media/${mediaId}/progress`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify(progressBody),
+            });
+
+            window.dispatchEvent(new CustomEvent('mediaProgressChanged', { detail: { mediaId } }));
+          }
+        } catch {
+          // si falla, el progreso simplemente se queda como estaba
+        }
+      }
     } catch {
       setPlayStatus(playStatusAnterior);
       setWatched(watchedAnterior);

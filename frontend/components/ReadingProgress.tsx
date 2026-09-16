@@ -26,10 +26,18 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
 
   useEffect(() => {
     if (tipo !== 'LIBRO') return;
-    const token = localStorage.getItem('token');
-    if (!token) return;
 
-    Promise.all([
+    const handleProgressChanged = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.mediaId === mediaId) cargar();
+    };
+    window.addEventListener('mediaProgressChanged', handleProgressChanged);
+
+    function cargar() {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      Promise.all([
       fetch(`http://localhost:3001/media/${mediaId}/status`, {
         headers: { Authorization: `Bearer ${token}` },
       }).then((res) => res.json()),
@@ -81,8 +89,12 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
           actual: status.progresoVolumenActual ?? 0,
           total: status.progresoVolumenTotal ?? mangaInfo?.totalVolumenes ?? mangadexInfo?.totalVolumenes ?? anilistInfo?.totalVolumenes ?? null,
         });
-      })
-      .catch(() => { });
+        })
+        .catch(() => { });
+    }
+
+    cargar();
+    return () => window.removeEventListener('mediaProgressChanged', handleProgressChanged);
   }, [mediaId, tipo]);
 
   const guardar = async (campo: 'capitulo' | 'volumen', nuevoActual: number, nuevoTotal: number | null) => {

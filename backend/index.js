@@ -3389,19 +3389,24 @@ app.get('/libros/buscar', async (req, res) => {
     // cualquier resultado de Google Books cuyo título EMPIECE por el título
     // de un manga ya encontrado en MAL (p. ej. "One Piece 1 (2018)" o "One
     // Piece: El Guerrero..." quedan fuera si ya existe "One Piece" en MAL).
-    const normalizar = (t) => t.trim().toLowerCase();
+    // .normalize('NFD') separa cada letra acentuada en base + marca de
+    // acento (ej. "ō" -> "o" + marca), y el regex quita esas marcas —
+    // así "Kakerō" y "Kakerou" comparan iguales. Sin esto, romanizaciones
+    // con macrón (usadas a veces en Comic Vine) nunca casaban con las
+    // mismas obras en MAL (que usa "ou" en su lugar).
+    const normalizar = (t) => t.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     const titulosManga = manga.map((m) => normalizar(m.titulo));
 
-    // Antes se descartaba de Comic Vine cualquier título que coincidiera
-    // EXACTO con un manga de MAL (pensado para el caso raro de manga
-    // traducido, ej. "Batman: The Jiro Kuwata Batmanga") — pero esto
-    // descartaba también cómics occidentales sin relación real que solo
-    // comparten un nombre corto y genérico con algún manga de MAL (p. ej.
-    // "Invincible" de Image, descartado porque también existe un manga
-    // llamado igual). El caso que se quería cubrir es mucho más raro que
-    // este falso positivo, así que ya no se aplica ningún filtro de
-    // solapamiento entre Comic Vine y MAL.
-    const comicsSinSolapar = comics;
+    // Si un título de Comic Vine coincide EXACTO con uno ya encontrado en
+    // MAL, se descarta el de Comic Vine y se prefiere el de MAL — pensado
+    // para el caso normal de manga con doble entrada (uno real en MAL, otro
+    // que Comic Vine indexa también por error o por edición traducida).
+    // Riesgo asumido: con títulos muy cortos/genéricos, dos obras distintas
+    // sin relación real (ej. "Invincible" de Image Comics vs. un manga
+    // coreano con el mismo nombre exacto) pueden coincidir por casualidad y
+    // el cómic quedaría oculto sin ser un duplicado de verdad.
+    const titulosMangaParaFiltro = new Set(manga.map((m) => normalizar(m.titulo)));
+    const comicsSinSolapar = comics.filter((c) => !titulosMangaParaFiltro.has(normalizar(c.titulo)));
 
     const titulosComics = comicsSinSolapar.map((c) => normalizar(c.titulo));
     const titulosExcluidos = [...titulosManga, ...titulosComics];
