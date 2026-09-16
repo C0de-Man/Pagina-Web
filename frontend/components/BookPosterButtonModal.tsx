@@ -6,16 +6,24 @@ export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) 
   const [imagenes, setImagenes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [fuente, setFuente] = useState<'googlebooks' | 'mal' | 'comicvine' | null>(null);
+  const [fuente, setFuente] = useState<'googlebooks' | 'mal' | 'comicvine' | 'mangadex' | null>(null);
   // null = todavía no sabemos si hay imágenes; el botón se queda oculto
   // hasta confirmar que SÍ hay algo que mostrar.
   const [hayImagenes, setHayImagenes] = useState<boolean | null>(null);
 
-  const obtenerImagenes = async (): Promise<{ imgs: string[]; fuenteDetectada: 'googlebooks' | 'mal' | 'comicvine' }> => {
+  const obtenerImagenes = async (): Promise<{ imgs: string[]; fuenteDetectada: 'googlebooks' | 'mal' | 'comicvine' | 'mangadex' }> => {
     const resMedia = await fetch(`http://localhost:3001/media/${mediaId}`);
     const media = await resMedia.json();
 
-    if (media.malMangaId) {
+    if (media.mangaDexId) {
+      // MangaDex tiene muchas más carátulas alternativas subidas por la
+      // comunidad que MAL — se prioriza siempre que el manga tenga
+      // mangaDexId, aunque también tenga malMangaId (que sigue siendo la
+      // fuente de nota/estado/capítulos, solo no de imágenes).
+      const res = await fetch(`http://localhost:3001/media/${mediaId}/mangadex-images`);
+      const data = await res.json();
+      return { imgs: Array.isArray(data) ? data : [], fuenteDetectada: 'mangadex' };
+    } else if (media.malMangaId) {
       const res = await fetch(`http://localhost:3001/mal/manga/${media.malMangaId}/images`);
       const data = await res.json();
       return { imgs: Array.isArray(data) ? data : [], fuenteDetectada: 'mal' };
@@ -41,7 +49,7 @@ export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) 
         // mostrar el selector (sería "elegir" entre una única opción, la
         // misma que ya tienes) — mangas y libros se quedan con el criterio
         // de siempre (basta con que haya al menos una).
-        const minimo = fuenteDetectada === 'comicvine' ? 2 : 1;
+        const minimo = fuenteDetectada === 'comicvine' || fuenteDetectada === 'mangadex' ? 2 : 1;
         if (!cancelado) {
           setFuente(fuenteDetectada);
           setHayImagenes(imgs.length >= minimo);
@@ -69,7 +77,9 @@ export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) 
             ? 'No se encontraron imágenes alternativas para este manga.'
             : fuenteDetectada === 'comicvine'
               ? 'No se encontraron carátulas alternativas para este cómic.'
-              : 'No se encontraron otras ediciones de este libro en Google Books.'
+              : fuenteDetectada === 'mangadex'
+                ? 'No se encontraron carátulas alternativas para este manga.'
+                : 'No se encontraron otras ediciones de este libro en Google Books.'
         );
       }
     } catch (error) {
@@ -133,7 +143,7 @@ export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) 
           >
             <div className="flex justify-between items-center px-6 py-4 border-b border-gray-700 flex-shrink-0">
               <span className="text-sm font-bold uppercase tracking-wider text-white">
-                {fuente === 'mal' || fuente === 'comicvine' ? 'Otras imágenes' : 'Otras ediciones'} ({imagenes.length})
+                {fuente === 'mal' || fuente === 'comicvine' || fuente === 'mangadex' ? 'Otras imágenes' : 'Otras ediciones'} ({imagenes.length})
               </span>
               <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white text-2xl font-bold cursor-pointer">✕</button>
             </div>

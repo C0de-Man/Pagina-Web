@@ -1338,6 +1338,77 @@ app.get('/mal/manga/details/:malMangaId', async (req, res) => {
   }
 });
 
+// --- CARÁTULAS ALTERNATIVAS DE UN MANGA GUARDADO DESDE MAL — MAL en su API
+// oficial solo da una única portada (main_picture), sin galería de
+// alternativas. Como respaldo, si el manga también tiene mangaDexId
+// guardado, se usan las carátulas de MangaDex (que sí tiene muchas más
+// subidas por la comunidad). Sin mangaDexId, se devuelve solo la portada
+// principal de MAL como única opción. ---
+app.get('/mal/manga/:malMangaId/images', async (req, res) => {
+  try {
+    const { malMangaId } = req.params;
+
+    const media = await prisma.media.findFirst({
+      where: { malMangaId: parseInt(malMangaId, 10) },
+      select: { id: true, mangaDexId: true, titulo: true },
+    });
+
+    let mangaDexIdParaImagenes = media?.mangaDexId || null;
+
+    // Sin mangaDexId guardado, buscamos por título directamente en MangaDex
+    // — muchos mangas se guardaron en su día solo desde MAL y nunca pasaron
+    // por MangaDex, así que sin esto se quedarían siempre con la única
+    // portada de MAL, aunque MangaDex sí tenga decenas de alternativas.
+    if (!mangaDexIdParaImagenes && media?.titulo) {
+      try {
+        const urlBusqueda = `https://api.mangadex.org/manga?title=${encodeURIComponent(media.titulo)}&limit=10`;
+        const respBusqueda = await fetch(urlBusqueda);
+        if (respBusqueda.ok) {
+          const dataBusqueda = await respBusqueda.json();
+          // Se exige coincidencia EXACTA de título (normalizado) — sin esto,
+          // una búsqueda de texto libre en MangaDex puede devolver como
+          // primer resultado un manga sin relación real que solo comparte
+          // una palabra (ej. "Naruto" encontrando "Renge to Naruto!").
+          const tituloNormalizado = media.titulo.trim().toLowerCase();
+          const candidatoExacto = (dataBusqueda.data || []).find((item) => {
+            const titulosCandidato = Object.values(item.attributes?.title || {});
+            const altTitulos = (item.attributes?.altTitles || []).flatMap((t) => Object.values(t));
+            return [...titulosCandidato, ...altTitulos].some(
+              (t) => typeof t === 'string' && t.trim().toLowerCase() === tituloNormalizado
+            );
+          });
+          mangaDexIdParaImagenes = candidatoExacto?.id || null;
+        }
+      } catch (e) {
+        // si falla la búsqueda, seguimos sin mangaDexId y caemos a MAL
+      }
+    }
+
+    if (mangaDexIdParaImagenes) {
+      const url = `https://api.mangadex.org/cover?manga[]=${mangaDexIdParaImagenes}&limit=100&order[volume]=asc`;
+      const url2 = `https://api.mangadex.org/cover?manga[]=${mangaDexIdParaImagenes}&limit=100&offset=100&order[volume]=asc`;
+      const [response, response2] = await Promise.all([fetch(url), fetch(url2)]);
+      if (response.ok) {
+        const data = await response.json();
+        const data2 = response2.ok ? await response2.json() : { data: [] };
+        const todasLasCovers = [...(data.data || []), ...(data2.data || [])];
+        const portadas = todasLasCovers
+          .map((c) => c.attributes?.fileName)
+          .filter(Boolean)
+          .map((fileName) => `https://uploads.mangadex.org/covers/${mangaDexIdParaImagenes}/${fileName}.512.jpg`);
+        if (portadas.length > 0) return res.json(portadas);
+      }
+    }
+
+    const data = await obtenerDetalleMangaMal(malMangaId);
+    const portadaMal = data.main_picture?.large || data.main_picture?.medium || null;
+    res.json(portadaMal ? [portadaMal] : []);
+  } catch (error) {
+    console.error('ERROR EN GET /mal/manga/:malMangaId/images:', error);
+    res.status(500).json({ error: 'Error al obtener imágenes del manga' });
+  }
+});
+
 // --- GUARDAR UN MANGA DESDE MAL (como tipo LIBRO — vive dentro de Books) ---
 app.post('/media/mal-manga', async (req, res) => {
   try {
@@ -3774,6 +3845,34 @@ app.get('/mangadex/details/:mangaDexId', async (req, res) => {
   }
 });
 
+// --- CARÁTULAS ALTERNATIVAS DE UN MANGA EN MANGADEX (todas las subidas
+// para ese título, no solo la oficial) — mismo papel que
+// /media/:id/comicvine-images para cómics. ---
+app.get('/media/:id/mangadex-images', async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id, 10);
+    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { mangaDexId: true } });
+    if (!media?.mangaDexId) return res.json([]);
+
+    const url = `https://api.mangadex.org/cover?manga[]=${media.mangaDexId}&limit=100&order[volume]=asc`;
+    const url2 = `https://api.mangadex.org/cover?manga[]=${media.mangaDexId}&limit=100&offset=100&order[volume]=asc`;
+    const [response, response2] = await Promise.all([fetch(url), fetch(url2)]);
+    if (!response.ok) return res.json([]);
+    const data = await response.json();
+    const data2 = response2.ok ? await response2.json() : { data: [] };
+    const todasLasCovers = [...(data.data || []), ...(data2.data || [])];
+
+    const portadas = todasLasCovers
+      .map((c) => c.attributes?.fileName)
+      .filter(Boolean)
+      .map((fileName) => `https://uploads.mangadex.org/covers/${media.mangaDexId}/${fileName}.512.jpg`);
+
+    res.json(portadas);
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/mangadex-images:', error);
+    res.status(500).json({ error: 'Error al obtener carátulas alternativas de MangaDex' });
+  }
+});
 
 // --- INFO EXTRA DE MANGA VÍA MANGADEX, por mediaId (mismo papel que
 // /media/:id/manga-info de MAL) — resuelve el mangaDexId internamente para
