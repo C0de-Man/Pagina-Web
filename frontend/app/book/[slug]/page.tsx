@@ -86,7 +86,7 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
     return `${meses[parseInt(m, 10) - 1]}${d ? ` ${parseInt(d, 10)},` : ''} ${y}`;
   };
   const publicado = mangaInfo.fechaInicio
-    ? `${formatFechaCorta(mangaInfo.fechaInicio)}${mangaInfo.fechaFin ? ` - ${formatFechaCorta(mangaInfo.fechaFin)}` : mangaInfo.estado === 'Finished' ? '' : ' - ?'}`
+    ? `${formatFechaCorta(mangaInfo.fechaInicio)}${mangaInfo.fechaFin && mangaInfo.fechaFin !== mangaInfo.fechaInicio ? ` - ${formatFechaCorta(mangaInfo.fechaFin)}` : mangaInfo.estado === 'Finished' || mangaInfo.fechaFin === mangaInfo.fechaInicio ? '' : ' - ?'}`
     : null;
 
   // Mismo criterio que "publicado" del manga, pero calculado a partir del
@@ -187,7 +187,7 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
                           estudios: [],
                           paises: [],
                           mangaPublicado: anilistInfo.fechaInicio
-                            ? `${formatFechaCorta(anilistInfo.fechaInicio)}${anilistInfo.fechaFin ? ` - ${formatFechaCorta(anilistInfo.fechaFin)}` : anilistInfo.estado === 'Finished' ? '' : ' - ?'}`
+                            ? `${formatFechaCorta(anilistInfo.fechaInicio)}${anilistInfo.fechaFin && anilistInfo.fechaFin !== anilistInfo.fechaInicio ? ` - ${formatFechaCorta(anilistInfo.fechaFin)}` : anilistInfo.estado === 'Finished' || anilistInfo.fechaFin === anilistInfo.fechaInicio ? '' : ' - ?'}`
                             : null,
                           mangaVolumenes: anilistInfo.totalVolumenes,
                           mangaCapitulos: anilistInfo.totalCapitulos,

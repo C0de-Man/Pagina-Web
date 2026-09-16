@@ -49,7 +49,12 @@ export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) 
         // mostrar el selector (sería "elegir" entre una única opción, la
         // misma que ya tienes) — mangas y libros se quedan con el criterio
         // de siempre (basta con que haya al menos una).
-        const minimo = fuenteDetectada === 'comicvine' || fuenteDetectada === 'mangadex' ? 2 : 1;
+        
+        // Con una sola imagen no tiene sentido mostrar el selector (sería
+        // "elegir" entre una única opción, la misma que ya tienes) — se
+        // exige un mínimo de 2 para cualquier fuente, no solo Comic Vine/
+        // MangaDex.
+        const minimo = 2;
         if (!cancelado) {
           setFuente(fuenteDetectada);
           setHayImagenes(imgs.length >= minimo);
