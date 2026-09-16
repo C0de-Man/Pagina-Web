@@ -51,6 +51,33 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
   const resComicInfo = await fetch(`http://localhost:3001/media/${media.id}/comic-info`, { cache: 'no-store' });
   const comicInfo = await resComicInfo.json();
 
+  // Info extra de manga vía AniList: solo existe si el libro se guardó
+  // desde AniList (anilistId) — respaldo final cuando ni MAL ni MangaDex
+  // encontraron el manga (ver /libros/buscar).
+  const resAniListInfo = await fetch(`http://localhost:3001/media/${media.id}/anilist-info`, { cache: 'no-store' });
+  const anilistInfo = await resAniListInfo.json();
+
+  // Info extra de manga vía MangaDex: solo existe si el libro se guardó
+  // desde MangaDex (mangaDexId), típicamente cuando MAL no lo encontró
+  // (ver /libros/buscar) — sin esto, un manga de MangaDex se queda sin
+  // autor/estado/pestaña Crew, aunque MangaDex sí tenga esos datos.
+  let mangaDexInfo: any = null;
+  if (media.mangaDexId) {
+    try {
+      const resMangaDexInfo = await fetch(`http://localhost:3001/mangadex/details/${media.mangaDexId}`, { cache: 'no-store' });
+      mangaDexInfo = await resMangaDexInfo.json();
+    } catch (e) {
+      mangaDexInfo = null;
+    }
+  }
+  const ESTADOS_MANGADEX: Record<string, string> = {
+    ongoing: 'Publishing',
+    completed: 'Finished',
+    hiatus: 'On hiatus',
+    cancelled: 'Cancelled',
+  };
+  const estadoMangaDex = mangaDexInfo?.estado ? (ESTADOS_MANGADEX[mangaDexInfo.estado] || mangaDexInfo.estado) : null;
+
   const formatFechaCorta = (fecha: string | null) => {
     if (!fecha) return null;
     const [y, m, d] = fecha.split('-');
@@ -96,7 +123,7 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
             <div className="flex items-center gap-2 text-gray-400 mb-6">
               <span className="text-lg">{media.anio}</span>
               <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">
-                {mangaInfo.tipoMedia || (media.comicVineId ? 'Comic' : 'Book')}
+                {mangaInfo.tipoMedia || (media.comicVineId ? 'Comic' : media.mangaDexId ? 'Manga' : 'Book')}
               </span>
               {mangaInfo.estado && (
                 <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold text-gray-300 flex-shrink-0">
@@ -108,6 +135,16 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
                   {comicInfo.estado}
                 </span>
               )}
+              {estadoMangaDex && !mangaInfo.estado && !comicInfo.estado && (
+                <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold text-gray-300 flex-shrink-0">
+                  {estadoMangaDex}
+                </span>
+              )}
+              {anilistInfo.estado && !mangaInfo.estado && !comicInfo.estado && !estadoMangaDex && (
+                <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold text-gray-300 flex-shrink-0">
+                  {anilistInfo.estado}
+                </span>
+              )}
             </div>
 
             <MediaTabs
@@ -116,23 +153,47 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
               detalles={
                 mangaInfo.totalVolumenes || mangaInfo.totalCapitulos || publicado || mangaInfo.autores?.length || mangaInfo.revistas?.length
                   ? {
-                      estudios: [],
-                      paises: [],
-                      mangaPublicado: publicado,
-                      mangaVolumenes: mangaInfo.totalVolumenes,
-                      mangaCapitulos: mangaInfo.totalCapitulos,
-                      mangaAutores: mangaInfo.autores || [],
-                      mangaRevistas: mangaInfo.revistas || [],
-                    }
+                    estudios: [],
+                    paises: [],
+                    mangaPublicado: publicado,
+                    mangaVolumenes: mangaInfo.totalVolumenes,
+                    mangaCapitulos: mangaInfo.totalCapitulos,
+                    mangaAutores: mangaInfo.autores || [],
+                    mangaRevistas: mangaInfo.revistas || [],
+                  }
                   : comicInfo.editorial || comicInfo.totalIssues
                     ? {
-                        estudios: comicInfo.editorial ? [{ nombre: comicInfo.editorial }] : [],
+                      estudios: comicInfo.editorial ? [{ nombre: comicInfo.editorial }] : [],
+                      paises: [],
+                      mangaPublicado: publicadoComic,
+                      mangaCapitulos: comicInfo.totalIssues,
+                      mangaAutores: comicInfo.autores || [],
+                    }
+                    : mangaDexInfo?.autores?.length || estadoMangaDex || mangaDexInfo?.totalCapitulos
+                      ? {
+                        estudios: [],
                         paises: [],
-                        mangaPublicado: publicadoComic,
-                        mangaCapitulos: comicInfo.totalIssues,
-                        mangaAutores: comicInfo.autores || [],
+                        // MangaDex no da fecha de inicio/fin, solo estado —
+                        // y ese estado ya se muestra en el badge de arriba,
+                        // así que aquí no se repite (evita un "Published:
+                        // Finished" sin fecha real, que no aporta nada).
+                        mangaPublicado: null,
+                        mangaVolumenes: mangaDexInfo?.totalVolumenes,
+                        mangaCapitulos: mangaDexInfo?.totalCapitulos,
+                        mangaAutores: (mangaDexInfo?.autores || []).map((nombre: string) => ({ nombre, rol: 'Author', foto: null })),
                       }
-                    : null
+                      : anilistInfo.totalCapitulos || anilistInfo.fechaInicio || anilistInfo.autores?.length
+                        ? {
+                          estudios: [],
+                          paises: [],
+                          mangaPublicado: anilistInfo.fechaInicio
+                            ? `${formatFechaCorta(anilistInfo.fechaInicio)}${anilistInfo.fechaFin ? ` - ${formatFechaCorta(anilistInfo.fechaFin)}` : anilistInfo.estado === 'Finished' ? '' : ' - ?'}`
+                            : null,
+                          mangaVolumenes: anilistInfo.totalVolumenes,
+                          mangaCapitulos: anilistInfo.totalCapitulos,
+                          mangaAutores: anilistInfo.autores || [],
+                        }
+                        : null
               }
             />
           </div>

@@ -39,8 +39,14 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
       // Total por defecto desde Comic Vine (si este libro es un cómic
       // guardado desde ahí).
       fetch(`http://localhost:3001/media/${mediaId}/comic-info`).then((res) => res.json()).catch(() => null),
+      // Total por defecto desde MangaDex (respaldo cuando MAL no lo
+      // encontró al guardar).
+      fetch(`http://localhost:3001/media/${mediaId}/mangadex-info`).then((res) => res.json()).catch(() => null),
+      // Total por defecto desde AniList (respaldo final cuando ni MAL ni
+      // MangaDex encontraron el manga).
+      fetch(`http://localhost:3001/media/${mediaId}/anilist-info`).then((res) => res.json()).catch(() => null),
     ])
-      .then(([status, mangaInfo, comicInfo]) => {
+      .then(([status, mangaInfo, comicInfo, mangadexInfo, anilistInfo]) => {
         // "estado" solo viene relleno si el libro tiene malMangaId/
         // comicVineId de verdad — presente incluso mientras el manga sigue
         // en publicación (Publishing) y su totalCapitulos aún es null. Se
@@ -53,28 +59,30 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
         // (ongoing) o relleno (terminado) — así "esComicConFuente" no
         // depende del propio valor que estamos intentando decidir mostrar.
         const esComicConFuente = !!(comicInfo?.editorial || comicInfo?.estado);
-const esMangaConFuente = !esComicConFuente && !!mangaInfo?.estado;
+        // Se cuenta como "manga con fuente automática" si CUALQUIERA de las
+        // tres fuentes (MAL, MangaDex o AniList — en ese orden de
+        // preferencia) confirma que este libro viene de ahí, no solo MAL.
+        const esMangaConFuente = !esComicConFuente && !!(mangaInfo?.estado || mangadexInfo?.estado || anilistInfo?.estado);
         setEsComic(esComicConFuente);
         setTotalGestionadoPorFuente({ capitulo: esMangaConFuente || esComicConFuente, volumen: esMangaConFuente });
         setCapitulo({
           actual: status.progresoActual ?? 0,
-          // El total de una fuente automática (MAL/Comic Vine) SIEMPRE
-          // manda sobre lo que se hubiera guardado antes a mano en
-          // progresoTotal — si Comic Vine dice que ahora mismo es null
-          // (cómic en curso, número aún no fijo), no debe seguir mostrando
-          // un total viejo guardado de una consulta anterior.
+          // El total de una fuente automática (MAL/MangaDex/AniList/Comic
+          // Vine) SIEMPRE manda sobre lo que se hubiera guardado antes a
+          // mano en progresoTotal. Se prueba cada fuente en orden hasta
+          // encontrar un total ya conocido.
           total: esMangaConFuente
-            ? (mangaInfo?.totalCapitulos ?? null)
+            ? (mangaInfo?.totalCapitulos ?? mangadexInfo?.totalCapitulos ?? anilistInfo?.totalCapitulos ?? null)
             : esComicConFuente
               ? (comicInfo?.totalIssues ?? null)
               : (status.progresoTotal ?? null),
         });
         setVolumen({
           actual: status.progresoVolumenActual ?? 0,
-          total: status.progresoVolumenTotal ?? mangaInfo?.totalVolumenes ?? null,
+          total: status.progresoVolumenTotal ?? mangaInfo?.totalVolumenes ?? mangadexInfo?.totalVolumenes ?? anilistInfo?.totalVolumenes ?? null,
         });
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [mediaId, tipo]);
 
   const guardar = async (campo: 'capitulo' | 'volumen', nuevoActual: number, nuevoTotal: number | null) => {
@@ -116,7 +124,7 @@ const esMangaConFuente = !esComicConFuente && !!mangaInfo?.estado;
           window.dispatchEvent(
             new CustomEvent('mediaWatchedChanged', { detail: { mediaId, watched: true } })
           );
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } catch {
       setter(anterior);
@@ -235,7 +243,16 @@ const esMangaConFuente = !esComicConFuente && !!mangaInfo?.estado;
       <h3 className="text-sm font-bold text-white mb-3">Reading progress</h3>
       <div className="space-y-2">
         <Fila campo="capitulo" etiqueta={esComic ? 'Issue' : 'Chapter'} contador={capitulo} />
-        {!esComic && <Fila campo="volumen" etiqueta="Volume" contador={volumen} />}
+        {/* La fila "Volume" solo se muestra si hay algo que mostrar: bien
+            porque alguna fuente automática (MAL/MangaDex/AniList) ya dio un
+            total real, bien porque no hay ninguna fuente automática y el
+            usuario puede escribirlo a mano. Si HAY fuente automática pero
+            ninguna conoce el total de volúmenes (común en manhwa/manhua,
+            que suelen publicarse solo por capítulo), la fila se oculta del
+            todo — mostrar "0 / ?" para siempre no aporta nada. */}
+        {!esComic && !(totalGestionadoPorFuente.volumen && volumen.total === null) && (
+          <Fila campo="volumen" etiqueta="Volume" contador={volumen} />
+        )}
       </div>
     </div>
   );

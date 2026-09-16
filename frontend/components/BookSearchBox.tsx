@@ -66,6 +66,8 @@ export default function BookSearchBox() {
     const campo =
       libro.fuente === 'mal' ? 'malMangaId' :
       libro.fuente === 'mangadex' ? 'mangaDexId' :
+      libro.fuente === 'anilist' ? 'anilistId' :
+      libro.fuente === 'comicvine' ? 'comicVineId' :
       'googleBooksId';
     const local = myDb.find((m: any) => m[campo] === libro.origenId);
     return {

@@ -210,35 +210,35 @@ export default function MediaTabs({
       {/* MAS */}
       {tab === 'mas' && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 text-sm pb-10">
-          <div>
-            <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">
-              {detalles?.mangaRevistas !== undefined ? 'Magazines' : 'Studio'}
+          {(detalles?.mangaRevistas?.length > 0 || detalles?.estudios?.length > 0) && (
+            <div>
+              <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">
+                {detalles?.mangaRevistas !== undefined ? 'Magazines' : 'Studio'}
+              </div>
+              <div className="text-gray-200">
+                {detalles?.mangaRevistas?.length > 0 ? (
+                  detalles.mangaRevistas.map((r: any) => r.nombre).join(', ')
+                ) : (
+                  detalles.estudios.map((e: any, i: number) => (
+                    <span key={e.id ?? i}>
+                      {e.id ? (
+                        <Link href={urlEstudio(e.id, e.nombre)} className="hover:underline hover:text-white transition">
+                          {e.nombre}
+                        </Link>
+                      ) : (
+                        e.nombre
+                      )}
+                      {i < detalles.estudios.length - 1 && ', '}
+                    </span>
+                  ))
+                )}
+              </div>
             </div>
-            <div className="text-gray-200">
-              {detalles?.mangaRevistas?.length > 0 ? (
-                detalles.mangaRevistas.map((r: any) => r.nombre).join(', ')
-              ) : detalles?.estudios?.length > 0 ? (
-                detalles.estudios.map((e: any, i: number) => (
-                  <span key={e.id ?? i}>
-                    {e.id ? (
-                      <Link href={urlEstudio(e.id, e.nombre)} className="hover:underline hover:text-white transition">
-                        {e.nombre}
-                      </Link>
-                    ) : (
-                      e.nombre
-                    )}
-                    {i < detalles.estudios.length - 1 && ', '}
-                  </span>
-                ))
-              ) : (
-                'Not available'
-              )}
-            </div>
-          </div>
-          {tipo !== 'LIBRO' && (
+          )}
+          {tipo !== 'LIBRO' && detalles?.paises?.length > 0 && (
             <div>
               <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Country</div>
-              <div className="text-gray-200">{detalles?.paises?.length > 0 ? detalles.paises.join(', ') : 'Not available'}</div>
+              <div className="text-gray-200">{detalles.paises.join(', ')}</div>
             </div>
           )}
           {detalles?.mangaPublicado && (

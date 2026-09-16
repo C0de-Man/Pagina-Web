@@ -31,7 +31,9 @@ export default function BookCard({ libro, dbId, customPoster, fullWidth }: { lib
         ? `/book/mangadex/${libro.origenId}`
         : libro.fuente === 'comicvine'
           ? `/book/comicvine/${libro.origenId}`
-          : `/book/googlebooks/${libro.origenId}`;
+          : libro.fuente === 'anilist'
+            ? `/book/anilist/${libro.origenId}`
+            : `/book/googlebooks/${libro.origenId}`;
 
   const posterUrl = miCustomPoster || libro.portada || null;
   const titulo = libro.titulo;

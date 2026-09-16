@@ -3339,7 +3339,10 @@ app.get('/libros/buscar', async (req, res) => {
     const buscarMangaMal = async () => {
       try {
         const resultados = await buscarMangaMalApi(searchQuery, 40);
-        if (resultados.length === 0) return buscarMangaDexRespaldo();
+        if (resultados.length === 0) {
+          const porMangaDex = await buscarMangaDexRespaldo();
+          return porMangaDex.length > 0 ? porMangaDex : buscarAniListRespaldo();
+        }
         return resultados.map((item) => ({
           fuente: 'mal',
           origenId: item.id,
@@ -3350,8 +3353,9 @@ app.get('/libros/buscar', async (req, res) => {
           tipoMedia: TIPOS_MEDIA_MAL_BUSQUEDA[item.media_type] || 'Manga',
         }));
       } catch (e) {
-        console.error('Error buscando manga en MAL, usando MangaDex de respaldo:', e.message);
-        return buscarMangaDexRespaldo();
+        console.error('Error buscando manga en MAL, probando MangaDex/AniList:', e.message);
+        const porMangaDex = await buscarMangaDexRespaldo();
+        return porMangaDex.length > 0 ? porMangaDex : buscarAniListRespaldo();
       }
     };
 
@@ -3432,6 +3436,171 @@ app.get('/libros/buscar', async (req, res) => {
     res.status(500).json({ error: 'Error al buscar libros y manga' });
   }
 });
+
+// --- DETALLE COMPLETO DE UN MANGA EN ANILIST (GraphQL) ---
+async function obtenerDetalleAniList(anilistId) {
+  const query = `
+    query ($id: Int) {
+      Media(id: $id, type: MANGA) {
+        id
+        title { english romaji native }
+        description(asHtml: false)
+        coverImage { large }
+        startDate { year month day }
+        endDate { year month day }
+        chapters
+        volumes
+        status
+        countryOfOrigin
+        staff(perPage: 6) {
+          edges {
+            role
+            node { id name { full } image { medium } }
+          }
+        }
+      }
+    }
+  `;
+  const resp = await fetch('https://graphql.anilist.co', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables: { id: anilistId } }),
+  });
+  if (!resp.ok) throw new Error(`AniList respondió ${resp.status}`);
+  const data = await resp.json();
+  return data?.data?.Media || null;
+}
+
+// AniList da las fechas como {year, month, day} separados en vez de un
+// string ISO — se juntan en formato "YYYY-MM-DD" (o solo "YYYY" si falta
+// mes/día), mismo formato que ya usan mangaInfo/comicInfo en el frontend.
+function fechaAniListATexto(fecha) {
+  if (!fecha?.year) return null;
+  if (!fecha.month) return String(fecha.year);
+  const mm = String(fecha.month).padStart(2, '0');
+  if (!fecha.day) return `${fecha.year}-${mm}`;
+  const dd = String(fecha.day).padStart(2, '0');
+  return `${fecha.year}-${mm}-${dd}`;
+}
+
+const ESTADOS_ANILIST = {
+  FINISHED: 'Finished',
+  RELEASING: 'Publishing',
+  NOT_YET_RELEASED: 'Not yet published',
+  CANCELLED: 'Cancelled',
+  HIATUS: 'On hiatus',
+};
+
+// --- GUARDAR UN MANGA DESDE ANILIST (como tipo LIBRO — vive dentro de Books) ---
+app.post('/media/anilist', async (req, res) => {
+  try {
+    const { anilistId } = req.body;
+    if (!anilistId) return res.status(400).json({ error: 'Falta anilistId' });
+
+    const anilistIdNum = parseInt(anilistId, 10);
+    const existente = await prisma.media.findFirst({ where: { anilistId: anilistIdNum } });
+    if (existente) return res.json(existente);
+
+    const data = await obtenerDetalleAniList(anilistIdNum);
+    if (!data?.id) return res.status(404).json({ error: 'Manga no encontrado en AniList' });
+
+    const titulo = data.title?.english || data.title?.romaji || 'Sin título';
+
+    const nuevoMedia = await prisma.media.create({
+      data: {
+        anilistId: anilistIdNum,
+        titulo,
+        tituloOriginal: titulo,
+        tipo: 'LIBRO', // no MANGA — el manga vive dentro de Books, sin sección propia (mismo criterio que MAL/MangaDex)
+        anio: data.startDate?.year || null,
+        portada: data.coverImage?.large || null,
+        sinopsis: data.description || null,
+      },
+    });
+
+    res.json({ ...nuevoMedia, totalCapitulos: data.chapters || null, totalVolumenes: data.volumes || null });
+  } catch (error) {
+    console.error('ERROR EN POST /media/anilist:', error);
+    res.status(500).json({ error: 'Error al guardar el manga desde AniList' });
+  }
+});
+
+// --- INFO EXTRA DE MANGA VÍA ANILIST: capítulos/volúmenes totales, estado,
+// fechas de inicio/fin y staff (Story/Art) — mismo papel que
+// /media/:id/manga-info (MAL), pero para lo guardado desde AniList. ---
+app.get('/media/:id/anilist-info', async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id, 10);
+    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { anilistId: true } });
+    if (!media?.anilistId) {
+      return res.json({ totalVolumenes: null, totalCapitulos: null, estado: null, fechaInicio: null, fechaFin: null, autores: [] });
+    }
+
+    const data = await obtenerDetalleAniList(media.anilistId);
+    if (!data) {
+      return res.json({ totalVolumenes: null, totalCapitulos: null, estado: null, fechaInicio: null, fechaFin: null, autores: [] });
+    }
+
+    const autores = (data.staff?.edges || [])
+      .filter((e) => e.node?.name?.full)
+      .map((e) => ({
+        nombre: e.node.name.full,
+        rol: e.role || 'Staff',
+        foto: e.node.image?.medium || null,
+      }));
+
+    res.json({
+      totalVolumenes: data.volumes || null,
+      totalCapitulos: data.chapters || null,
+      estado: ESTADOS_ANILIST[data.status] || data.status || null,
+      fechaInicio: fechaAniListATexto(data.startDate),
+      fechaFin: fechaAniListATexto(data.endDate),
+      autores,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/anilist-info:', error);
+    res.status(500).json({ error: 'Error al obtener la información de AniList' });
+  }
+});
+
+// Respaldo final, si ni MAL ni MangaDex encuentran nada: AniList, API
+// GraphQL pública y gratuita, sin necesidad de clave. Cubre bien
+// manhwa/manhua (formato "MANGA" con countryOfOrigin distinto de JP),
+// con fechas de inicio/fin y estado que ya encajan con los campos que
+// usa /media/:id/manga-info.
+const buscarAniListRespaldo = async () => {
+  try {
+    const query = `
+          query ($search: String) {
+            Page(perPage: 20) {
+              media(search: $search, type: MANGA) {
+                id
+                title { english romaji }
+                coverImage { large }
+                startDate { year }
+              }
+            }
+          }
+        `;
+    const resp = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, variables: { search: searchQuery } }),
+    });
+    const data = await resp.json();
+    return (data?.data?.Page?.media || []).map((item) => ({
+      fuente: 'anilist',
+      origenId: item.id,
+      titulo: item.title?.english || item.title?.romaji || 'Sin título',
+      autor: null,
+      anio: item.startDate?.year || null,
+      portada: item.coverImage?.large || null,
+    }));
+  } catch (e) {
+    console.error('Error buscando en AniList (respaldo final):', e.message);
+    return [];
+  }
+};
 
 // --- DETALLES DE UN LIBRO: autor, editorial, páginas, categorías ---
 app.get('/googlebooks/details/:googleBooksId', async (req, res) => {
@@ -3556,15 +3725,105 @@ app.get('/mangadex/details/:mangaDexId', async (req, res) => {
       .map((r) => r.attributes?.name)
       .filter(Boolean);
 
+    // El total de capítulos SUBIDOS (con páginas para leer) no viene en el
+    // endpoint de detalle — se pide aparte al endpoint "aggregate". Pero
+    // series licenciadas oficialmente (como "Such a Cute Spy", que solo
+    // enlaza a Lezhin) pueden no tener NINGÚN capítulo subido a MangaDex,
+    // aunque la obra ya esté completa — para esos casos, MangaDex sí guarda
+    // el número del último capítulo/volumen como METADATO aparte
+    // (attrs.lastChapter/lastVolume), que usamos de respaldo.
+    let totalCapitulos = null;
+    let totalVolumenes = null;
+    try {
+      const urlAggregate = `https://api.mangadex.org/manga/${mangaDexId}/aggregate`;
+      const respAggregate = await fetch(urlAggregate);
+      const dataAggregate = await respAggregate.json();
+      const volumenes = Object.values(dataAggregate.volumes || {});
+      if (volumenes.length > 0) {
+        totalVolumenes = volumenes.filter((v) => v.volume !== 'none').length || null;
+        totalCapitulos = volumenes.reduce((suma, v) => suma + Object.keys(v.chapters || {}).length, 0) || null;
+      }
+    } catch (e) {
+      console.error('No se pudo obtener el total de capítulos de MangaDex:', e.message);
+    }
+    if (!totalCapitulos && attrs.lastChapter) {
+      const numeroCapitulo = parseInt(attrs.lastChapter, 10);
+      if (!Number.isNaN(numeroCapitulo)) totalCapitulos = numeroCapitulo;
+    }
+    if (!totalVolumenes && attrs.lastVolume) {
+      const numeroVolumen = parseInt(attrs.lastVolume, 10);
+      if (!Number.isNaN(numeroVolumen)) totalVolumenes = numeroVolumen;
+    }
+
     res.json({
       sinopsis,
       tags,
       estado: attrs.status || null,
       autores: [...new Set(autores)],
+      totalCapitulos,
+      totalVolumenes,
     });
   } catch (error) {
     console.error('ERROR EN GET /mangadex/details/:mangaDexId:', error);
     res.status(500).json({ error: 'Error al obtener detalles del manga' });
+  }
+});
+
+
+// --- INFO EXTRA DE MANGA VÍA MANGADEX, por mediaId (mismo papel que
+// /media/:id/manga-info de MAL) — resuelve el mangaDexId internamente para
+// que el frontend no tenga que conocerlo, igual que ya hacen manga-info/
+// comic-info/anilist-info. ---
+app.get('/media/:id/mangadex-info', async (req, res) => {
+  try {
+    const mediaId = parseInt(req.params.id, 10);
+    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { mangaDexId: true } });
+    if (!media?.mangaDexId) {
+      return res.json({ totalVolumenes: null, totalCapitulos: null, estado: null, autores: [] });
+    }
+
+    const url = `https://api.mangadex.org/manga/${media.mangaDexId}?includes[]=author&includes[]=artist`;
+    const response = await fetch(url);
+    const data = await response.json();
+    const attrs = data.data?.attributes || {};
+
+    const autores = (data.data?.relationships || [])
+      .filter((r) => r.type === 'author' || r.type === 'artist')
+      .map((r) => r.attributes?.name)
+      .filter(Boolean);
+
+    let totalCapitulos = null;
+    let totalVolumenes = null;
+    try {
+      const urlAggregate = `https://api.mangadex.org/manga/${media.mangaDexId}/aggregate`;
+      const respAggregate = await fetch(urlAggregate);
+      const dataAggregate = await respAggregate.json();
+      const volumenes = Object.values(dataAggregate.volumes || {});
+      if (volumenes.length > 0) {
+        totalVolumenes = volumenes.filter((v) => v.volume !== 'none').length || null;
+        totalCapitulos = volumenes.reduce((suma, v) => suma + Object.keys(v.chapters || {}).length, 0) || null;
+      }
+    } catch (e) {
+      console.error('No se pudo obtener el total de capítulos de MangaDex:', e.message);
+    }
+    if (!totalCapitulos && attrs.lastChapter) {
+      const n = parseInt(attrs.lastChapter, 10);
+      if (!Number.isNaN(n)) totalCapitulos = n;
+    }
+    if (!totalVolumenes && attrs.lastVolume) {
+      const n = parseInt(attrs.lastVolume, 10);
+      if (!Number.isNaN(n)) totalVolumenes = n;
+    }
+
+    res.json({
+      totalVolumenes,
+      totalCapitulos,
+      estado: attrs.status || null,
+      autores: [...new Set(autores)],
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /media/:id/mangadex-info:', error);
+    res.status(500).json({ error: 'Error al obtener la información de MangaDex' });
   }
 });
 
@@ -10165,7 +10424,7 @@ app.get('/media/:id/rating', async (req, res) => {
 
     let externaAvg = null;
     let externaPeso = 0; // número real de votos que respaldan esa media externa
-    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true, igdbId: true, malMangaId: true, tipo: true } });
+    const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true, igdbId: true, malMangaId: true, anilistId: true, mangaDexId: true, tipo: true } });
 
     if (media?.tmdbId) {
       try {
@@ -10217,6 +10476,17 @@ app.get('/media/:id/rating', async (req, res) => {
         if (malData.mean) {
           externaAvg = malData.mean;
           externaPeso = malData.num_scoring_users || 1;
+        }
+      } catch (e) { }
+    } else if (media?.anilistId) {
+      try {
+        const anilistData = await obtenerDetalleAniList(media.anilistId);
+        // AniList usa escala 0-100; lo pasamos a 0-10 como el resto del proyecto.
+        if (anilistData?.averageScore) {
+          externaAvg = anilistData.averageScore / 10;
+          // AniList no da un número de votos en este campo; usamos su popularity
+          // como peso aproximado, o 1 si tampoco está.
+          externaPeso = anilistData.popularity || 1;
         }
       } catch (e) { }
     }
