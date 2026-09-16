@@ -472,24 +472,71 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
                 onToggle={async () => {
                   const nuevoEstado = !visto;
                   const token = localStorage.getItem('token');
+                  let completa = true;
+
                   if (token) {
-                    fetch(`http://localhost:3001/media/${mediaId}/seasons/${t.numero}/mark-all`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                      body: JSON.stringify({ watched: nuevoEstado, totalEpisodios: t.episodios }),
-                    }).catch(() => { });
+                    try {
+                      const res = await fetch(`http://localhost:3001/media/${mediaId}/seasons/${t.numero}/mark-all`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ watched: nuevoEstado, totalEpisodios: t.episodios }),
+                      });
+                      if (nuevoEstado) {
+                        const body = await res.json();
+                        completa = !!body.completa;
+                      }
+                    } catch {
+                      completa = false;
+                    }
                   }
+
                   if (temporadaAbierta?.numero === t.numero) {
                     setEstadosEpisodios((prev) => {
                       const nuevo: Record<number, EstadoEpisodio> = {};
                       episodios.forEach((ep) => {
-                        nuevo[ep.numero] = { episodeNumber: ep.numero, watched: nuevoEstado, rating: prev[ep.numero]?.rating ?? null };
+                        // Solo se refleja como visto localmente lo que YA se
+                        // ha emitido — mismo criterio que aplica el backend.
+                        const yaEmitido = !nuevoEstado || (ep.fechaEmision ? new Date(ep.fechaEmision) <= new Date() : false);
+                        nuevo[ep.numero] = { episodeNumber: ep.numero, watched: nuevoEstado && yaEmitido, rating: prev[ep.numero]?.rating ?? null };
                       });
                       return nuevo;
                     });
                   }
+
                   if (nuevoEstado) {
-                    await marcarTemporadaYAnteriores(t.numero);
+                    // Las temporadas ANTERIORES se marcan completas sin más
+                    // (ya deberían estar emitidas del todo, al ser previas) —
+                    // la temporada ACTUAL solo se marca completa si el
+                    // backend ha confirmado que no le falta ningún episodio.
+                    const numerosAnteriores = temporadas
+                      .filter((tt) => tt.numero > 0 && tt.numero < t.numero && !estadosTemporadas[tt.numero]?.watched)
+                      .map((tt) => tt.numero);
+
+                    const estadosActualizados = { ...estadosTemporadas };
+                    for (const n of numerosAnteriores) {
+                      const estadoActual = estadosTemporadas[n];
+                      estadosActualizados[n] = { seasonNumber: n, watched: true, rating: estadoActual?.rating ?? null, customPoster: estadoActual?.customPoster ?? null };
+                    }
+
+                    if (numerosAnteriores.length > 0 && token) {
+                      await Promise.all(
+                        numerosAnteriores.map((n) =>
+                          fetch(`http://localhost:3001/media/${mediaId}/seasons/${n}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({ watched: true }),
+                          }).catch(() => { })
+                        )
+                      );
+                    }
+
+                    if (completa) {
+                      const estadoActual = estadosTemporadas[t.numero];
+                      estadosActualizados[t.numero] = { seasonNumber: t.numero, watched: true, rating: estadoActual?.rating ?? null, customPoster: estadoActual?.customPoster ?? null };
+                    }
+
+                    setEstadosTemporadas(estadosActualizados);
+                    await revisarSiSerieCompleta(estadosActualizados);
                   } else {
                     await actualizarTemporada(t.numero, { watched: false });
                   }
@@ -560,10 +607,34 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
               <button
                 onClick={async () => {
                   const nuevoEstado = !(estadoTemporadaAbierta?.watched);
-                  episodios.forEach((ep) => actualizarEpisodio(temporadaAbierta.numero, ep.numero, { watched: nuevoEstado }));
                   if (nuevoEstado) {
-                    await marcarTemporadaCompleta(temporadaAbierta.numero);
+                    const token = localStorage.getItem('token');
+                    let completa = true;
+                    if (token) {
+                      try {
+                        const res = await fetch(`http://localhost:3001/media/${mediaId}/seasons/${temporadaAbierta.numero}/mark-all`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                          body: JSON.stringify({ watched: true, totalEpisodios: totalEpisodiosModal }),
+                        });
+                        const body = await res.json();
+                        completa = !!body.completa;
+                      } catch {
+                        completa = false;
+                      }
+                    }
+                    // Solo se marcan localmente los episodios YA emitidos —
+                    // el backend ya no marca los que aún no tienen fecha
+                    // de emisión pasada.
+                    episodios.forEach((ep) => {
+                      const yaEmitido = ep.fechaEmision ? new Date(ep.fechaEmision) <= new Date() : false;
+                      if (yaEmitido) actualizarEpisodio(temporadaAbierta.numero, ep.numero, { watched: true });
+                    });
+                    if (completa) {
+                      await marcarTemporadaCompleta(temporadaAbierta.numero);
+                    }
                   } else {
+                    episodios.forEach((ep) => actualizarEpisodio(temporadaAbierta.numero, ep.numero, { watched: false }));
                     await actualizarTemporada(temporadaAbierta.numero, { watched: false });
                   }
                 }}

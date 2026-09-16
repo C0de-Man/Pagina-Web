@@ -6432,11 +6432,21 @@ async function calcularProgresoSerie(media, userId, apiKey, idioma) {
   const episodioVistoSet = new Set(episodiosVistos.map((e) => `${e.seasonNumber}-${e.episodeNumber}`));
   const temporadaVistaSet = new Set(temporadasVistas.map((t) => t.seasonNumber));
 
+  // Los episodios nuevos casi siempre se añaden a la ÚLTIMA temporada
+  // conocida — si esa temporada ya estaba marcada como "vista de golpe"
+  // (porque en su momento se completó la serie entera), no podemos
+  // saltárnosla sin más: TMDB puede haberle añadido un episodio nuevo desde
+  // entonces. Sí seguimos saltando las temporadas anteriores ya vistas, por
+  // rapidez — un episodio nuevo casi nunca aparece "por sorpresa" en una
+  // temporada antigua ya cerrada.
+  const numeroUltimaTemporada = Math.max(...seasons.map((s) => s.season_number));
+
   for (const s of seasons) {
     // Temporada marcada como vista de golpe (sin marcar episodio a episodio):
     // se da por hecho que todos sus episodios están vistos y se pasa a la
-    // siguiente temporada, sin gastar una petición a TMDB para nada.
-    if (temporadaVistaSet.has(s.season_number)) continue;
+    // siguiente temporada, sin gastar una petición a TMDB para nada — salvo
+    // que sea la última temporada, que sí se revisa siempre (ver arriba).
+    if (temporadaVistaSet.has(s.season_number) && s.season_number !== numeroUltimaTemporada) continue;
 
     const detRes = await fetch(`https://api.themoviedb.org/3/tv/${idTmdb}/season/${s.season_number}?api_key=${apiKey}&language=${idioma}`);
     const det = await detRes.json();
@@ -6480,13 +6490,25 @@ app.get('/media/continue-watching', requireAuth, async (req, res) => {
     const idioma = getLang(req);
     const apiKey = process.env.TMDB_API_KEY;
 
+    // Además de "Watching", incluimos las series ya marcadas como Complete
+    // (watched=true, playStatus=null) — si TMDB le añade un episodio o
+    // temporada nueva a una serie que ya diste por terminada, calcularProgresoSerie
+    // lo detecta (ver el cambio en esa función) y esta serie reaparece sola
+    // en Coming Up / Continue Watching, sin que tengas que volver a marcarla
+    // como "Watching" a mano.
     const entries = await prisma.userMedia.findMany({
-      where: { userId: req.userId, playStatus: 'WATCHING' },
+      where: {
+        userId: req.userId,
+        OR: [
+          { playStatus: 'WATCHING' },
+          { watched: true, playStatus: null },
+        ],
+      },
     });
     if (entries.length === 0) return res.json({ continuando: [], proximamente: [] });
 
     const mediaIds = entries.map((e) => e.mediaId);
-    const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds }, tmdbId: { not: null } } });
+    const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds }, tmdbId: { not: null }, tipo: 'SERIE' } });
     const entryPorMediaId = new Map(entries.map((e) => [e.mediaId, e]));
 
     const continuando = [];
@@ -8345,12 +8367,34 @@ async function marcarTodaLaSerieVista(userId, mediaId, tmdbId) {
   const seriesData = await seriesRes.json();
   const temporadas = (seriesData.seasons || []).filter((s) => s.season_number > 0);
   const fecha = new Date();
+  const hoy = new Date();
 
   for (const temporada of temporadas) {
-    const totalEpisodios = temporada.episode_count || 0;
-    if (totalEpisodios > 0) {
+    // Se piden los episodios reales de la temporada (con su air_date) en
+    // vez de fiarnos de episode_count — antes se marcaban TODOS los
+    // episodios del 1 al total declarado, sin comprobar si ya se habían
+    // emitido de verdad, así que pulsar "Watched" en la serie daba por
+    // vistos episodios/temporadas todavía sin estrenar.
+    let episodiosEmitidos = [];
+    let totalEpisodiosReal = temporada.episode_count || 0;
+    try {
+      const seasonRes = await fetch(`https://api.themoviedb.org/3/tv/${tmdbId}/season/${temporada.season_number}?api_key=${apiKey}`);
+      const seasonData = await seasonRes.json();
+      const episodiosTemporada = seasonData.episodes || [];
+      totalEpisodiosReal = episodiosTemporada.length || totalEpisodiosReal;
+      episodiosEmitidos = episodiosTemporada
+        .filter((e) => e.air_date && new Date(e.air_date) <= hoy)
+        .map((e) => e.episode_number);
+    } catch (e) {
+      // Si falla la consulta, mejor no marcar nada de esta temporada por
+      // seguridad, en vez de arriesgarnos a marcar episodios sin estrenar.
+      console.error(`No se pudo comprobar fechas de emisión de la temporada ${temporada.season_number}:`, e.message);
+      continue;
+    }
+
+    if (episodiosEmitidos.length > 0) {
       await Promise.all(
-        Array.from({ length: totalEpisodios }, (_, i) => i + 1).map((episodeNumber) =>
+        episodiosEmitidos.map((episodeNumber) =>
           prisma.userEpisodeWatch.upsert({
             where: { userId_mediaId_seasonNumber_episodeNumber: { userId, mediaId, seasonNumber: temporada.season_number, episodeNumber } },
             update: { watched: true, fechaVisto: fecha },
@@ -8359,11 +8403,18 @@ async function marcarTodaLaSerieVista(userId, mediaId, tmdbId) {
         )
       );
     }
-    await prisma.userSeasonWatch.upsert({
-      where: { userId_mediaId_seasonNumber: { userId, mediaId, seasonNumber: temporada.season_number } },
-      update: { watched: true, fechaVisto: fecha },
-      create: { userId, mediaId, seasonNumber: temporada.season_number, watched: true, fechaVisto: fecha },
-    });
+
+    // La temporada solo se marca como "completa" en UserSeasonWatch si de
+    // verdad se han emitido TODOS sus episodios — si a la temporada le
+    // faltan episodios por estrenar, se deja sin marcar (aunque los ya
+    // emitidos sí quedan vistos arriba).
+    if (totalEpisodiosReal > 0 && episodiosEmitidos.length === totalEpisodiosReal) {
+      await prisma.userSeasonWatch.upsert({
+        where: { userId_mediaId_seasonNumber: { userId, mediaId, seasonNumber: temporada.season_number } },
+        update: { watched: true, fechaVisto: fecha },
+        create: { userId, mediaId, seasonNumber: temporada.season_number, watched: true, fechaVisto: fecha },
+      });
+    }
   }
 }
 
@@ -8470,11 +8521,41 @@ app.patch('/media/:id/seasons/:seasonNumber/mark-all', requireAuth, async (req, 
     const seasonNumber = parseInt(req.params.seasonNumber);
     const { watched, totalEpisodios } = req.body;
     const total = parseInt(totalEpisodios) || 0;
-    if (total <= 0) return res.json({ ok: true });
+    if (total <= 0) return res.json({ ok: true, completa: false });
+
+    // Al marcar como visto, solo se marcan los episodios que YA se han
+    // emitido de verdad — antes se marcaban del 1 al total declarado sin
+    // comprobar fecha, así que un episodio anunciado pero aún sin estrenar
+    // se quedaba marcado como "visto" igualmente. Al desmarcar sí se
+    // desmarcan todos sin más, no hay riesgo en eso.
+    let numerosAMarcar = Array.from({ length: total }, (_, i) => i + 1);
+    let completa = true;
+
+    if (watched) {
+      const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { tmdbId: true } });
+      if (media?.tmdbId) {
+        try {
+          const apiKey = process.env.TMDB_API_KEY;
+          const seasonRes = await fetch(`https://api.themoviedb.org/3/tv/${media.tmdbId}/season/${seasonNumber}?api_key=${apiKey}`);
+          const seasonData = await seasonRes.json();
+          const hoy = new Date();
+          const emitidos = new Set(
+            (seasonData.episodes || [])
+              .filter((e) => e.air_date && new Date(e.air_date) <= hoy)
+              .map((e) => e.episode_number)
+          );
+          const totalReal = (seasonData.episodes || []).length || total;
+          numerosAMarcar = numerosAMarcar.filter((n) => emitidos.has(n));
+          completa = totalReal > 0 && numerosAMarcar.length === totalReal;
+        } catch (e) {
+          console.error('No se pudo comprobar fechas de emisión, se marcan todos por seguridad:', e.message);
+        }
+      }
+    }
 
     const fecha = watched ? new Date() : null;
     await Promise.all(
-      Array.from({ length: total }, (_, i) => i + 1).map((episodeNumber) =>
+      numerosAMarcar.map((episodeNumber) =>
         prisma.userEpisodeWatch.upsert({
           where: { userId_mediaId_seasonNumber_episodeNumber: { userId: req.userId, mediaId, seasonNumber, episodeNumber } },
           update: { watched, fechaVisto: fecha },
@@ -8483,10 +8564,23 @@ app.patch('/media/:id/seasons/:seasonNumber/mark-all', requireAuth, async (req, 
       )
     );
 
-    // Este endpoint marca TODOS los episodios de golpe, sin pasar por el
-    // PATCH por episodio (que sí actualiza esto) — así que había que
-    // repetirlo aquí también, o marcar temporada entera desde este botón
-    // nunca subía la serie arriba del todo en "Continue Watching".
+    // Solo se marca la temporada como "completa" en UserSeasonWatch si de
+    // verdad se han marcado TODOS sus episodios ya emitidos — así una
+    // temporada con episodios pendientes de estreno nunca queda como vista
+    // del todo, aunque se pulse "marcar como vista".
+    if (watched && completa) {
+      await prisma.userSeasonWatch.upsert({
+        where: { userId_mediaId_seasonNumber: { userId: req.userId, mediaId, seasonNumber } },
+        update: { watched: true, fechaVisto: fecha },
+        create: { userId: req.userId, mediaId, seasonNumber, watched: true, fechaVisto: fecha },
+      });
+    } else if (!watched) {
+      await prisma.userSeasonWatch.updateMany({
+        where: { userId: req.userId, mediaId, seasonNumber, watched: true },
+        data: { watched: false },
+      });
+    }
+
     if (watched === true) {
       await prisma.userMedia.updateMany({
         where: { userId: req.userId, mediaId },
@@ -8505,7 +8599,7 @@ app.patch('/media/:id/seasons/:seasonNumber/mark-all', requireAuth, async (req, 
       }
     }
 
-    res.json({ ok: true });
+    res.json({ ok: true, marcados: numerosAMarcar.length, total, completa });
   } catch (error) {
     console.error('ERROR EN PATCH /media/:id/seasons/:seasonNumber/mark-all:', error);
     res.status(500).json({ error: 'Error al marcar los episodios' });
