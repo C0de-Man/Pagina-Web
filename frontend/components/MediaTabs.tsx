@@ -74,14 +74,33 @@ export default function MediaTabs({
 
   const hayAdaptaciones = (adaptaciones?.videojuegos?.length || 0) > 0;
 
+  // Igual que ya se hace con "Cast" (oculta si tipo === 'LIBRO'), aquí se
+  // comprueba si de verdad hay algo que mostrar en "Crew" e "Info" antes de
+  // dejarlas en la lista de pestañas — así un libro/manga sin autores
+  // conocidos, o una ficha sin studio/country/presupuesto, no muestra una
+  // pestaña vacía con solo un "No information available.".
+  const hayCrew =
+    (detalles?.mangaAutores?.length || 0) > 0 ||
+    !!detalles?.director ||
+    (detalles?.guionistas?.length || 0) > 0;
+
+  const hayInfo =
+    (detalles?.mangaRevistas?.length || 0) > 0 ||
+    (detalles?.estudios?.length || 0) > 0 ||
+    (tipo !== 'LIBRO' && (detalles?.paises?.length || 0) > 0) ||
+    !!detalles?.mangaPublicado ||
+    !!seriesInfo ||
+    !!detalles?.presupuesto ||
+    !!detalles?.ganancias;
+
   // "Cast" no tiene sentido para libros/manga/cómics — no son medios con
   // reparto de actores. Se oculta directamente en vez de mostrarla vacía
   // con "No cast information available.".
   const tabs: { key: typeof tab; label: string }[] = [
     { key: 'descripcion', label: 'Description' },
     ...(tipo !== 'LIBRO' ? [{ key: 'cast' as const, label: 'Cast' }] : []),
-    { key: 'crew', label: 'Crew' },
-    { key: 'mas', label: 'Info' },
+    ...(hayCrew ? [{ key: 'crew' as const, label: 'Crew' }] : []),
+    ...(hayInfo ? [{ key: 'mas' as const, label: 'Info' }] : []),
     ...(hayAdaptaciones ? [{ key: 'adaptation' as const, label: 'Adaptation' }] : []),
   ];
 

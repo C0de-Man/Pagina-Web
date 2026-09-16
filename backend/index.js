@@ -921,7 +921,7 @@ function headersMal() {
 }
 
 async function buscarMangaMalApi(query, limit = 20) {
-  const url = `${MAL_API_BASE}/manga?q=${encodeURIComponent(query)}&limit=${limit}&fields=id,title,main_picture,authors{first_name,last_name},start_date`;
+  const url = `${MAL_API_BASE}/manga?q=${encodeURIComponent(query)}&limit=${limit}&fields=id,title,main_picture,authors{first_name,last_name},start_date,media_type`;
   const response = await fetch(url, { headers: headersMal() });
   if (!response.ok) throw new Error(`MAL respondió ${response.status}`);
   const data = await response.json();
@@ -960,6 +960,20 @@ async function obtenerFotoAutorMal(personaId) {
     return null;
   }
 }
+
+// Mismo mapeo que ya usa /media/:id/manga-info, pero disponible aquí
+// también para el buscador combinado de Books (necesita saber el tipo de
+// cada resultado — Manga, Novel, Light Novel...— para poder filtrarlos).
+const TIPOS_MEDIA_MAL_BUSQUEDA = {
+  manga: 'Manga',
+  novel: 'Novel',
+  light_novel: 'Light Novel',
+  one_shot: 'One-shot',
+  doujinshi: 'Doujinshi',
+  manhwa: 'Manhwa',
+  manhua: 'Manhua',
+  oel: 'OEL',
+};
 
 function nombreAutorMal(autoresMal) {
   const primero = (autoresMal || [])[0]?.node;
@@ -3333,6 +3347,7 @@ app.get('/libros/buscar', async (req, res) => {
           autor: nombreAutorMal(item.authors),
           anio: item.start_date ? parseInt(item.start_date.slice(0, 4), 10) : null,
           portada: item.main_picture?.large || item.main_picture?.medium || null,
+          tipoMedia: TIPOS_MEDIA_MAL_BUSQUEDA[item.media_type] || 'Manga',
         }));
       } catch (e) {
         console.error('Error buscando manga en MAL, usando MangaDex de respaldo:', e.message);
