@@ -13,7 +13,9 @@ app.use(cors());
 // base64 (BannerCropModal/AvatarCropModal) — sin subir esto, esas peticiones
 // fallaban con "PayloadTooLargeError" sin que el frontend llegara a
 // enterarse de por qué.
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+
+app.get('/test123', (req, res) => res.json({ ok: true }));
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -3403,6 +3405,8 @@ app.get('/libros/buscar', async (req, res) => {
       }
     };
 
+
+
     // Respaldo: solo se usa si MAL falla del todo o no devuelve nada — MAL
     // (API oficial) es la fuente principal de manga ahora.
     const buscarMangaDexRespaldo = async () => {
@@ -3552,6 +3556,79 @@ app.get('/libros/buscar', async (req, res) => {
     res.status(500).json({ error: 'Error al buscar libros y manga' });
   }
 });
+
+    // --- MANGA + CÓMICS ESTRENADOS EN UN AÑO CONCRETO (para el carrusel
+    // "Books 202X" de la home de Books) — MAL no tiene un endpoint de
+    // "novedades del año", así que se aproxima con su ranking de popularidad
+    // filtrado por año de inicio. Comic Vine sí permite filtrar volúmenes por
+    // start_year directamente. Google Books se queda fuera de este carrusel:
+    // su API no permite filtrar de forma fiable por año de publicación.
+    app.get('/libros/anio/:year', async (req, res) => {
+      try {
+        const year = parseInt(req.params.year, 10);
+        if (Number.isNaN(year)) return res.status(400).json({ error: 'Año inválido' });
+
+        const buscarMangaDelAño = async () => {
+          try {
+            const url = `${MAL_API_BASE}/manga/ranking?ranking_type=bypopularity&limit=500&fields=id,title,main_picture,start_date`;
+            const response = await fetch(url, { headers: headersMal() });
+            if (!response.ok) return [];
+            const data = await response.json();
+            return (data.data || [])
+              .map((item) => item.node)
+              .filter((node) => node.start_date && node.start_date.startsWith(String(year)))
+              .map((node) => ({
+                fuente: 'mal',
+                origenId: node.id,
+                titulo: node.title,
+                autor: null,
+                anio: year,
+                portada: node.main_picture?.large || node.main_picture?.medium || null,
+              }));
+          } catch (e) {
+            console.error('Error buscando manga del año en MAL:', e.message);
+            return [];
+          }
+        };
+
+        const buscarComicsDelAño = async () => {
+          try {
+            const apiKey = process.env.COMICVINE_API_KEY;
+            const headers = { 'User-Agent': COMICVINE_USER_AGENT };
+            const url = `${COMICVINE_API_BASE}/volumes/?api_key=${apiKey}&format=json&filter=start_year:${year}&sort=date_added:desc&field_list=id,name,start_year,image,publisher,count_of_issues&limit=50`;
+            const response = await fetchComicVine(url, { headers });
+            if (!response.ok) return [];
+            const data = await response.json();
+            return (data.results || []).map((item) => ({
+              fuente: 'comicvine',
+              origenId: item.id,
+              titulo: item.name,
+              autor: item.publisher?.name || null,
+              anio: item.start_year ? parseInt(item.start_year, 10) : year,
+              portada: item.image?.medium_url || item.image?.small_url || null,
+            }));
+          } catch (e) {
+            console.error('Error buscando cómics del año en Comic Vine:', e.message);
+            return [];
+          }
+        };
+
+        const [manga, comics] = await Promise.all([buscarMangaDelAño(), buscarComicsDelAño()]);
+        // Se intercalan uno a uno (manga, cómic, manga, cómic...) en vez de
+        // ponerlos todos seguidos por fuente — así el carrusel no empieza con
+        // 4 cómics idénticos en estilo antes de que aparezca el primer manga.
+        const intercalados = [];
+        const maxLen = Math.max(manga.length, comics.length);
+        for (let i = 0; i < maxLen; i++) {
+          if (manga[i]) intercalados.push(manga[i]);
+          if (comics[i]) intercalados.push(comics[i]);
+        }
+        res.json(intercalados);
+      } catch (error) {
+        console.error('ERROR EN GET /libros/año/:year:', error);
+        res.status(500).json({ error: 'Error al obtener libros del año' });
+      }
+    });
 
 // --- DETALLE COMPLETO DE UN MANGA EN ANILIST (GraphQL) ---
 async function obtenerDetalleAniList(anilistId) {
@@ -4075,6 +4152,312 @@ async function buscarPeliculaTmdbPorTituloYAnio(titulo, anio) {
   if (conAnio.length === 0) return null;
   return conAnio[0];
 }
+
+// --- EXPORTAR TODO MI CATÁLOGO COMO BACKUP JSON ---
+// Junta todo lo que cuelga de tu usuario: catálogo (UserMedia + su Media),
+// logs de juegos, registros de visionado, progreso de series por episodio/
+// temporada, listas y favoritos. Pensado como backup completo, no como
+// formato para reimportar en otro sitio (eso ya lo cubren los imports
+// específicos de Letterboxd/Backloggd/MAL).
+app.get('/export', requireAuth, async (req, res) => {
+  try {
+    const [userMedia, mediaItems, gameLogs, watchLogs, episodeWatches, seasonWatches, lists, listItems, favorites] = await Promise.all([
+      prisma.userMedia.findMany({ where: { userId: req.userId } }),
+      prisma.media.findMany({
+        where: {
+          id: {
+            in: (await prisma.userMedia.findMany({ where: { userId: req.userId }, select: { mediaId: true } })).map((m) => m.mediaId),
+          },
+        },
+      }),
+      prisma.gameLog.findMany({ where: { userId: req.userId } }),
+      prisma.watchLog.findMany({ where: { userId: req.userId } }),
+      prisma.userEpisodeWatch.findMany({ where: { userId: req.userId } }),
+      prisma.userSeasonWatch.findMany({ where: { userId: req.userId } }),
+      prisma.list.findMany({ where: { userId: req.userId } }),
+      prisma.listItem.findMany({ where: { list: { userId: req.userId } } }),
+      prisma.favorite.findMany({ where: { userId: req.userId } }),
+    ]);
+
+    const mediaPorId = new Map(mediaItems.map((m) => [m.id, m]));
+
+    // Cada entrada de catálogo lleva su ficha de Media incrustada, para que
+    // el JSON sea legible/útil por sí mismo sin tener que cruzar ids a mano.
+    const catalogo = userMedia.map((um) => ({
+      ...um,
+      media: mediaPorId.get(um.mediaId) || null,
+    }));
+
+    res.json({
+      exportadoEl: new Date().toISOString(),
+      catalogo,
+      gameLogs,
+      watchLogs,
+      episodeWatches,
+      seasonWatches,
+      lists,
+      listItems,
+      favorites,
+    });
+  } catch (error) {
+    console.error('ERROR EN GET /export:', error);
+    res.status(500).json({ error: 'Error al exportar el catálogo' });
+  }
+});
+
+// --- IMPORTAR UN BACKUP JSON GENERADO POR /export ---
+// Solo esta cuenta, nunca sobrescribe: si algo del backup ya existe (mismo
+// título ya en tu catálogo, mismo log, misma lista con ese nombre...), se
+// salta y se deja lo que ya tenías tal cual. Solo rellena lo que falte.
+const CAMPOS_EXTERNOS_MEDIA = ['tmdbId', 'igdbId', 'malMangaId', 'mangaDexId', 'comicVineId', 'googleBooksId', 'anilistId'];
+
+function claveExternaMedia(media) {
+  // tmdbId es ambiguo sin el tipo (pelis y series comparten numeración) —
+  // el resto de ids externos ya son únicos por sí solos.
+  if (media.tmdbId) return `tmdbId:${media.tmdbId}:${media.tipo}`;
+  for (const campo of CAMPOS_EXTERNOS_MEDIA) {
+    if (campo !== 'tmdbId' && media[campo]) return `${campo}:${media[campo]}`;
+  }
+  return null; // sin ningún id externo — no debería pasar, pero por seguridad
+}
+
+app.post('/import/mediatracker-backup', requireAuth, async (req, res) => {
+  try {
+    const { catalogo, gameLogs, watchLogs, episodeWatches, seasonWatches, lists, listItems, favorites } = req.body;
+    if (!Array.isArray(catalogo)) {
+      return res.status(400).json({ error: 'Archivo de backup inválido' });
+    }
+
+    const resultado = {
+      mediaCreada: 0,
+      catalogoAñadido: 0,
+      catalogoSaltado: 0,
+      logsAñadidos: 0,
+      listasAñadidas: 0,
+      listasSaltadas: 0,
+      favoritosAñadidos: 0,
+    };
+
+    // --- Paso 1: mapear cada mediaId del backup a un mediaId real de ESTA
+    // base de datos (existente si ya está, o recién creado si no) ---
+    const mediaIdMap = new Map(); // mediaId del backup -> mediaId real
+
+    for (const entrada of catalogo) {
+      const mediaOriginal = entrada.media;
+      if (!mediaOriginal) continue;
+
+      const clave = claveExternaMedia(mediaOriginal);
+      let mediaReal = null;
+
+      if (clave) {
+        const [campo, valor, tipoExtra] = clave.split(':');
+        if (campo === 'tmdbId') {
+          mediaReal = await prisma.media.findFirst({ where: { tmdbId: parseInt(valor, 10), tipo: tipoExtra } });
+        } else {
+          mediaReal = await prisma.media.findFirst({ where: { [campo]: isNaN(valor) ? valor : parseInt(valor, 10) } });
+        }
+      }
+
+      if (!mediaReal) {
+        mediaReal = await prisma.media.create({
+          data: {
+            titulo: mediaOriginal.titulo,
+            tituloOriginal: mediaOriginal.tituloOriginal || mediaOriginal.titulo,
+            tipo: mediaOriginal.tipo,
+            anio: mediaOriginal.anio || null,
+            portada: mediaOriginal.portada || null,
+            backdrop: mediaOriginal.backdrop || null,
+            sinopsis: mediaOriginal.sinopsis || null,
+            tmdbId: mediaOriginal.tmdbId || null,
+            igdbId: mediaOriginal.igdbId || null,
+            malMangaId: mediaOriginal.malMangaId || null,
+            mangaDexId: mediaOriginal.mangaDexId || null,
+            comicVineId: mediaOriginal.comicVineId || null,
+            googleBooksId: mediaOriginal.googleBooksId || null,
+            anilistId: mediaOriginal.anilistId || null,
+          },
+        });
+        resultado.mediaCreada++;
+      }
+
+      mediaIdMap.set(entrada.mediaId, mediaReal.id);
+    }
+
+    // --- Paso 2: UserMedia (catálogo) — solo se crea si no existe ya ---
+    for (const entrada of catalogo) {
+      const mediaId = mediaIdMap.get(entrada.mediaId);
+      if (!mediaId) continue;
+
+      const existente = await prisma.userMedia.findUnique({
+        where: { userId_mediaId: { userId: req.userId, mediaId } },
+      });
+      if (existente) {
+        resultado.catalogoSaltado++;
+        continue;
+      }
+
+      await prisma.userMedia.create({
+        data: {
+          userId: req.userId,
+          mediaId,
+          watched: entrada.watched ?? false,
+          liked: entrada.liked ?? false,
+          watchlist: entrada.watchlist ?? false,
+          rating: entrada.rating ?? null,
+          customPoster: entrada.customPoster ?? null,
+          customBackdrop: entrada.customBackdrop ?? null,
+          playStatus: entrada.playStatus ?? null,
+          progresoActual: entrada.progresoActual ?? null,
+          progresoTotal: entrada.progresoTotal ?? null,
+          progresoVolumenActual: entrada.progresoVolumenActual ?? null,
+          progresoVolumenTotal: entrada.progresoVolumenTotal ?? null,
+          lastActivityAt: entrada.lastActivityAt ? new Date(entrada.lastActivityAt) : new Date(),
+        },
+      });
+      resultado.catalogoAñadido++;
+    }
+
+    // --- Paso 3: logs (GameLog/WatchLog) — solo para títulos que ACABAN de
+    // añadirse en el paso 2 (si ya tenías el título, sus logs actuales se
+    // respetan tal cual, sin mezclar con los del backup) ---
+    const mediaIdsNuevos = new Set(
+      catalogo.filter((e) => mediaIdMap.has(e.mediaId)).map((e) => mediaIdMap.get(e.mediaId))
+    );
+    // Nos quedamos solo con los que de verdad se crearon en el paso 2 (no
+    // los que ya existían y se saltaron) — recalculado a partir de
+    // catalogoAñadido no es trivial aquí, así que comprobamos por mediaId
+    // directamente: si ahora existe un UserMedia recién creado para ese
+    // usuario+media, es que era nuevo.
+    const idsRecienCreados = new Set();
+    for (const mediaId of mediaIdsNuevos) {
+      const um = await prisma.userMedia.findUnique({ where: { userId_mediaId: { userId: req.userId, mediaId } } });
+      if (um) idsRecienCreados.add(mediaId);
+    }
+
+    for (const log of gameLogs || []) {
+      const mediaId = mediaIdMap.get(log.mediaId);
+      if (!mediaId || !idsRecienCreados.has(mediaId)) continue;
+      await prisma.gameLog.create({
+        data: {
+          userId: req.userId,
+          mediaId,
+          nombre: log.nombre,
+          orden: log.orden,
+          plataforma: log.plataforma,
+          jugadoEn: log.jugadoEn,
+          propiedad: log.propiedad,
+          fechaInicio: log.fechaInicio ? new Date(log.fechaInicio) : null,
+          fechaFin: log.fechaFin ? new Date(log.fechaFin) : null,
+          edicion: log.edicion,
+          minutosJugados: log.minutosJugados,
+          rating: log.rating,
+          review: log.review,
+          spoilers: log.spoilers,
+        },
+      });
+      resultado.logsAñadidos++;
+    }
+
+    for (const log of watchLogs || []) {
+      const mediaId = mediaIdMap.get(log.mediaId);
+      if (!mediaId || !idsRecienCreados.has(mediaId)) continue;
+      await prisma.watchLog.create({
+        data: {
+          userId: req.userId,
+          mediaId,
+          fechaVisto: log.fechaVisto ? new Date(log.fechaVisto) : new Date(),
+          review: log.review,
+          rewatch: log.rewatch,
+        },
+      });
+      resultado.logsAñadidos++;
+    }
+
+    for (const ep of episodeWatches || []) {
+      const mediaId = mediaIdMap.get(ep.mediaId);
+      if (!mediaId) continue;
+      const existe = await prisma.userEpisodeWatch.findUnique({
+        where: {
+          userId_mediaId_seasonNumber_episodeNumber: {
+            userId: req.userId, mediaId, seasonNumber: ep.seasonNumber, episodeNumber: ep.episodeNumber,
+          },
+        },
+      });
+      if (existe) continue;
+      await prisma.userEpisodeWatch.create({
+        data: {
+          userId: req.userId, mediaId, seasonNumber: ep.seasonNumber, episodeNumber: ep.episodeNumber,
+          watched: ep.watched, rating: ep.rating, fechaVisto: ep.fechaVisto ? new Date(ep.fechaVisto) : null,
+        },
+      });
+    }
+
+    for (const s of seasonWatches || []) {
+      const mediaId = mediaIdMap.get(s.mediaId);
+      if (!mediaId) continue;
+      const existe = await prisma.userSeasonWatch.findUnique({
+        where: { userId_mediaId_seasonNumber: { userId: req.userId, mediaId, seasonNumber: s.seasonNumber } },
+      });
+      if (existe) continue;
+      await prisma.userSeasonWatch.create({
+        data: {
+          userId: req.userId, mediaId, seasonNumber: s.seasonNumber,
+          watched: s.watched, rating: s.rating, customPoster: s.customPoster,
+          fechaVisto: s.fechaVisto ? new Date(s.fechaVisto) : null,
+        },
+      });
+    }
+
+    // --- Paso 4: listas — se salta cualquier lista cuyo nombre ya exista ---
+    for (const lista of lists || []) {
+      const yaExiste = await prisma.list.findFirst({ where: { userId: req.userId, nombre: lista.nombre } });
+      if (yaExiste) {
+        resultado.listasSaltadas++;
+        continue;
+      }
+
+      const nuevaLista = await prisma.list.create({
+        data: {
+          userId: req.userId,
+          nombre: lista.nombre,
+          privada: lista.privada ?? false,
+          modo: lista.modo || 'GRID',
+          ordenPor: lista.ordenPor || 'MANUAL',
+          ordenDireccion: lista.ordenDireccion || 'ASC',
+        },
+      });
+
+      const itemsDeEstaLista = (listItems || []).filter((li) => li.listId === lista.id);
+      for (const item of itemsDeEstaLista) {
+        const mediaId = mediaIdMap.get(item.mediaId);
+        if (!mediaId) continue;
+        try {
+          await prisma.listItem.create({ data: { listId: nuevaLista.id, mediaId, orden: item.orden } });
+        } catch (e) {
+          // duplicado dentro del propio backup, se ignora
+        }
+      }
+      resultado.listasAñadidas++;
+    }
+
+    // --- Paso 5: favoritos — solo si no lo tenías ya como favorito ---
+    for (const fav of favorites || []) {
+      const mediaId = mediaIdMap.get(fav.mediaId);
+      if (!mediaId) continue;
+      const yaEsFavorito = await prisma.favorite.findFirst({ where: { userId: req.userId, mediaId } });
+      if (yaEsFavorito) continue;
+      const total = await prisma.favorite.count({ where: { userId: req.userId } });
+      if (total >= 7) continue; // ya tienes los 7 huecos llenos
+      await prisma.favorite.create({ data: { userId: req.userId, mediaId, orden: total } });
+      resultado.favoritosAñadidos++;
+    }
+
+    res.json(resultado);
+  } catch (error) {
+    console.error('ERROR EN POST /import/mediatracker-backup:', error);
+    res.status(500).json({ error: 'Error al importar el backup' });
+  }
+});
 
 // --- RUTA: IMPORTAR HISTORIAL DESDE LETTERBOXD ---
 app.post('/import/letterboxd', requireAuth, async (req, res) => {

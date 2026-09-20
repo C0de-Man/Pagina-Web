@@ -9,6 +9,7 @@ import SettingsIdiomaRegion from '@/components/SettingsIdiomaRegion';
 export default function Settings() {
   const router = useRouter();
   const [tab, setTab] = useState<'perfil' | 'account' | 'importexport' | 'admin'>('perfil');
+  const [exportando, setExportando] = useState(false);
   const [username, setUsername] = useState('');
   const [usernameInput, setUsernameInput] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -196,6 +197,34 @@ export default function Settings() {
     }
     setGuardandoCredenciales(false);
   };
+
+  const exportarDatos = async () => {
+  const token = localStorage.getItem('token');
+  if (!token || exportando) return;
+
+  setExportando(true);
+  try {
+    const res = await fetch('http://localhost:3001/export', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error('export failed');
+    const data = await res.json();
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const fecha = new Date().toISOString().split('T')[0];
+    a.download = `mediatracker-backup-${fecha}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch {
+    alert('Something went wrong exporting your data, please try again.');
+  }
+  setExportando(false);
+};
 
   const resetearCaratulas = async () => {
     const token = localStorage.getItem('token');
@@ -598,12 +627,26 @@ export default function Settings() {
                   Import from Backloggd
                 </Link>
                 <Link
-                  href="/perfil/settings/import/mal"
+                  href="/perfil/settings/import/backup"
                   className="inline-block bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
                 >
-                  Import from MyAnimeList
+                  Import from backup
                 </Link>
               </div>
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-gray-800">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Export your data</h3>
+              <p className="text-gray-500 text-sm mb-3">
+                Download a full backup of your catalog as a JSON file — everything you've watched, played, read, rated or reviewed, plus your logs, lists and favorites.
+              </p>
+              <button
+                onClick={exportarDatos}
+                disabled={exportando}
+                className="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 px-4 py-2 rounded text-sm font-semibold transition cursor-pointer"
+              >
+                {exportando ? 'Exporting...' : 'Export my data'}
+              </button>
             </div>
           </div>
         ) : (
