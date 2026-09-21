@@ -7,6 +7,8 @@ interface AmigoActividad {
   username: string;
   avatar: string | null;
   rating: number | null;
+  watched: boolean;
+  watchlist: boolean;
 }
 
 export default function FriendsActivityOnMedia({ mediaId }: { mediaId: number }) {
@@ -44,7 +46,11 @@ export default function FriendsActivityOnMedia({ mediaId }: { mediaId: number })
                 </div>
               )}
             </div>
-            {amigo.rating != null && <StarRating value={amigo.rating} readOnly size="sm" />}
+            {amigo.watched && amigo.rating != null ? (
+              <StarRating value={amigo.rating} readOnly size="sm" />
+            ) : !amigo.watched && amigo.watchlist ? (
+              <span title="In watchlist" className="text-gray-400 text-sm leading-none">🕐</span>
+            ) : null}
           </Link>
         ))}
       </div>

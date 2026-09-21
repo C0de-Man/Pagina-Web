@@ -5158,9 +5158,12 @@ app.get('/media/:id/friends-activity', requireAuth, async (req, res) => {
     const idsAmigos = siguiendo.map((f) => f.followingId);
     if (idsAmigos.length === 0) return res.json([]);
 
+    // Además de quien ya la tiene vista (con o sin nota), incluimos también
+    // a quien la tiene en su watchlist — para esos se muestra el icono de
+    // reloj en vez de estrellas.
     const entradas = await prisma.userMedia.findMany({
-      where: { userId: { in: idsAmigos }, mediaId, watched: true },
-      select: { userId: true, rating: true },
+      where: { userId: { in: idsAmigos }, mediaId, OR: [{ watched: true }, { watchlist: true }] },
+      select: { userId: true, rating: true, watched: true, watchlist: true },
     });
     if (entradas.length === 0) return res.json([]);
 
@@ -5174,7 +5177,7 @@ app.get('/media/:id/friends-activity', requireAuth, async (req, res) => {
       .map((e) => {
         const u = usuarioPorId.get(e.userId);
         if (!u) return null;
-        return { username: u.username, avatar: u.avatar, rating: e.rating };
+        return { username: u.username, avatar: u.avatar, rating: e.rating, watched: e.watched, watchlist: e.watchlist };
       })
       .filter(Boolean);
 
