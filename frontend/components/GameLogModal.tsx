@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
 const API_URL = 'http://localhost:3001';
@@ -36,6 +36,87 @@ const LOG_VACIO = (nombre: string): LogForm => ({
 
 function fechaAInput(iso: string | null) {
   return iso ? iso.slice(0, 10) : '';
+}
+
+function SelectorConBusqueda({
+  valor,
+  opciones,
+  placeholder,
+  onChange,
+}: {
+  valor: string;
+  opciones: { id: string | number; name: string }[];
+  placeholder: string;
+  onChange: (valor: string) => void;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function alHacerClicFuera(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setAbierto(false);
+        setBusqueda('');
+      }
+    }
+    document.addEventListener('mousedown', alHacerClicFuera);
+    return () => document.removeEventListener('mousedown', alHacerClicFuera);
+  }, []);
+
+  const filtradas = opciones.filter((o) => o.name.toLowerCase().includes(busqueda.toLowerCase()));
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        className="w-full bg-[#2c3440] border border-gray-700 rounded px-3 py-2 text-sm text-left flex justify-between items-center focus:outline-none"
+      >
+        <span className={valor ? 'text-white' : 'text-gray-400'}>{valor || placeholder}</span>
+        <span className="text-gray-500 ml-2">▾</span>
+      </button>
+      {abierto && (
+        <div className="absolute left-0 right-0 top-full mt-1 bg-[#1c2228] border border-gray-700 rounded shadow-2xl z-20 max-h-60 overflow-y-auto">
+          <input
+            autoFocus
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Search.."
+            className="w-full bg-[#2c3440] border-b border-gray-700 px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              onChange('');
+              setAbierto(false);
+              setBusqueda('');
+            }}
+            className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-gray-700 hover:text-white transition cursor-pointer"
+          >
+            {placeholder}
+          </button>
+          {filtradas.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => {
+                onChange(o.name);
+                setAbierto(false);
+                setBusqueda('');
+              }}
+              className={`w-full text-left px-3 py-2 text-sm transition cursor-pointer ${
+                o.name === valor ? 'bg-blue-600 text-white' : 'text-gray-200 hover:bg-gray-700 hover:text-white'
+              }`}
+            >
+              {o.name}
+            </button>
+          ))}
+          {filtradas.length === 0 && <p className="px-3 py-2 text-sm text-gray-500">No results</p>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function GameLogModal({
@@ -360,30 +441,22 @@ export default function GameLogModal({
                 <div className="grid grid-cols-3 gap-4 mb-6">
                   <div>
                     <p className="text-white font-bold text-sm mb-1.5">Platform</p>
-                    <select
-                      value={logActual.plataforma}
-                      onChange={(e) => actualizarCampo('plataforma', e.target.value)}
-                      className="w-full bg-[#2c3440] border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none"
-                    >
-                      <option value="">Select release platfo...</option>
-                      {plataformasFiltradas.map((p) => (
-                        <option key={p.id} value={p.name}>{p.name}</option>
-                      ))}
-                    </select>
+                    <SelectorConBusqueda
+                      valor={logActual.plataforma}
+                      opciones={plataformasFiltradas}
+                      placeholder="Select release platfo..."
+                      onChange={(v) => actualizarCampo('plataforma', v)}
+                    />
                   </div>
 
                   <div>
                     <p className="text-white font-bold text-sm mb-1.5">Played on</p>
-                    <select
-                      value={logActual.jugadoEn}
-                      onChange={(e) => actualizarCampo('jugadoEn', e.target.value)}
-                      className="w-full bg-[#2c3440] border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none"
-                    >
-                      <option value="">Played platform</option>
-                      {plataformasFiltradas.map((p) => (
-                        <option key={p.id} value={p.name}>{p.name}</option>
-                      ))}
-                    </select>
+                    <SelectorConBusqueda
+                      valor={logActual.jugadoEn}
+                      opciones={plataformas}
+                      placeholder="Played platform"
+                      onChange={(v) => actualizarCampo('jugadoEn', v)}
+                    />
                   </div>
 
                   <div>
@@ -447,7 +520,8 @@ export default function GameLogModal({
                     />
                   </div>
 
-                  <div className="flex-shrink-0 flex flex-col items-center gap-2">
+                  <div className="flex-shrink-0 flex flex-col gap-2">
+                    <p className="text-white font-bold text-sm mb-1.5 whitespace-nowrap">Total played</p>
                     <div className="flex gap-2">
                       <input
                         type="number"
@@ -467,7 +541,6 @@ export default function GameLogModal({
                         placeholder="m"
                       />
                     </div>
-                    <span className="text-xs text-gray-400 whitespace-nowrap">total played</span>
                   </div>
                 </div>
 
