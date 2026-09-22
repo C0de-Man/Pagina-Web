@@ -1,4 +1,5 @@
 'use client';
+import { urlPlataforma, urlGenero } from '@/lib/slug';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
@@ -22,6 +23,30 @@ interface EdicionConPlataformas {
   igdbId: number;
   nombreVersion: string;
   plataformas: { id: number; name: string }[];
+}
+
+function ListaLinks({
+  items,
+  urlDe,
+  keyPrefix,
+}: {
+  items: { id: number; nombre: string }[];
+  urlDe: (id: number, nombre: string) => string;
+  keyPrefix: string;
+}) {
+  if (!items || items.length === 0) return <>Not available</>;
+  return (
+    <>
+      {items.map((item, i) => (
+        <span key={`${keyPrefix}-${item.id}-${i}`}>
+          <Link href={urlDe(item.id, item.nombre)} className="hover:underline hover:text-white transition">
+            {item.nombre}
+          </Link>
+          {i < items.length - 1 && ', '}
+        </span>
+      ))}
+    </>
+  );
 }
 
 export default function GameTabs({
@@ -354,17 +379,25 @@ export default function GameTabs({
                   {ediciones.map((ed) => (
                     <div key={ed.igdbId} className="text-gray-200">
                       <span className="font-semibold">{ed.nombreVersion}:</span>{' '}
-                      {ed.plataformas.length > 0 ? ed.plataformas.map((p) => p.name).join(', ') : 'Not available'}
+                      <ListaLinks
+                        items={ed.plataformas.map((p) => ({ id: p.id, nombre: p.name }))}
+                        urlDe={urlPlataforma}
+                        keyPrefix={`${ed.igdbId}`}
+                      />
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-gray-200">{detalles?.plataformas?.length > 0 ? detalles.plataformas.join(', ') : 'Not available'}</div>
+                <div className="text-gray-200">
+                  <ListaLinks items={detalles?.plataformas || []} urlDe={urlPlataforma} keyPrefix="plat" />
+                </div>
               )}
             </div>
             <div>
               <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Genres</div>
-              <div className="text-gray-200">{detalles?.generos?.length > 0 ? detalles.generos.join(', ') : 'Not available'}</div>
+              <div className="text-gray-200">
+                <ListaLinks items={detalles?.generos || []} urlDe={urlGenero} keyPrefix="genre" />
+              </div>
             </div>
             <div>
               <div className="text-gray-500 uppercase text-xs tracking-wide mb-1">Developer</div>

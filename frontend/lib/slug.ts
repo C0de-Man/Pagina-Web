@@ -95,3 +95,13 @@ export function urlEstudio(id: number, nombre?: string | null): string {
 export function urlPersona(id: number, nombre?: string | null): string {
   return `/person/${generarSlugSimple(nombre, id)}`;
 }
+
+export function urlPlataforma(id: number, nombre?: string | null): string {
+  const limpio = limpiarParaSlug(nombre) || 'sin-nombre';
+  return `/platform/${limpio}/${id}`;
+}
+
+export function urlGenero(id: number, nombre?: string | null): string {
+  const limpio = limpiarParaSlug(nombre) || 'sin-nombre';
+  return `/genre/${limpio}/${id}`;
+}

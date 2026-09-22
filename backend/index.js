@@ -124,7 +124,7 @@ app.get('/igdb/details/:igdbId', async (req, res) => {
     const { igdbId } = req.params;
     const token = await getIgdbToken();
 
-    const body = `fields first_release_date, status, platforms.name, genres.name, involved_companies.company.id, involved_companies.company.name, involved_companies.developer, involved_companies.publisher; where id = ${igdbId};`; const response = await fetchIgdb('https://api.igdb.com/v4/games', {
+    const body = `fields first_release_date, status, platforms.id, platforms.name, genres.id, genres.name, involved_companies.company.id, involved_companies.company.name, involved_companies.developer, involved_companies.publisher; where id = ${igdbId};`; const response = await fetchIgdb('https://api.igdb.com/v4/games', {
       method: 'POST',
       headers: {
         'Client-ID': process.env.IGDB_CLIENT_ID,
@@ -162,8 +162,8 @@ app.get('/igdb/details/:igdbId', async (req, res) => {
       estado: estadoJuego,
       // IGDB da first_release_date como timestamp Unix en SEGUNDOS (no ms)
       fechaLanzamiento: juego.first_release_date ? juego.first_release_date * 1000 : null,
-      plataformas: (juego.platforms || []).map(p => p.name),
-      generos: (juego.genres || []).map(g => g.name),
+      plataformas: (juego.platforms || []).map(p => ({ id: p.id, nombre: p.name })),
+      generos: (juego.genres || []).map(g => ({ id: g.id, nombre: g.name })),
       desarrolladoras: companies.filter(c => c.developer).map(c => ({ id: c.company?.id, nombre: c.company?.name })),
       distribuidoras: companies.filter(c => c.publisher).map(c => ({ id: c.company?.id, nombre: c.company?.name })),
     });
@@ -292,6 +292,108 @@ app.get('/igdb/dlc-of/:igdbId', async (req, res) => {
   } catch (error) {
     console.error('ERROR EN GET /igdb/dlc-of/:igdbId:', error);
     res.status(500).json({ error: 'Error al buscar el juego base' });
+  }
+});
+
+// --- JUEGOS DE UNA PLATAFORMA CONCRETA, PAGINADOS DE 42 EN 42 (TODOS los
+// juegos con esa plataforma, sin filtrar por tipo: DLCs, remasters, etc.
+// también aparecen) ---
+app.get('/igdb/platform/:platformId', async (req, res) => {
+  try {
+    const platformId = parseInt(req.params.platformId, 10);
+    if (Number.isNaN(platformId)) return res.status(400).json({ error: 'platformId inválido' });
+
+    const page = parseInt(req.query.page) || 1;
+    const itemsPerPage = 42;
+    const offset = (page - 1) * itemsPerPage;
+
+    const token = await getIgdbToken();
+    const headers = {
+      'Client-ID': process.env.IGDB_CLIENT_ID,
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/json',
+      'Content-Type': 'text/plain',
+    };
+
+    const where = `where platforms = (${platformId});`;
+
+    const [respNombre, respJuegos, respCount] = await Promise.all([
+      fetchIgdb('https://api.igdb.com/v4/platforms', { method: 'POST', headers, body: `fields name; where id = ${platformId};` }),
+      fetchIgdb('https://api.igdb.com/v4/games', {
+        method: 'POST',
+        headers,
+        body: `fields name, cover.url, first_release_date; ${where} sort total_rating_count desc; limit ${itemsPerPage}; offset ${offset};`,
+      }),
+      fetchIgdb('https://api.igdb.com/v4/games/count', { method: 'POST', headers, body: where }),
+    ]);
+    const dataNombre = await respNombre.json();
+    const dataJuegos = await respJuegos.json();
+    const dataCount = await respCount.json();
+    const nombre = dataNombre?.[0]?.name || null;
+    const totalPaginas = Math.max(1, Math.ceil((dataCount.count || 0) / itemsPerPage));
+
+    const juegos = (dataJuegos || []).map((g) => ({
+      igdbId: g.id,
+      titulo: g.name,
+      anio: g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null,
+      portada: g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null,
+    }));
+
+    res.json({ nombre, page, totalPaginas, juegos });
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/platform/:platformId:', error);
+    res.status(500).json({ error: 'Error al obtener juegos de la plataforma' });
+  }
+});
+
+
+// --- JUEGOS DE UN GÉNERO CONCRETO, PAGINADOS DE 42 EN 42 (TODOS los
+// juegos con ese género, sin filtrar por tipo) ---
+app.get('/igdb/genre/:genreId', async (req, res) => {
+  try {
+    const genreId = parseInt(req.params.genreId, 10);
+    if (Number.isNaN(genreId)) return res.status(400).json({ error: 'genreId inválido' });
+
+    const page = parseInt(req.query.page) || 1;
+    const itemsPerPage = 42;
+    const offset = (page - 1) * itemsPerPage;
+
+    const token = await getIgdbToken();
+    const headers = {
+      'Client-ID': process.env.IGDB_CLIENT_ID,
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/json',
+      'Content-Type': 'text/plain',
+    };
+
+    const where = `where genres = (${genreId});`;
+
+    const [respNombre, respJuegos, respCount] = await Promise.all([
+      fetchIgdb('https://api.igdb.com/v4/genres', { method: 'POST', headers, body: `fields name; where id = ${genreId};` }),
+      fetchIgdb('https://api.igdb.com/v4/games', {
+        method: 'POST',
+        headers,
+        body: `fields name, cover.url, first_release_date; ${where} sort total_rating_count desc; limit ${itemsPerPage}; offset ${offset};`,
+      }),
+      fetchIgdb('https://api.igdb.com/v4/games/count', { method: 'POST', headers, body: where }),
+    ]);
+    const dataNombre = await respNombre.json();
+    const dataJuegos = await respJuegos.json();
+    const dataCount = await respCount.json();
+    const nombre = dataNombre?.[0]?.name || null;
+    const totalPaginas = Math.max(1, Math.ceil((dataCount.count || 0) / itemsPerPage));
+
+    const juegos = (dataJuegos || []).map((g) => ({
+      igdbId: g.id,
+      titulo: g.name,
+      anio: g.first_release_date ? new Date(g.first_release_date * 1000).getFullYear() : null,
+      portada: g.cover?.url ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}` : null,
+    }));
+
+    res.json({ nombre, page, totalPaginas, juegos });
+  } catch (error) {
+    console.error('ERROR EN GET /igdb/genre/:genreId:', error);
+    res.status(500).json({ error: 'Error al obtener juegos del género' });
   }
 });
 
@@ -3557,78 +3659,78 @@ app.get('/libros/buscar', async (req, res) => {
   }
 });
 
-    // --- MANGA + CÓMICS ESTRENADOS EN UN AÑO CONCRETO (para el carrusel
-    // "Books 202X" de la home de Books) — MAL no tiene un endpoint de
-    // "novedades del año", así que se aproxima con su ranking de popularidad
-    // filtrado por año de inicio. Comic Vine sí permite filtrar volúmenes por
-    // start_year directamente. Google Books se queda fuera de este carrusel:
-    // su API no permite filtrar de forma fiable por año de publicación.
-    app.get('/libros/anio/:year', async (req, res) => {
+// --- MANGA + CÓMICS ESTRENADOS EN UN AÑO CONCRETO (para el carrusel
+// "Books 202X" de la home de Books) — MAL no tiene un endpoint de
+// "novedades del año", así que se aproxima con su ranking de popularidad
+// filtrado por año de inicio. Comic Vine sí permite filtrar volúmenes por
+// start_year directamente. Google Books se queda fuera de este carrusel:
+// su API no permite filtrar de forma fiable por año de publicación.
+app.get('/libros/anio/:year', async (req, res) => {
+  try {
+    const year = parseInt(req.params.year, 10);
+    if (Number.isNaN(year)) return res.status(400).json({ error: 'Año inválido' });
+
+    const buscarMangaDelAño = async () => {
       try {
-        const year = parseInt(req.params.year, 10);
-        if (Number.isNaN(year)) return res.status(400).json({ error: 'Año inválido' });
-
-        const buscarMangaDelAño = async () => {
-          try {
-            const url = `${MAL_API_BASE}/manga/ranking?ranking_type=bypopularity&limit=500&fields=id,title,main_picture,start_date`;
-            const response = await fetch(url, { headers: headersMal() });
-            if (!response.ok) return [];
-            const data = await response.json();
-            return (data.data || [])
-              .map((item) => item.node)
-              .filter((node) => node.start_date && node.start_date.startsWith(String(year)))
-              .map((node) => ({
-                fuente: 'mal',
-                origenId: node.id,
-                titulo: node.title,
-                autor: null,
-                anio: year,
-                portada: node.main_picture?.large || node.main_picture?.medium || null,
-              }));
-          } catch (e) {
-            console.error('Error buscando manga del año en MAL:', e.message);
-            return [];
-          }
-        };
-
-        const buscarComicsDelAño = async () => {
-          try {
-            const apiKey = process.env.COMICVINE_API_KEY;
-            const headers = { 'User-Agent': COMICVINE_USER_AGENT };
-            const url = `${COMICVINE_API_BASE}/volumes/?api_key=${apiKey}&format=json&filter=start_year:${year}&sort=date_added:desc&field_list=id,name,start_year,image,publisher,count_of_issues&limit=50`;
-            const response = await fetchComicVine(url, { headers });
-            if (!response.ok) return [];
-            const data = await response.json();
-            return (data.results || []).map((item) => ({
-              fuente: 'comicvine',
-              origenId: item.id,
-              titulo: item.name,
-              autor: item.publisher?.name || null,
-              anio: item.start_year ? parseInt(item.start_year, 10) : year,
-              portada: item.image?.medium_url || item.image?.small_url || null,
-            }));
-          } catch (e) {
-            console.error('Error buscando cómics del año en Comic Vine:', e.message);
-            return [];
-          }
-        };
-
-        const [manga, comics] = await Promise.all([buscarMangaDelAño(), buscarComicsDelAño()]);
-        // Se intercalan uno a uno (manga, cómic, manga, cómic...) en vez de
-        // ponerlos todos seguidos por fuente — así el carrusel no empieza con
-        // 4 cómics idénticos en estilo antes de que aparezca el primer manga.
-        const intercalados = [];
-        const maxLen = Math.max(manga.length, comics.length);
-        for (let i = 0; i < maxLen; i++) {
-          if (manga[i]) intercalados.push(manga[i]);
-          if (comics[i]) intercalados.push(comics[i]);
-        }
-        res.json(intercalados);
-      } catch (error) {
-        console.error('ERROR EN GET /libros/año/:year:', error);
-        res.status(500).json({ error: 'Error al obtener libros del año' });
+        const url = `${MAL_API_BASE}/manga/ranking?ranking_type=bypopularity&limit=500&fields=id,title,main_picture,start_date`;
+        const response = await fetch(url, { headers: headersMal() });
+        if (!response.ok) return [];
+        const data = await response.json();
+        return (data.data || [])
+          .map((item) => item.node)
+          .filter((node) => node.start_date && node.start_date.startsWith(String(year)))
+          .map((node) => ({
+            fuente: 'mal',
+            origenId: node.id,
+            titulo: node.title,
+            autor: null,
+            anio: year,
+            portada: node.main_picture?.large || node.main_picture?.medium || null,
+          }));
+      } catch (e) {
+        console.error('Error buscando manga del año en MAL:', e.message);
+        return [];
       }
-    });
+    };
+
+    const buscarComicsDelAño = async () => {
+      try {
+        const apiKey = process.env.COMICVINE_API_KEY;
+        const headers = { 'User-Agent': COMICVINE_USER_AGENT };
+        const url = `${COMICVINE_API_BASE}/volumes/?api_key=${apiKey}&format=json&filter=start_year:${year}&sort=date_added:desc&field_list=id,name,start_year,image,publisher,count_of_issues&limit=50`;
+        const response = await fetchComicVine(url, { headers });
+        if (!response.ok) return [];
+        const data = await response.json();
+        return (data.results || []).map((item) => ({
+          fuente: 'comicvine',
+          origenId: item.id,
+          titulo: item.name,
+          autor: item.publisher?.name || null,
+          anio: item.start_year ? parseInt(item.start_year, 10) : year,
+          portada: item.image?.medium_url || item.image?.small_url || null,
+        }));
+      } catch (e) {
+        console.error('Error buscando cómics del año en Comic Vine:', e.message);
+        return [];
+      }
+    };
+
+    const [manga, comics] = await Promise.all([buscarMangaDelAño(), buscarComicsDelAño()]);
+    // Se intercalan uno a uno (manga, cómic, manga, cómic...) en vez de
+    // ponerlos todos seguidos por fuente — así el carrusel no empieza con
+    // 4 cómics idénticos en estilo antes de que aparezca el primer manga.
+    const intercalados = [];
+    const maxLen = Math.max(manga.length, comics.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (manga[i]) intercalados.push(manga[i]);
+      if (comics[i]) intercalados.push(comics[i]);
+    }
+    res.json(intercalados);
+  } catch (error) {
+    console.error('ERROR EN GET /libros/año/:year:', error);
+    res.status(500).json({ error: 'Error al obtener libros del año' });
+  }
+});
 
 // --- DETALLE COMPLETO DE UN MANGA EN ANILIST (GraphQL) ---
 async function obtenerDetalleAniList(anilistId) {
