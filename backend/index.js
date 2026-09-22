@@ -614,7 +614,15 @@ app.get('/igdb/search', async (req, res) => {
       } : null
     }));
 
-    res.json(arreglados);
+    // Cruzamos con tu base de datos: si el juego ya está guardado (con
+    // carátula compartida distinta a la de IGDB, o personalizada a mano por
+    // ti), esa debe ganar — mismo criterio que ya aplican /igdb/popular,
+    // /igdb/year y /igdb/catalogo/page. Sin esto, el buscador de Games
+    // mostraba siempre la carátula genérica de IGDB, distinta a la que se
+    // ve en la propia ficha del juego.
+    const final = await mezclarCaratulasJuegos(arreglados, getUserIdOpcional(req));
+
+    res.json(final);
   } catch (error) {
     console.error('ERROR EN GET /igdb/search:', error);
     res.status(500).json({ error: 'Error al buscar en IGDB' });
