@@ -7,6 +7,7 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const esJuego = item.media_type === 'juego';
+  const esLibro = item.media_type === 'libro';
   // portadaCompartida es la carátula COMPARTIDA (Media.portada) — sirve de
   // valor por defecto mientras no sabemos si tienes una personalización
   // propia. miCustomPoster empieza en null (nunca la personalización real,
@@ -32,50 +33,86 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
       .catch(() => {});
   }, [dbId]);
 
+  // Href de un libro/manga/cómic que aún NO está guardado: a la
+  // resolvedora que corresponda según de dónde vino el resultado — mismo
+  // criterio que ya usa BookCard.tsx. Esa página se encarga de guardarlo.
+  const hrefLibroSinGuardar = () => {
+    switch (item.fuente) {
+      case 'mal':
+        return `/book/mal/${item.origenId}`;
+      case 'mangadex':
+        return `/book/mangadex/${item.origenId}`;
+      case 'comicvine':
+        return `/book/comicvine/${item.origenId}`;
+      case 'anilist':
+        return `/book/anilist/${item.origenId}`;
+      default:
+        return `/book/googlebooks/${item.origenId}`;
+    }
+  };
+
   const handleClick = async () => {
     if (loading) return;
     setLoading(true);
 
     if (dbId) {
-      router.push(urlFicha({ ...item, id: dbId }));
-    } else {
-      try {
-        if (esJuego) {
-          const res = await fetch('http://localhost:3001/media/igdb', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ igdbId: item.id })
-          });
-          const nuevoJuego = await res.json();
-          router.push(urlFicha(nuevoJuego));
-        } else {
-          const tipo = item.media_type === 'tv' ? 'SERIE' : 'PELICULA';
+      const tipo = esLibro ? 'LIBRO' : undefined;
+      router.push(urlFicha({ ...item, id: dbId, ...(tipo ? { tipo } : {}) }));
+      return;
+    }
 
-          const res = await fetch('http://localhost:3001/media/tmdb', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tmdbId: item.id, tipo })
-          });
-          const nuevaPeli = await res.json();
-          router.push(urlFicha(nuevaPeli));
-        }
-      } catch (error) {
-        console.error("Error al guardar:", error);
-        setLoading(false);
+    if (esLibro) {
+      router.push(hrefLibroSinGuardar());
+      return;
+    }
+
+    try {
+      if (esJuego) {
+        const res = await fetch('http://localhost:3001/media/igdb', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ igdbId: item.id })
+        });
+        const nuevoJuego = await res.json();
+        router.push(urlFicha(nuevoJuego));
+      } else {
+        const tipo = item.media_type === 'tv' ? 'SERIE' : 'PELICULA';
+
+        const res = await fetch('http://localhost:3001/media/tmdb', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tmdbId: item.id, tipo })
+        });
+        const nuevaPeli = await res.json();
+        router.push(urlFicha(nuevaPeli));
       }
+    } catch (error) {
+      console.error("Error al guardar:", error);
+      setLoading(false);
     }
   };
 
   // Orden de prioridad: 1) tu personalización real (miCustomPoster) > 2) la
   // carátula compartida ya guardada (portadaCompartida) > 3) lo que traiga
-  // TMDB/IGDB en crudo para este resultado de búsqueda.
-  const posterUrl = miCustomPoster || portadaCompartida || (esJuego ? item.cover?.url : (item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : null));
-  const title = esJuego ? item.name : (item.title || item.name);
+  // TMDB/IGDB/libros en crudo para este resultado de búsqueda.
+  const posterUrl =
+    miCustomPoster ||
+    portadaCompartida ||
+    (esJuego
+      ? item.cover?.url
+      : esLibro
+      ? item.portada
+      : item.poster_path
+      ? `https://image.tmdb.org/t/p/w200${item.poster_path}`
+      : null);
+  const title = esJuego ? item.name : esLibro ? item.titulo : (item.title || item.name);
   const year = esJuego
     ? (item.first_release_date ? new Date(item.first_release_date * 1000).getFullYear() : '')
+    : esLibro
+    ? (item.anio || '')
     : (item.release_date ? item.release_date.split('-')[0] : (item.first_air_date ? item.first_air_date.split('-')[0] : ''));
-  const descripcion = esJuego ? item.summary : item.overview;
-  const etiqueta = item.media_type === 'movie' ? 'MOVIE' : item.media_type === 'tv' ? 'SERIES' : esJuego ? 'GAME' : 'OTHER';
+  const descripcion = esJuego ? item.summary : esLibro ? item.autor : item.overview;
+  const etiqueta = item.media_type === 'movie' ? 'MOVIE' : item.media_type === 'tv' ? 'SERIES' : esJuego ? 'GAME' : esLibro ? 'BOOK' : 'OTHER';
 
   return (
     <div onClick={handleClick} className={`flex gap-4 group cursor-pointer transition ${loading ? 'opacity-50 blur-sm' : ''}`}>

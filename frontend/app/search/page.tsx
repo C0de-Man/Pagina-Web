@@ -14,15 +14,18 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const query = resolvedParams.q;
   const tipoActivo = resolvedParams.tipo || 'all';
 
-  // 1. Buscamos en la API de TMDB (películas/series) y en IGDB (juegos) a la vez
-  const [resTmdb, resIgdb, resDb] = await Promise.all([
+  // 1. Buscamos en la API de TMDB (películas/series), IGDB (juegos) y la
+  // combinada de libros/manga/cómics (/libros/buscar) a la vez
+  const [resTmdb, resIgdb, resLibros, resDb] = await Promise.all([
     fetch(`http://localhost:3001/tmdb/buscar?q=${query}`, { cache: 'no-store' }),
     fetch(`http://localhost:3001/igdb/search?q=${query}`, { cache: 'no-store' }),
+    fetch(`http://localhost:3001/libros/buscar?q=${query}`, { cache: 'no-store' }),
     fetch('http://localhost:3001/media', { cache: 'no-store' }),
   ]);
 
   const resultsTmdb = await resTmdb.json();
   const resultsIgdb = await resIgdb.json();
+  const resultsLibros = await resLibros.json();
   const myDb = await resDb.json();
 
   // /tmdb/buscar usa TMDB search/multi: además de películas y series trae
@@ -36,7 +39,16 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     media_type: 'juego',
   }));
 
-  const results = [...resultsTmdbFiltrados, ...resultsJuegos];
+  // /libros/buscar ya devuelve { fuente, origenId, titulo, autor, anio,
+  // portada, ... } — lo adaptamos a la misma forma "id"/"media_type" que
+  // usa el resto de esta página para poder mezclarlo sin más.
+  const resultsLibrosMapeados = (Array.isArray(resultsLibros) ? resultsLibros : []).map((libro: any) => ({
+    ...libro,
+    id: libro.origenId,
+    media_type: 'libro',
+  }));
+
+  const results = [...resultsTmdbFiltrados, ...resultsJuegos, ...resultsLibrosMapeados];
 
   // /media no lleva token (página de servidor, sin acceso a localStorage) y
   // su "portada" es la compartida, no tu personalización — aquí solo
@@ -44,6 +56,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   // comprueba tu portada real por su cuenta, en el navegador.
   const getLocalData = (item: any) => {
     const esJuego = item.media_type === 'juego';
+    const esLibro = item.media_type === 'libro';
     // OJO: TMDB numera películas y series en espacios de IDs independientes,
     // así que una película guardada puede tener el MISMO tmdbId numérico que
     // una serie distinta que aparece en los resultados (y viceversa). Sin
@@ -53,6 +66,14 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     const tipoEsperado = item.media_type === 'tv' ? 'SERIE' : 'PELICULA';
     const local = esJuego
       ? myDb.find((m: any) => m.igdbId === item.id)
+      : esLibro
+      ? myDb.find((m: any) =>
+          (item.fuente === 'mal' && m.malMangaId === item.id) ||
+          (item.fuente === 'mangadex' && m.mangaDexId === item.id) ||
+          (item.fuente === 'anilist' && m.anilistId === item.id) ||
+          (item.fuente === 'comicvine' && m.comicVineId === item.id) ||
+          (item.fuente === 'googlebooks' && m.googleBooksId === item.id)
+        )
       : myDb.find((m: any) => m.tmdbId === item.id && m.tipo === tipoEsperado);
     return {
       dbId: local ? local.id : null,
