@@ -1,5 +1,4 @@
 import BookSearchBox from '@/components/BookSearchBox';
-import YearBooksCarousel from '@/components/YearBooksCarousel';
 
 export default async function BooksPage() {
   const currentYear = new Date().getFullYear();
@@ -33,14 +32,7 @@ export default async function BooksPage() {
   return (
     <main className="min-h-screen bg-[#14181c] text-white font-sans">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <BookSearchBox />
-
-        {librosDelAñoConDatos.length > 0 && (
-          <div className="mt-10">
-            <h2 className="text-xl font-bold mb-4">Books {currentYear}</h2>
-            <YearBooksCarousel items={librosDelAñoConDatos} />
-          </div>
-        )}
+        <BookSearchBox añoActual={currentYear} librosDelAño={librosDelAñoConDatos} />
       </div>
     </main>
   );

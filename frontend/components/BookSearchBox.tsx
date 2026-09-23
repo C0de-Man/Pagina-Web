@@ -1,4 +1,5 @@
 'use client';
+import YearBooksCarousel from './YearBooksCarousel';
 import { useState } from 'react';
 import BookCard from '@/components/BookCard';
 
@@ -25,7 +26,13 @@ function categoriaDe(item: any): string {
   return 'libro';
 }
 
-export default function BookSearchBox() {
+export default function BookSearchBox({
+  añoActual,
+  librosDelAño,
+}: {
+  añoActual: number;
+  librosDelAño: any[];
+}) {
   const [query, setQuery] = useState('');
   const [resultados, setResultados] = useState<any[]>([]);
   const [myDb, setMyDb] = useState<any[]>([]);
@@ -135,7 +142,7 @@ export default function BookSearchBox() {
         </div>
       </div>
 
-      {buscadoYa && (
+      {buscadoYa ? (
         buscando ? (
           <p className="text-gray-500 text-sm">Searching...</p>
         ) : resultadosFiltrados.length === 0 ? (
@@ -148,6 +155,13 @@ export default function BookSearchBox() {
                 <BookCard key={`${libro.fuente}-${libro.origenId}`} libro={libro} dbId={dbId} customPoster={customPoster} />
               );
             })}
+          </div>
+        )
+      ) : (
+        librosDelAño.length > 0 && (
+          <div className="mt-10">
+            <h2 className="text-xl font-bold mb-4">Books {añoActual}</h2>
+            <YearBooksCarousel items={librosDelAño} />
           </div>
         )
       )}
