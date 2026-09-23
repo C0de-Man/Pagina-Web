@@ -123,7 +123,7 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
             <div className="flex items-center gap-2 text-gray-400 mb-6">
               <span className="text-lg">{media.anio}</span>
               <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold ml-2">
-                {mangaInfo.tipoMedia || (media.comicVineId ? 'Comic' : media.mangaDexId ? 'Manga' : 'Book')}
+                {mangaInfo.tipoMedia || anilistInfo.tipoMedia || (media.comicVineId ? 'Comic' : media.mangaDexId ? 'Manga' : 'Book')}
               </span>
               {mangaInfo.estado && (
                 <span className="bg-gray-800 px-2 py-1 rounded text-xs font-semibold text-gray-300 flex-shrink-0">

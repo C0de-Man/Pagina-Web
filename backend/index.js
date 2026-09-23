@@ -1032,14 +1032,6 @@ function headersMal() {
   return { 'X-MAL-CLIENT-ID': process.env.MAL_CLIENT_ID };
 }
 
-async function buscarMangaMalApi(query, limit = 20) {
-  const url = `${MAL_API_BASE}/manga?q=${encodeURIComponent(query)}&limit=${limit}&fields=id,title,main_picture,authors{first_name,last_name},start_date,media_type,alternative_titles`;
-  const response = await fetch(url, { headers: headersMal() });
-  if (!response.ok) throw new Error(`MAL respondió ${response.status}`);
-  const data = await response.json();
-  return (data.data || []).map((item) => item.node);
-}
-
 async function obtenerDetalleMangaMal(malMangaId) {
   const url = `${MAL_API_BASE}/manga/${malMangaId}?fields=id,title,main_picture,synopsis,num_volumes,num_chapters,authors{first_name,last_name,role},status,start_date,end_date,mean,num_scoring_users,media_type,serialization{id,name}`;
   const response = await fetch(url, { headers: headersMal() });
@@ -3552,7 +3544,7 @@ app.get('/libros/buscar', async (req, res) => {
         const resultados = await buscarMangaMalApi(searchQuery, 40);
         if (resultados.length === 0) {
           const porMangaDex = await buscarMangaDexRespaldo();
-          return porMangaDex.length > 0 ? porMangaDex : buscarAniListRespaldo();
+          return porMangaDex.length > 0 ? porMangaDex : buscarAniListRespaldo(searchQuery);
         }
         return resultados.map((item) => ({
           fuente: 'mal',
@@ -3576,7 +3568,7 @@ app.get('/libros/buscar', async (req, res) => {
       } catch (e) {
         console.error('Error buscando manga en MAL, probando MangaDex/AniList:', e.message);
         const porMangaDex = await buscarMangaDexRespaldo();
-        return porMangaDex.length > 0 ? porMangaDex : buscarAniListRespaldo();
+        return porMangaDex.length > 0 ? porMangaDex : buscarAniListRespaldo(searchQuery);
       }
     };
 
@@ -3836,12 +3828,12 @@ app.get('/media/:id/anilist-info', async (req, res) => {
     const mediaId = parseInt(req.params.id, 10);
     const media = await prisma.media.findUnique({ where: { id: mediaId }, select: { anilistId: true } });
     if (!media?.anilistId) {
-      return res.json({ totalVolumenes: null, totalCapitulos: null, estado: null, fechaInicio: null, fechaFin: null, autores: [] });
+      return res.json({ totalVolumenes: null, totalCapitulos: null, estado: null, fechaInicio: null, fechaFin: null, autores: [], tipoMedia: null });
     }
 
     const data = await obtenerDetalleAniList(media.anilistId);
     if (!data) {
-      return res.json({ totalVolumenes: null, totalCapitulos: null, estado: null, fechaInicio: null, fechaFin: null, autores: [] });
+      return res.json({ totalVolumenes: null, totalCapitulos: null, estado: null, fechaInicio: null, fechaFin: null, autores: [], tipoMedia: null });
     }
 
     const autores = (data.staff?.edges || [])
@@ -3852,6 +3844,12 @@ app.get('/media/:id/anilist-info', async (req, res) => {
         foto: e.node.image?.medium || null,
       }));
 
+    // AniList no distingue manga/manhwa/manhua por un campo propio como MAL
+    // (media_type) — se aproxima por el país de origen: KR -> Manhwa,
+    // CN/TW -> Manhua, cualquier otro (normalmente JP) -> Manga.
+    const TIPO_POR_PAIS = { KR: 'Manhwa', CN: 'Manhua', TW: 'Manhua' };
+    const tipoMedia = TIPO_POR_PAIS[data.countryOfOrigin] || 'Manga';
+
     res.json({
       totalVolumenes: data.volumes || null,
       totalCapitulos: data.chapters || null,
@@ -3859,6 +3857,7 @@ app.get('/media/:id/anilist-info', async (req, res) => {
       fechaInicio: fechaAniListATexto(data.startDate),
       fechaFin: fechaAniListATexto(data.endDate),
       autores,
+      tipoMedia,
     });
   } catch (error) {
     console.error('ERROR EN GET /media/:id/anilist-info:', error);
@@ -3871,7 +3870,7 @@ app.get('/media/:id/anilist-info', async (req, res) => {
 // manhwa/manhua (formato "MANGA" con countryOfOrigin distinto de JP),
 // con fechas de inicio/fin y estado que ya encajan con los campos que
 // usa /media/:id/manga-info.
-const buscarAniListRespaldo = async () => {
+const buscarAniListRespaldo = async (searchQuery) => {
   try {
     const query = `
           query ($search: String) {
