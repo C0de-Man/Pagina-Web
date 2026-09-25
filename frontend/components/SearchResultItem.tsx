@@ -1,6 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
+import Link from 'next/link'; // 1. Añadimos la importación de Link
 import { urlFicha } from '@/lib/slug';
 
 export default function SearchResultItem({ item, dbId, portadaCompartida }: { item: any, dbId: number | null, portadaCompartida: string | null }) {
@@ -8,15 +9,6 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
   const [loading, setLoading] = useState(false);
   const esJuego = item.media_type === 'juego';
   const esLibro = item.media_type === 'libro';
-  // portadaCompartida es la carátula COMPARTIDA (Media.portada) — sirve de
-  // valor por defecto mientras no sabemos si tienes una personalización
-  // propia. miCustomPoster empieza en null (nunca la personalización real,
-  // que solo se puede saber en el navegador con tu token) y se rellena tras
-  // consultar tu estado real en el useEffect de abajo. Antes se pasaba la
-  // carátula compartida COMO SI fuera tu personalización (como "customPoster"),
-  // lo que hacía que este useEffect nunca llegara a comprobar tu carátula de
-  // verdad — por eso cambiar la carátula de un juego a mano nunca se veía
-  // reflejado en el buscador general.
   const [miCustomPoster, setMiCustomPoster] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,38 +25,29 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
       .catch(() => {});
   }, [dbId]);
 
-  // Href de un libro/manga/cómic que aún NO está guardado: a la
-  // resolvedora que corresponda según de dónde vino el resultado — mismo
-  // criterio que ya usa BookCard.tsx. Esa página se encarga de guardarlo.
   const hrefLibroSinGuardar = () => {
     switch (item.fuente) {
-      case 'mal':
-        return `/book/mal/${item.origenId}`;
-      case 'mangadex':
-        return `/book/mangadex/${item.origenId}`;
-      case 'comicvine':
-        return `/book/comicvine/${item.origenId}`;
-      case 'anilist':
-        return `/book/anilist/${item.origenId}`;
-      default:
-        return `/book/googlebooks/${item.origenId}`;
+      case 'mal': return `/book/mal/${item.origenId}`;
+      case 'mangadex': return `/book/mangadex/${item.origenId}`;
+      case 'comicvine': return `/book/comicvine/${item.origenId}`;
+      case 'anilist': return `/book/anilist/${item.origenId}`;
+      default: return `/book/googlebooks/${item.origenId}`;
     }
   };
 
+  // 2. Calculamos de antemano si ya tenemos una URL directa a la que ir
+  let urlDirecta = null;
+  if (dbId) {
+    const tipo = esLibro ? 'LIBRO' : undefined;
+    urlDirecta = urlFicha({ ...item, id: dbId, ...(tipo ? { tipo } : {}) });
+  } else if (esLibro) {
+    urlDirecta = hrefLibroSinGuardar();
+  }
+
+  // 3. El handleClick original, pero solo se usa si NO hay urlDirecta
   const handleClick = async () => {
-    if (loading) return;
+    if (loading || urlDirecta) return; 
     setLoading(true);
-
-    if (dbId) {
-      const tipo = esLibro ? 'LIBRO' : undefined;
-      router.push(urlFicha({ ...item, id: dbId, ...(tipo ? { tipo } : {}) }));
-      return;
-    }
-
-    if (esLibro) {
-      router.push(hrefLibroSinGuardar());
-      return;
-    }
 
     try {
       if (esJuego) {
@@ -77,7 +60,6 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
         router.push(urlFicha(nuevoJuego));
       } else {
         const tipo = item.media_type === 'tv' ? 'SERIE' : 'PELICULA';
-
         const res = await fetch('http://localhost:3001/media/tmdb', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -92,37 +74,22 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
     }
   };
 
-  // Orden de prioridad: 1) tu personalización real (miCustomPoster) > 2) la
-  // carátula compartida ya guardada (portadaCompartida) > 3) lo que traiga
-  // TMDB/IGDB/libros en crudo para este resultado de búsqueda.
-  const posterUrl =
-    miCustomPoster ||
-    portadaCompartida ||
-    (esJuego
-      ? item.cover?.url
-      : esLibro
-      ? item.portada
-      : item.poster_path
-      ? `https://image.tmdb.org/t/p/w200${item.poster_path}`
-      : null);
+  const posterUrl = miCustomPoster || portadaCompartida ||
+    (esJuego ? item.cover?.url : esLibro ? item.portada : item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : null);
+  
   const title = esJuego ? item.name : esLibro ? item.titulo : (item.title || item.name);
-  const year = esJuego
-    ? (item.first_release_date ? new Date(item.first_release_date * 1000).getFullYear() : '')
-    : esLibro
-    ? (item.anio || '')
-    : (item.release_date ? item.release_date.split('-')[0] : (item.first_air_date ? item.first_air_date.split('-')[0] : ''));
+  const year = esJuego ? (item.first_release_date ? new Date(item.first_release_date * 1000).getFullYear() : '') : esLibro ? (item.anio || '') : (item.release_date ? item.release_date.split('-')[0] : (item.first_air_date ? item.first_air_date.split('-')[0] : ''));
   const descripcion = esJuego ? item.summary : esLibro ? item.autor : item.overview;
   const etiqueta = item.media_type === 'movie' ? 'MOVIE' : item.media_type === 'tv' ? 'SERIES' : esJuego ? 'GAME' : esLibro ? 'BOOK' : 'OTHER';
 
-  return (
-    <div onClick={handleClick} className={`flex gap-4 group cursor-pointer transition ${loading ? 'opacity-50 blur-sm' : ''}`}>
+  const clasesContenedor = `flex gap-4 group cursor-pointer transition ${loading ? 'opacity-50 blur-sm' : ''}`;
+
+  // 4. Extraemos el contenido visual para no repetirlo
+  const ContenidoTarjeta = (
+    <>
       <div className="flex-shrink-0 w-24 relative">
         {posterUrl ? (
-          <img 
-            src={posterUrl} 
-            alt={title} 
-            className="w-full rounded border border-gray-700 group-hover:border-gray-400 transition object-cover aspect-[2/3] shadow-lg"
-          />
+          <img src={posterUrl} alt={title} className="w-full rounded border border-gray-700 group-hover:border-gray-400 transition object-cover aspect-[2/3] shadow-lg" />
         ) : (
           <div className="w-full aspect-[2/3] bg-gray-800 rounded border border-gray-700 flex items-center justify-center text-xs text-gray-500 text-center p-2">Sin imagen</div>
         )}
@@ -135,22 +102,29 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
       
       <div className="flex flex-col pt-1">
         <div className="flex items-baseline gap-2 mb-1">
-          <h2 className="text-xl font-bold text-white group-hover:text-blue-400 transition">
-            {title}
-          </h2>
+          <h2 className="text-xl font-bold text-white group-hover:text-blue-400 transition">{title}</h2>
           <span className="text-sm text-gray-400">{year}</span>
         </div>
-        
-        <p className="text-sm text-gray-400 line-clamp-3">
-          {descripcion || "Sin descripción disponible."}
-        </p>
-        
+        <p className="text-sm text-gray-400 line-clamp-3">{descripcion || "Sin descripción disponible."}</p>
         <div className="mt-2 flex gap-2">
-           <span className="text-xs font-semibold bg-gray-800 px-2 py-1 rounded text-gray-400">
-             {etiqueta}
-           </span>
+           <span className="text-xs font-semibold bg-gray-800 px-2 py-1 rounded text-gray-400">{etiqueta}</span>
         </div>
       </div>
+    </>
+  );
+
+  // 5. Renderizado condicional: si hay URL usamos <Link> (soporta clic central), sino usamos <div>
+  if (urlDirecta) {
+    return (
+      <Link href={urlDirecta} className={clasesContenedor}>
+        {ContenidoTarjeta}
+      </Link>
+    );
+  }
+
+  return (
+    <div onClick={handleClick} className={clasesContenedor}>
+      {ContenidoTarjeta}
     </div>
   );
 }
