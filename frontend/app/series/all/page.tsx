@@ -1,6 +1,7 @@
 import SeriesCard from '@/components/SeriesCard';
 import SeriesFiltersSidebar from '@/components/SeriesFiltersSidebar';
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 
 export default async function TodasLasSeries({ searchParams }: { searchParams: Promise<{ page?: string; tipo?: string; anio?: string; ratingMin?: string; ratingMax?: string; duracion?: string; orden?: string }> }) {
   const currentYear = new Date().getFullYear();
@@ -19,13 +20,19 @@ export default async function TodasLasSeries({ searchParams }: { searchParams: P
   if (resolvedParams.duracion) filtros.set('duracion', resolvedParams.duracion);
   if (resolvedParams.orden) filtros.set('orden', resolvedParams.orden);
 
+  const cookieStore = await cookies();
+  const idioma = cookieStore.get('idioma')?.value || 'es-ES';
+  const region = cookieStore.get('region')?.value || 'ES';
+
   const filtrosBackend = new URLSearchParams();
+  filtrosBackend.set('language', idioma);
+  filtrosBackend.set('region', region);
   if (resolvedParams.anio) filtrosBackend.set('anio', resolvedParams.anio);
   if (resolvedParams.ratingMin) filtrosBackend.set('ratingMin', resolvedParams.ratingMin);
   if (resolvedParams.ratingMax) filtrosBackend.set('ratingMax', resolvedParams.ratingMax);
   if (resolvedParams.duracion) filtrosBackend.set('duracion', resolvedParams.duracion);
   if (resolvedParams.orden) filtrosBackend.set('orden', resolvedParams.orden);
-  const sufijoBackend = filtrosBackend.toString() ? `?${filtrosBackend.toString()}` : '';
+  const sufijoBackend = `?${filtrosBackend.toString()}`;
 
   const url = esTop
     ? `http://localhost:3001/tmdb/tv/top/page/${currentPage}${sufijoBackend}`
