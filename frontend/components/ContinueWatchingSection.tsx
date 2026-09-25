@@ -42,7 +42,7 @@ export default function ContinueWatchingSection() {
         setContinuando(data.continuando || []);
         setProximamente(data.proximamente || []);
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setCargando(false));
   }, []);
 
@@ -83,7 +83,15 @@ export default function ContinueWatchingSection() {
     });
   };
 
-  if (cargando || (continuando.length === 0 && proximamente.length === 0)) return null;
+  if (cargando) {
+    return (
+      <div className="mb-10 text-center py-10">
+        <p className="text-gray-500 text-sm animate-pulse">Loading upcoming episodes...</p>
+      </div>
+    );
+  }
+
+  if (continuando.length === 0 && proximamente.length === 0) return null;
 
   const Fila = ({
     titulo,
