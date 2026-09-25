@@ -11,13 +11,16 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
+  // Esta línea es la magia: usará la URL de internet si existe, o localhost si estás en tu PC
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:3001/auth/register', {
+      const res = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, username, password }),
@@ -31,7 +34,7 @@ export default function Register() {
       }
 
       // Registro correcto: ahora iniciamos sesión automáticamente
-      const loginRes = await fetch('http://localhost:3001/auth/login', {
+      const loginRes = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
