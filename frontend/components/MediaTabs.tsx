@@ -5,17 +5,6 @@ import { urlEstudio, urlPersona } from '@/lib/slug';
 
 const API_URL = 'http://localhost:3001';
 
-interface JuegoAdaptacion {
-  igdbId: number;
-  titulo: string;
-  portada: string | null;
-  anio: number | null;
-}
-
-interface AdaptacionesResponse {
-  videojuegos: JuegoAdaptacion[];
-}
-
 export default function MediaTabs({
   sinopsis,
   detalles,
@@ -30,15 +19,7 @@ export default function MediaTabs({
   tipo?: string;
 }) {
   const [tab, setTab] = useState<'descripcion' | 'cast' | 'crew' | 'mas' | 'adaptation'>('descripcion');
-  const [adaptaciones, setAdaptaciones] = useState<AdaptacionesResponse | null>(null);
-  const [navegandoA, setNavegandoA] = useState<number | null>(null);
   const [seriesInfo, setSeriesInfo] = useState<any>(null);
-
-  // Enlace <a> DE VERDAD a la resolvedora de juegos — ver hrefDeJuego en
-  // GameTabs.tsx para la explicación completa de por qué.
-  function hrefDeJuego(juego: JuegoAdaptacion) {
-    return `/game/igdb/${juego.igdbId}`;
-  }
 
   useEffect(() => {
     if (tipo !== 'SERIE' || !mediaId) return;
@@ -53,26 +34,6 @@ export default function MediaTabs({
       cancelado = true;
     };
   }, [tipo, mediaId]);
-
-  useEffect(() => {
-    if (!tmdbId) return;
-    let cancelado = false;
-    fetch(`${API_URL}/wikidata/adaptaciones/${tmdbId}`)
-      .then((r) => r.json())
-      .then((d: Partial<AdaptacionesResponse>) => {
-        if (!cancelado) {
-          setAdaptaciones({
-            videojuegos: Array.isArray(d?.videojuegos) ? d.videojuegos : [],
-          });
-        }
-      })
-      .catch((err) => console.error('Error cargando adaptaciones', err));
-    return () => {
-      cancelado = true;
-    };
-  }, [tmdbId]);
-
-  const hayAdaptaciones = (adaptaciones?.videojuegos?.length || 0) > 0;
 
   // Igual que ya se hace con "Cast" (oculta si tipo === 'LIBRO'), aquí se
   // comprueba si de verdad hay algo que mostrar en "Crew" e "Info" antes de
@@ -101,7 +62,6 @@ export default function MediaTabs({
     ...(tipo !== 'LIBRO' ? [{ key: 'cast' as const, label: 'Cast' }] : []),
     ...(hayCrew ? [{ key: 'crew' as const, label: 'Crew' }] : []),
     ...(hayInfo ? [{ key: 'mas' as const, label: 'Info' }] : []),
-    ...(hayAdaptaciones ? [{ key: 'adaptation' as const, label: 'Adaptation' }] : []),
   ];
 
   return (
@@ -287,48 +247,6 @@ export default function MediaTabs({
       {/* INFO EXTRA DE SERIE: episodios/duración total, show tracking, ranking de episodios */}
       {tab === 'mas' && tipo === 'SERIE' && seriesInfo && (
         <div className="pb-10">
-        </div>
-      )}
-
-      {/* ADAPTATION */}
-      {tab === 'adaptation' && adaptaciones && (
-        <div>
-          {adaptaciones.videojuegos.length > 0 && (
-            <div>
-              <h3 className="text-lg font-bold text-white mb-3">VideoGame</h3>
-              <div className="flex flex-wrap gap-4">
-                {adaptaciones.videojuegos.map((j) => (
-                  <Link
-                    key={j.igdbId}
-                    href={hrefDeJuego(j)}
-                    onClick={() => setNavegandoA(j.igdbId)}
-                    className="w-32 flex-shrink-0 relative overflow-hidden rounded cursor-pointer group block"
-                  >
-                    {j.portada && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={j.portada}
-                        alt={j.titulo}
-                        className="w-full aspect-[2/3] object-cover rounded transition"
-                      />
-                    )}
-
-                    {navegandoA === j.igdbId ? (
-                      <div className="absolute inset-0 flex items-center justify-center rounded pointer-events-none">
-                        <span className="text-white text-xs font-bold bg-black/60 px-2 py-1 rounded">Loading...</span>
-                      </div>
-                    ) : (
-                      <div className="absolute inset-0 rounded bg-black/90 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-center p-2 pointer-events-none">
-                        <p className="text-sm font-bold text-white">
-                          {j.titulo} <span className="font-normal text-gray-300">({j.anio})</span>
-                        </p>
-                      </div>
-                    )}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>
