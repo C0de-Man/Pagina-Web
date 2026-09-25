@@ -417,7 +417,7 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
 
   return (
     <section className="mt-8">
-      <h2 className="text-xl font-bold text-white mb-4">Seasons ({temporadas.length})</h2>
+      <h2 className="text-xl font-bold text-white mb-4">Seasons ({temporadas.filter(t => t.numero > 0).length})</h2>
 
       {mostrarSugerenciaNota && (
         <div className="mb-4 bg-teal-950/30 border border-teal-800/60 rounded-lg p-4 flex flex-col items-center gap-2 text-center">
