@@ -1085,6 +1085,14 @@ function nombreAutorMal(autoresMal) {
   return [primero.first_name, primero.last_name].filter(Boolean).join(' ') || null;
 }
 
+async function buscarMangaMalApi(query, limit = 10) {
+  const url = `${MAL_API_BASE}/manga?q=${encodeURIComponent(query)}&limit=${limit}&fields=id,title,main_picture,start_date,media_type,alternative_titles,authors{first_name,last_name}`;
+  const response = await fetch(url, { headers: headersMal() });
+  if (!response.ok) throw new Error(`MAL respondió ${response.status}`);
+  const data = await response.json();
+  return (data.data || []).map(item => item.node);
+}
+
 // --- COMIC VINE — CÓMICS ---
 // Comic Vine exige un User-Agent propio (si no, algunas peticiones dan 420/
 // bloqueo silencioso) y la key va como query param ?api_key=, no como header.
@@ -1799,11 +1807,21 @@ async function construirSagaManga(malMangaIdInicial) {
   return completa;
 }
 
-app.get('/mal/manga/:malMangaId/relations', async (req, res) => {
+app.get('/media/:id/relations', async (req, res) => {
   try {
-    const malMangaId = parseInt(req.params.malMangaId, 10);
-    if (Number.isNaN(malMangaId)) return res.status(400).json({ error: 'malMangaId inválido' });
+    const mediaId = parseInt(req.params.id, 10);
+    if (Number.isNaN(mediaId)) return res.status(400).json({ error: 'mediaId inválido' });
 
+    const media = await prisma.media.findUnique({
+      where: { id: mediaId },
+      select: { malMangaId: true }
+    });
+
+    if (!media?.malMangaId) {
+      return res.json({ saga: [], indiceActual: -1, moreContent: {} });
+    }
+
+    const malMangaId = media.malMangaId;
     const [saga, dataActual] = await Promise.all([
       construirSagaManga(malMangaId),
       obtenerRelacionesMangaMal(malMangaId),
@@ -1823,8 +1841,8 @@ app.get('/mal/manga/:malMangaId/relations', async (req, res) => {
       moreContent: grupos,
     });
   } catch (error) {
-    console.error('ERROR EN GET /mal/manga/:malMangaId/relations:', error);
-    res.status(500).json({ error: 'Error al obtener las relaciones del manga' });
+    console.error('ERROR EN GET /media/:id/relations:', error);
+    res.status(500).json({ error: 'Error al obtener las relaciones' });
   }
 });
 
@@ -3747,6 +3765,8 @@ async function obtenerDetalleAniList(anilistId) {
         volumes
         status
         countryOfOrigin
+        averageScore
+        popularity
         staff(perPage: 6) {
           edges {
             role
@@ -4048,13 +4068,17 @@ app.get('/mangadex/details/:mangaDexId', async (req, res) => {
     } catch (e) {
       console.error('No se pudo obtener el total de capítulos de MangaDex:', e.message);
     }
-    if (!totalCapitulos && attrs.lastChapter) {
+    if (attrs.lastChapter) {
       const numeroCapitulo = parseInt(attrs.lastChapter, 10);
-      if (!Number.isNaN(numeroCapitulo)) totalCapitulos = numeroCapitulo;
+      if (!Number.isNaN(numeroCapitulo)) {
+        totalCapitulos = totalCapitulos ? Math.max(totalCapitulos, numeroCapitulo) : numeroCapitulo;
+      }
     }
-    if (!totalVolumenes && attrs.lastVolume) {
+    if (attrs.lastVolume) {
       const numeroVolumen = parseInt(attrs.lastVolume, 10);
-      if (!Number.isNaN(numeroVolumen)) totalVolumenes = numeroVolumen;
+      if (!Number.isNaN(numeroVolumen)) {
+        totalVolumenes = totalVolumenes ? Math.max(totalVolumenes, numeroVolumen) : numeroVolumen;
+      }
     }
 
     res.json({
@@ -4136,13 +4160,17 @@ app.get('/media/:id/mangadex-info', async (req, res) => {
     } catch (e) {
       console.error('No se pudo obtener el total de capítulos de MangaDex:', e.message);
     }
-    if (!totalCapitulos && attrs.lastChapter) {
-      const n = parseInt(attrs.lastChapter, 10);
-      if (!Number.isNaN(n)) totalCapitulos = n;
+    if (attrs.lastChapter) {
+      const numeroCapitulo = parseInt(attrs.lastChapter, 10);
+      if (!Number.isNaN(numeroCapitulo)) {
+        totalCapitulos = totalCapitulos ? Math.max(totalCapitulos, numeroCapitulo) : numeroCapitulo;
+      }
     }
-    if (!totalVolumenes && attrs.lastVolume) {
-      const n = parseInt(attrs.lastVolume, 10);
-      if (!Number.isNaN(n)) totalVolumenes = n;
+    if (attrs.lastVolume) {
+      const numeroVolumen = parseInt(attrs.lastVolume, 10);
+      if (!Number.isNaN(numeroVolumen)) {
+        totalVolumenes = totalVolumenes ? Math.max(totalVolumenes, numeroVolumen) : numeroVolumen;
+      }
     }
 
     res.json({

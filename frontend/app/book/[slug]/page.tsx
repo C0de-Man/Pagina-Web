@@ -214,7 +214,7 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
               <RatingWidget mediaId={media.id} />
             </div>
 
-            {media.malMangaId && <MangaCollectionLinks malMangaId={media.malMangaId} />}
+            {media.malMangaId && <MangaCollectionLinks mediaId={media.id} />}
           </div>
 
         </div>

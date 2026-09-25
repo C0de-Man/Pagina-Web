@@ -17,21 +17,18 @@ interface RelationsResponse {
   moreContent: Record<string, MangaSimple[]>;
 }
 
-export default function MangaCollectionLinks({ malMangaId }: { malMangaId: number }) {
+export default function MangaCollectionLinks({ mediaId }: { mediaId: number }) {
   const [data, setData] = useState<RelationsResponse | null>(null);
   const [modalAbierto, setModalAbierto] = useState(false);
   const [tabModal, setTabModal] = useState<string>('saga');
-  // /media no lleva token y solo sirve para saber si un manga ya está
-  // guardado (dbId) — así se enlaza a su ficha real en vez de pasar por la
-  // resolvedora de nuevo, mismo criterio que en GameCollectionLinks.
   const [myDb, setMyDb] = useState<{ id: number; malMangaId: number | null }[]>([]);
 
   useEffect(() => {
-    fetch(`${API_URL}/mal/manga/${malMangaId}/relations`)
+    fetch(`${API_URL}/media/${mediaId}/relations`)
       .then((r) => r.json())
       .then(setData)
       .catch((err) => console.error('Error cargando relaciones del manga', err));
-  }, [malMangaId]);
+  }, [mediaId]);
 
   useEffect(() => {
     fetch(`${API_URL}/media`, { cache: 'no-store' })
@@ -43,8 +40,6 @@ export default function MangaCollectionLinks({ malMangaId }: { malMangaId: numbe
   function hrefDeManga(manga: MangaSimple) {
     const local = myDb.find((m) => m.malMangaId === manga.malMangaId);
     return local ? `/book/mal/${manga.malMangaId}` : `/book/mal/${manga.malMangaId}`;
-    // Ambas rutas son la misma resolvedora: si ya está guardado, /media/mal-manga
-    // devuelve la fila existente sin duplicar, así que no hace falta distinguirlas.
   }
 
   if (!data) return null;

@@ -9,20 +9,13 @@ type Contador = {
 export default function ReadingProgress({ mediaId, tipo, className }: { mediaId: number; tipo?: string; className?: string }) {
   const [capitulo, setCapitulo] = useState<Contador | null>(null);
   const [volumen, setVolumen] = useState<Contador | null>(null);
-  // Comic Vine no maneja volúmenes/capítulos como MAL — solo un total de
-  // issues, así que para un cómic se oculta la fila "Volume" y se reetiqueta
-  // "Chapter" como "Issue" (reutilizando el mismo campo progresoActual/
-  // progresoTotal por debajo, sin necesidad de columnas nuevas en la BD).
   const [esComic, setEsComic] = useState(false);
-  // Cuando el total lo gestiona una fuente automática (MAL/Comic Vine), el
-  // "?" nunca se puede escribir a mano — se queda esperando a que esa
-  // fuente lo rellene sola (típicamente al terminar la publicación). Solo
-  // un libro sin ninguna fuente (Google Books) deja escribirlo.
   const [totalGestionadoPorFuente, setTotalGestionadoPorFuente] = useState<{ capitulo: boolean; volumen: boolean }>({ capitulo: false, volumen: false });
   const [editando, setEditando] = useState<'capitulo' | 'volumen' | null>(null);
   const [totalInput, setTotalInput] = useState('');
   const [editandoActual, setEditandoActual] = useState<'capitulo' | 'volumen' | null>(null);
   const [actualInput, setActualInput] = useState('');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
     if (tipo !== 'LIBRO') return;
@@ -35,60 +28,37 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
 
     function cargar() {
       const token = localStorage.getItem('token');
-      if (!token) return;
+      setIsLoggedIn(!!token);
 
       Promise.all([
-      fetch(`http://localhost:3001/media/${mediaId}/status`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).then((res) => res.json()),
-      // Totales por defecto desde MAL (si este libro es un manga guardado
-      // desde ahí).
-      fetch(`http://localhost:3001/media/${mediaId}/manga-info`).then((res) => res.json()).catch(() => null),
-      // Total por defecto desde Comic Vine (si este libro es un cómic
-      // guardado desde ahí).
-      fetch(`http://localhost:3001/media/${mediaId}/comic-info`).then((res) => res.json()).catch(() => null),
-      // Total por defecto desde MangaDex (respaldo cuando MAL no lo
-      // encontró al guardar).
-      fetch(`http://localhost:3001/media/${mediaId}/mangadex-info`).then((res) => res.json()).catch(() => null),
-      // Total por defecto desde AniList (respaldo final cuando ni MAL ni
-      // MangaDex encontraron el manga).
-      fetch(`http://localhost:3001/media/${mediaId}/anilist-info`).then((res) => res.json()).catch(() => null),
-    ])
-      .then(([status, mangaInfo, comicInfo, mangadexInfo, anilistInfo]) => {
-        // "estado" solo viene relleno si el libro tiene malMangaId/
-        // comicVineId de verdad — presente incluso mientras el manga sigue
-        // en publicación (Publishing) y su totalCapitulos aún es null. Se
-        // usa como marca de "esto tiene una fuente automática", para saber
-        // si el total lo debe dar siempre esa fuente (nunca a mano) o si,
-        // al no tener ninguna fuente (ej. Google Books), sí se puede
-        // escribir el total manualmente.
-        // "editorial" identifica que el libro TIENE fuente Comic Vine,
-        // independientemente de si totalIssues está de momento oculto
-        // (ongoing) o relleno (terminado) — así "esComicConFuente" no
-        // depende del propio valor que estamos intentando decidir mostrar.
-        const esComicConFuente = !!(comicInfo?.editorial || comicInfo?.estado);
-        // Se cuenta como "manga con fuente automática" si CUALQUIERA de las
-        // tres fuentes (MAL, MangaDex o AniList — en ese orden de
-        // preferencia) confirma que este libro viene de ahí, no solo MAL.
-        const esMangaConFuente = !esComicConFuente && !!(mangaInfo?.estado || mangadexInfo?.estado || anilistInfo?.estado);
-        setEsComic(esComicConFuente);
-        setTotalGestionadoPorFuente({ capitulo: esMangaConFuente || esComicConFuente, volumen: esMangaConFuente });
-        setCapitulo({
-          actual: status.progresoActual ?? 0,
-          // El total de una fuente automática (MAL/MangaDex/AniList/Comic
-          // Vine) SIEMPRE manda sobre lo que se hubiera guardado antes a
-          // mano en progresoTotal. Se prueba cada fuente en orden hasta
-          // encontrar un total ya conocido.
-          total: esMangaConFuente
-            ? (mangaInfo?.totalCapitulos ?? mangadexInfo?.totalCapitulos ?? anilistInfo?.totalCapitulos ?? null)
-            : esComicConFuente
-              ? (comicInfo?.totalIssues ?? null)
-              : (status.progresoTotal ?? null),
-        });
-        setVolumen({
-          actual: status.progresoVolumenActual ?? 0,
-          total: status.progresoVolumenTotal ?? mangaInfo?.totalVolumenes ?? mangadexInfo?.totalVolumenes ?? anilistInfo?.totalVolumenes ?? null,
-        });
+        // Si hay token pedimos el progreso personal; si no, devolvemos un objeto vacío para no bloquear los datos públicos
+        token
+          ? fetch(`http://localhost:3001/media/${mediaId}/status`, {
+              headers: { Authorization: `Bearer ${token}` },
+            }).then((res) => res.json()).catch(() => ({}))
+          : Promise.resolve({}),
+        fetch(`http://localhost:3001/media/${mediaId}/manga-info`).then((res) => res.json()).catch(() => null),
+        fetch(`http://localhost:3001/media/${mediaId}/comic-info`).then((res) => res.json()).catch(() => null),
+        fetch(`http://localhost:3001/media/${mediaId}/mangadex-info`).then((res) => res.json()).catch(() => null),
+        fetch(`http://localhost:3001/media/${mediaId}/anilist-info`).then((res) => res.json()).catch(() => null),
+      ])
+        .then(([status, mangaInfo, comicInfo, mangadexInfo, anilistInfo]) => {
+          const esComicConFuente = !!(comicInfo?.editorial || comicInfo?.estado);
+          const esMangaConFuente = !esComicConFuente && !!(mangaInfo?.estado || mangadexInfo?.estado || anilistInfo?.estado);
+          setEsComic(esComicConFuente);
+          setTotalGestionadoPorFuente({ capitulo: esMangaConFuente || esComicConFuente, volumen: esMangaConFuente });
+          setCapitulo({
+            actual: status.progresoActual ?? 0,
+            total: esMangaConFuente
+              ? (mangaInfo?.totalCapitulos ?? mangadexInfo?.totalCapitulos ?? anilistInfo?.totalCapitulos ?? null)
+              : esComicConFuente
+                ? (comicInfo?.totalIssues ?? null)
+                : (status.progresoTotal ?? null),
+          });
+          setVolumen({
+            actual: status.progresoVolumenActual ?? 0,
+            total: status.progresoVolumenTotal ?? mangaInfo?.totalVolumenes ?? mangadexInfo?.totalVolumenes ?? anilistInfo?.totalVolumenes ?? null,
+          });
         })
         .catch(() => { });
     }
@@ -120,10 +90,6 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
       });
       if (!res.ok) throw new Error('fallo al guardar');
 
-      // Si el contador principal (Issue/Chapter) llega al total, se marca
-      // automáticamente como Read (mismo cambio que hace ActionButtons al
-      // elegir "Read" a mano: watched=true, playStatus=null), reutilizando
-      // el mismo endpoint /status.
       if (campo === 'capitulo' && nuevoTotal !== null && nuevoActual >= nuevoTotal) {
         fetch(`http://localhost:3001/media/${mediaId}/status`, {
           method: 'PATCH',
@@ -166,16 +132,18 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
     <div className="flex items-center justify-between gap-3">
       <span className="text-xs text-gray-400 uppercase tracking-wide">{etiqueta}</span>
       <div className="flex items-center gap-2">
-        <button
-          onClick={() => guardar(campo, Math.max(0, contador.actual - 1), contador.total)}
-          disabled={contador.actual <= 0}
-          className="w-6 h-6 rounded bg-[#2c3440] hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-sm transition cursor-pointer"
-        >
-          −
-        </button>
+        {isLoggedIn && (
+          <button
+            onClick={() => guardar(campo, Math.max(0, contador.actual - 1), contador.total)}
+            disabled={contador.actual <= 0}
+            className="w-6 h-6 rounded bg-[#2c3440] hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-sm transition cursor-pointer"
+          >
+            −
+          </button>
+        )}
 
         <div className="text-base font-extrabold text-white min-w-[56px] text-center">
-          {editandoActual === campo ? (
+          {editandoActual === campo && isLoggedIn ? (
             <input
               type="number"
               min={0}
@@ -187,32 +155,23 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
               className="w-10 bg-[#2c3440] border border-gray-600 rounded text-center text-sm font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-600"
             />
           ) : (
-            // Número actual: siempre editable a mano (escribir directamente
-            // en vez de tener que pulsar +/- una a una para llegar, ej., al
-            // issue 80).
             <button
               onClick={() => {
+                if (!isLoggedIn) return;
                 setActualInput(String(contador.actual));
                 setEditandoActual(campo);
               }}
-              className="hover:text-blue-400 transition cursor-pointer"
+              className={isLoggedIn ? "hover:text-blue-400 transition cursor-pointer" : "cursor-default text-gray-500"}
             >
-              {contador.actual}
+              {isLoggedIn ? contador.actual : '-'}
             </button>
           )}
           <span className="text-gray-500"> / </span>
           {contador.total !== null ? (
-            // Total ya conocido (viene de MAL/Comic Vine): solo texto, no
-            // editable — no tiene sentido dejar tocar un dato que ya
-            // sabemos con certeza de la fuente original.
             <span className="text-gray-400">{contador.total}</span>
           ) : totalGestionadoPorFuente[campo] ? (
-            // Total desconocido TODAVÍA, pero gestionado por una fuente
-            // automática (manga en publicación, cómic sin fecha de fin) —
-            // no se deja escribir a mano: se queda en "?" hasta que esa
-            // fuente lo rellene sola (típicamente al terminar la serie).
             <span className="text-gray-500">?</span>
-          ) : editando === campo ? (
+          ) : editando === campo && isLoggedIn ? (
             <input
               type="number"
               min={1}
@@ -224,44 +183,37 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
               className="w-10 bg-[#2c3440] border border-gray-600 rounded text-center text-sm font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-600"
             />
           ) : (
-            // Total desconocido y SIN ninguna fuente automática (libro de
-            // Google Books, que nunca da un total): se deja editable a
-            // mano, como hasta ahora.
             <button
               onClick={() => {
+                if (!isLoggedIn) return;
                 setTotalInput('');
                 setEditando(campo);
               }}
-              className="text-gray-400 hover:text-white transition cursor-pointer"
+              className={isLoggedIn ? "text-gray-400 hover:text-white transition cursor-pointer" : "text-gray-400 cursor-default"}
             >
               ?
             </button>
           )}
         </div>
 
-        <button
-          onClick={() => guardar(campo, contador.total !== null ? Math.min(contador.total, contador.actual + 1) : contador.actual + 1, contador.total)}
-          disabled={contador.total !== null && contador.actual >= contador.total}
-          className="w-6 h-6 rounded bg-[#2c3440] hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-sm transition cursor-pointer"
-        >
-          +
-        </button>
+        {isLoggedIn && (
+          <button
+            onClick={() => guardar(campo, contador.total !== null ? Math.min(contador.total, contador.actual + 1) : contador.actual + 1, contador.total)}
+            disabled={contador.total !== null && contador.actual >= contador.total}
+            className="w-6 h-6 rounded bg-[#2c3440] hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-sm transition cursor-pointer"
+          >
+            +
+          </button>
+        )}
       </div>
     </div>
   );
 
   return (
     <div className={className ?? 'bg-[#1c2228] rounded-lg border border-gray-700 p-4 shadow-xl mt-4'}>
-      <h3 className="text-sm font-bold text-white mb-3">Reading progress</h3>
+      <h3 className="text-sm font-bold text-white mb-3">{isLoggedIn ? 'Reading progress' : 'Chapters / Volumes'}</h3>
       <div className="space-y-2">
         <Fila campo="capitulo" etiqueta={esComic ? 'Issue' : 'Chapter'} contador={capitulo} />
-        {/* La fila "Volume" solo se muestra si hay algo que mostrar: bien
-            porque alguna fuente automática (MAL/MangaDex/AniList) ya dio un
-            total real, bien porque no hay ninguna fuente automática y el
-            usuario puede escribirlo a mano. Si HAY fuente automática pero
-            ninguna conoce el total de volúmenes (común en manhwa/manhua,
-            que suelen publicarse solo por capítulo), la fila se oculta del
-            todo — mostrar "0 / ?" para siempre no aporta nada. */}
         {!esComic && !(totalGestionadoPorFuente.volumen && volumen.total === null) && (
           <Fila campo="volumen" etiqueta="Volume" contador={volumen} />
         )}
