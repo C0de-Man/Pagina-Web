@@ -20,7 +20,11 @@ app.get('/test123', (req, res) => res.json({ ok: true }));
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Servidor corriendo en puerto ${PORT}`);
+});
 
 // --- TOKEN DE IGDB (vía Twitch): se pide una vez y se reutiliza hasta que caduca ---
 let igdbToken = null;
