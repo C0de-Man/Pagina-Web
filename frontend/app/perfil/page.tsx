@@ -31,13 +31,14 @@ export default function Perfil() {
   const [avatar, setAvatar] = useState<string | null>(null);
   const [logueado, setLogueado] = useState(false);
   const [copiado, setCopiado] = useState(false);
+  const [cargandoVistas, setCargandoVistas] = useState(true);
   // Igual que CarruselJuegos en GameTabs.tsx: en vez de scroll continuo (que
   // cortaba la última carátula a medias), se muestra un bloque fijo de
   // carátulas COMPLETAS y las flechas cambian de bloque entero.
   const JUGANDO_AHORA_VISIBLES = 7;
   const [jugandoAhoraInicio, setJugandoAhoraInicio] = useState(0);
 
-  useEffect(() => {
+useEffect(() => {
     const token = localStorage.getItem('token');
     const rawUser = localStorage.getItem('user');
     if (rawUser) setUsername(JSON.parse(rawUser).username);
@@ -69,7 +70,8 @@ export default function Perfil() {
       })
         .then((res) => res.json())
         .then(setVistas)
-        .catch(() => { });
+        .catch(() => { })
+        .finally(() => setCargandoVistas(false)); // <-- Aquí avisamos que ya terminó
 
       fetch(`http://localhost:3001/media/playing?language=${getIdioma()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -78,6 +80,9 @@ export default function Perfil() {
         .then((res) => res.json())
         .then(setJugandoAhora)
         .catch(() => { });
+    } else {
+      // Si no hay token (no estás logueado), quitamos la carga al instante
+      setCargandoVistas(false);
     }
   }, []);
 
@@ -236,14 +241,17 @@ export default function Perfil() {
           </section>
         )}
 
-        <section>
+<section>
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400">Recent activity</h2>
             <Link href="/perfil/actividad" className="text-xs text-gray-400 hover:text-white transition flex items-center gap-1">
               See all <span className="text-sm leading-none">›</span>
             </Link>
           </div>
-          {vistas.length > 0 ? (
+          
+          {cargandoVistas ? (
+            <p className="text-gray-500 text-sm animate-pulse">Loading activity...</p>
+          ) : vistas.length > 0 ? (
             <div className="flex flex-wrap justify-center gap-4 pb-2">
               {vistas.slice(0, 7).map((item) => renderCard(item, true))}
             </div>
