@@ -14,7 +14,7 @@ app.use(cors());
 // fallaban con "PayloadTooLargeError" sin que el frontend llegara a
 // enterarse de por qué.
 app.use(express.json({ limit: '50mb' }));
-
+app.get('/', (req, res) => res.send('API funcionando correctamente'));
 app.get('/test123', (req, res) => res.json({ ok: true }));
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
