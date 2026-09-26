@@ -20,6 +20,64 @@ app.get('/test123', (req, res) => res.json({ ok: true }));
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
+// --- RUTAS DE AUTENTICACIÓN (LOGIN Y REGISTRO) ---
+
+app.post('/auth/register', async (req, res) => {
+  try {
+    const { email, password, username } = req.body;
+    
+    // Comprobar si el usuario ya existe
+    const usuarioExistente = await prisma.user.findFirst({ 
+      where: { OR: [{ email }, { username }] } 
+    });
+    if (usuarioExistente) {
+      return res.status(400).json({ error: 'El email o nombre de usuario ya está en uso' });
+    }
+
+    // Encriptar contraseña y crear usuario
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const nuevoUsuario = await prisma.user.create({
+      data: {
+        email,
+        username,
+        password: hashedPassword
+      }
+    });
+
+    // Generar token
+    const token = jwt.sign({ userId: nuevoUsuario.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: nuevoUsuario.id, email: nuevoUsuario.email, username: nuevoUsuario.username } });
+  } catch (error) {
+    console.error('Error en registro:', error);
+    res.status(500).json({ error: 'Error interno del servidor al registrar' });
+  }
+});
+
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Buscar al usuario por email
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    // Comprobar la contraseña
+    const passwordValida = await bcrypt.compare(password, user.password);
+    if (!passwordValida) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    // Generar token
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: user.id, email: user.email, username: user.username } });
+  } catch (error) {
+    console.error('Error en login:', error);
+    res.status(500).json({ error: 'Error interno del servidor al iniciar sesión' });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 
 app.listen(PORT, '0.0.0.0', () => {
