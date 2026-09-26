@@ -105,7 +105,7 @@ export default function ImportarLetterboxd() {
       }
 
       const token = localStorage.getItem('token');
-      const res = await fetch('http://localhost:3001/import/letterboxd', {
+      const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/import/letterboxd', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

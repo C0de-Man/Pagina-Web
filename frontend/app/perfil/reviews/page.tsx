@@ -41,7 +41,7 @@ export default function MisResenas() {
     }
     setLogueado(true);
 
-    fetch(`http://localhost:3001/media/reviews?language=${getIdioma()}`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/reviews?language=${getIdioma()}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })

@@ -33,14 +33,14 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
       Promise.all([
         // Si hay token pedimos el progreso personal; si no, devolvemos un objeto vacío para no bloquear los datos públicos
         token
-          ? fetch(`http://localhost:3001/media/${mediaId}/status`, {
+          ? fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
               headers: { Authorization: `Bearer ${token}` },
             }).then((res) => res.json()).catch(() => ({}))
           : Promise.resolve({}),
-        fetch(`http://localhost:3001/media/${mediaId}/manga-info`).then((res) => res.json()).catch(() => null),
-        fetch(`http://localhost:3001/media/${mediaId}/comic-info`).then((res) => res.json()).catch(() => null),
-        fetch(`http://localhost:3001/media/${mediaId}/mangadex-info`).then((res) => res.json()).catch(() => null),
-        fetch(`http://localhost:3001/media/${mediaId}/anilist-info`).then((res) => res.json()).catch(() => null),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/manga-info`).then((res) => res.json()).catch(() => null),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/comic-info`).then((res) => res.json()).catch(() => null),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/mangadex-info`).then((res) => res.json()).catch(() => null),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/anilist-info`).then((res) => res.json()).catch(() => null),
       ])
         .then(([status, mangaInfo, comicInfo, mangadexInfo, anilistInfo]) => {
           const esComicConFuente = !!(comicInfo?.editorial || comicInfo?.estado);
@@ -80,7 +80,7 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
       : { progresoVolumenActual: nuevoActual, progresoVolumenTotal: nuevoTotal };
 
     try {
-      const res = await fetch(`http://localhost:3001/media/${mediaId}/progress`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/progress`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -91,7 +91,7 @@ export default function ReadingProgress({ mediaId, tipo, className }: { mediaId:
       if (!res.ok) throw new Error('fallo al guardar');
 
       if (campo === 'capitulo' && nuevoTotal !== null && nuevoActual >= nuevoTotal) {
-        fetch(`http://localhost:3001/media/${mediaId}/status`, {
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',

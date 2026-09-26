@@ -47,17 +47,17 @@ export default async function TodasLasPeliculas({ searchParams }: { searchParams
   // filtro, o el actual por defecto), el histórico de populares, o el Top
   // ordenado por nota combinada (community + externa).
   const url = esTop
-    ? `http://localhost:3001/tmdb/top/page/${currentPage}${sufijoBackend}`
+    ? `${process.env.NEXT_PUBLIC_API_URL}/tmdb/top/page/${currentPage}${sufijoBackend}`
     : esPopulares
-      ? `http://localhost:3001/tmdb/popular-historico/page/${currentPage}${sufijoBackend}`
-      : `http://localhost:3001/tmdb/year/${anioFiltro}/page/${currentPage}${sufijoBackend}`;
+      ? `${process.env.NEXT_PUBLIC_API_URL}/tmdb/popular-historico/page/${currentPage}${sufijoBackend}`
+      : `${process.env.NEXT_PUBLIC_API_URL}/tmdb/year/${anioFiltro}/page/${currentPage}${sufijoBackend}`;
 
   const res = await fetch(url, { cache: 'no-store' });
   const data = await res.json();
   const peliculas = data.results || [];
 
   // Obtenemos TU base de datos local
-  const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
+  const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' });
   const myDb = await resDb.json();
 
   // Igual que en peliculas/page.tsx: aquí solo miramos si ya está guardada

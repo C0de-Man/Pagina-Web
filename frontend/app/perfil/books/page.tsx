@@ -40,7 +40,7 @@ export default function MisLibros() {
     if (!token) return;
     setLogueado(true);
 
-    fetch('http://localhost:3001/media/watched', {
+    fetch('${process.env.NEXT_PUBLIC_API_URL}/media/watched', {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })

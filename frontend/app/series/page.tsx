@@ -10,15 +10,15 @@ export default async function SeriesLobby() {
   const region = cookieStore.get('region')?.value || 'ES';
 
   // 1. Series EXACTAS de este año, ordenadas por popularidad
-  const resYear = await fetch(`http://localhost:3001/tmdb/tv/year/${currentYear}?language=${idioma}&region=${region}`, { cache: 'no-store' });
+  const resYear = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/tv/year/${currentYear}?language=${idioma}&region=${region}`, { cache: 'no-store' });
   const yearSeries = await resYear.json();
 
   // 2. Más populares de SIEMPRE (no solo tendencia actual)
-  const resPop = await fetch(`http://localhost:3001/tmdb/tv/popular-historico?language=${idioma}&region=${region}`, { cache: 'no-store' });
+  const resPop = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/tv/popular-historico?language=${idioma}&region=${region}`, { cache: 'no-store' });
   const popular = await resPop.json();
 
   // 3. TU base de datos
-  const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
+  const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' });
   const myDb = await resDb.json();
 
   // Igual que en el lobby de películas: sin token aquí (página de

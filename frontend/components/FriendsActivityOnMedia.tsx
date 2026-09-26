@@ -17,7 +17,7 @@ export default function FriendsActivityOnMedia({ mediaId }: { mediaId: number })
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
-    fetch(`http://localhost:3001/media/${mediaId}/friends-activity`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/friends-activity`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())

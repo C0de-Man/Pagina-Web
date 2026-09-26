@@ -17,7 +17,7 @@ export default async function PersonaDetail({ params }: { params: Promise<{ slug
   const cookieStore = await cookies();
   const idioma = cookieStore.get('idioma')?.value || 'es-ES';
 
-  const res = await fetch(`http://localhost:3001/tmdb/person/${personId}?language=${idioma}`, { cache: 'no-store' });
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/person/${personId}?language=${idioma}`, { cache: 'no-store' });
   const persona = await res.json();
 
   if (!persona || persona.error) {
@@ -31,7 +31,7 @@ export default async function PersonaDetail({ params }: { params: Promise<{ slug
   // Cruzamos con tu base de datos local para poder enlazar directo a la
   // ficha si ya la tienes guardada (en vez de pasar siempre por la
   // resolvedora), y para usar tu carátula personalizada si la elegiste.
-  const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
+  const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' });
   const db = await resDb.json();
   const localesPorClave: Record<string, { dbId: number; portada: string | null }> = {};
   for (const m of db) {

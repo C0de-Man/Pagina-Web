@@ -42,7 +42,7 @@ export default function JuegosLobbyClient({
   const [plataformas, setPlataformas] = useState<{ id: number; name: string }[]>([]);
 
   useEffect(() => {
-    fetch('http://localhost:3001/igdb/filtros')
+    fetch('${process.env.NEXT_PUBLIC_API_URL}/igdb/filtros')
       .then((r) => r.json())
       .then((data) => {
         setPlataformas(data.plataformas || []);
@@ -89,8 +89,8 @@ export default function JuegosLobbyClient({
       if (filtros.ratingMax < 5) params.set('ratingMax', String(filtros.ratingMax));
 
       const [resJuegos, resDb] = await Promise.all([
-        fetch(`http://localhost:3001/igdb/search?${params.toString()}`),
-        fetch('http://localhost:3001/media'),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/search?${params.toString()}`),
+        fetch('${process.env.NEXT_PUBLIC_API_URL}/media'),
       ]);
       const juegos = await resJuegos.json();
       const db = await resDb.json();

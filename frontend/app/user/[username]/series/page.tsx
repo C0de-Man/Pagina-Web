@@ -5,7 +5,7 @@ import Link from 'next/link';
 import StarRating from '@/components/StarRating';
 import { urlFicha } from '@/lib/slug';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = '${process.env.NEXT_PUBLIC_API_URL}';
 
 // Mismos valores/colores que ActionButtons.tsx. "WATCHED" no es un
 // playStatus real en la base de datos (solo WATCHING/PAUSED/ABANDONED lo

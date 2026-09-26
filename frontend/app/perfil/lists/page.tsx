@@ -19,7 +19,7 @@ export default function MisListas() {
   const cargarListas = () => {
     const token = localStorage.getItem('token');
     if (!token) return;
-    fetch('http://localhost:3001/lists', {
+    fetch('${process.env.NEXT_PUBLIC_API_URL}/lists', {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })
@@ -31,7 +31,7 @@ export default function MisListas() {
   const cargarListasConLike = () => {
     const token = localStorage.getItem('token');
     if (!token) return;
-    fetch('http://localhost:3001/lists/liked', {
+    fetch('${process.env.NEXT_PUBLIC_API_URL}/lists/liked', {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })
@@ -68,7 +68,7 @@ export default function MisListas() {
 
     setCreando(true);
     try {
-      await fetch('http://localhost:3001/lists', {
+      await fetch('${process.env.NEXT_PUBLIC_API_URL}/lists', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ nombre: nuevoNombre.trim() }),
@@ -91,7 +91,7 @@ export default function MisListas() {
     setBorrando(true);
 
     try {
-      const res = await fetch(`http://localhost:3001/lists/${id}`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/lists/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });

@@ -20,7 +20,7 @@ export default function PosterImage({
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
-    fetch(`http://localhost:3001/media/${mediaId}/status`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())

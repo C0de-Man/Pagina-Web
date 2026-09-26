@@ -37,7 +37,7 @@ export default function Watchlist() {
     if (!token) return;
     setLogueado(true);
 
-    fetch(`http://localhost:3001/media/watchlist?language=${getIdioma()}`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/watchlist?language=${getIdioma()}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })

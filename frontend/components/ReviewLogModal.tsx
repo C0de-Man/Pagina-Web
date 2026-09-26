@@ -34,7 +34,7 @@ export default function ReviewLogModal({
     try {
       if (logId) {
         // Editando un registro ya existente
-        const res = await fetch(`http://localhost:3001/watchlogs/${logId}`, {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/watchlogs/${logId}`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -45,7 +45,7 @@ export default function ReviewLogModal({
         if (!res.ok) throw new Error('fallo al actualizar el registro');
       } else {
         // Creando uno nuevo (comportamiento de siempre)
-        const res = await fetch(`http://localhost:3001/media/${mediaId}/watchlogs`, {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/watchlogs`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -61,7 +61,7 @@ export default function ReviewLogModal({
         // RatingWidget, sin necesitar que ambos estén en el mismo componente.
         // Esto solo tiene sentido al CREAR (si ya existía un log, ya estaba
         // marcada como vista de antes).
-        await fetch(`http://localhost:3001/media/${mediaId}/status`, {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -88,7 +88,7 @@ export default function ReviewLogModal({
 
     setBorrando(true);
     try {
-      const res = await fetch(`http://localhost:3001/watchlogs/${logId}`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/watchlogs/${logId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });

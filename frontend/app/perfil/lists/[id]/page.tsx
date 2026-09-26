@@ -6,7 +6,7 @@ import MovieCard from '@/components/MovieCard';
 import GameCard from '@/components/GameCard';
 import { getIdioma } from '@/lib/preferences';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = '${process.env.NEXT_PUBLIC_API_URL}';
 
 const OPCIONES_ORDEN = [
   { valor: 'MANUAL', label: 'User Order' },

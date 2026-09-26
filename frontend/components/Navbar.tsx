@@ -26,7 +26,7 @@ export default function Navbar() {
   const cargarContadorNoLeidas = () => {
     const token = localStorage.getItem('token');
     if (!token) return;
-    fetch('http://localhost:3001/notifications/unread-count', {
+    fetch('${process.env.NEXT_PUBLIC_API_URL}/notifications/unread-count', {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })
@@ -44,7 +44,7 @@ export default function Navbar() {
     setPanelNotisAbierto((v) => !v);
 
     if (!panelNotisAbierto) {
-      fetch('http://localhost:3001/notifications', {
+      fetch('${process.env.NEXT_PUBLIC_API_URL}/notifications', {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       })
@@ -57,7 +57,7 @@ export default function Navbar() {
       // que el numerito desaparezca.
       if (noLeidas > 0) {
         setNoLeidas(0);
-        fetch('http://localhost:3001/notifications/mark-read', {
+        fetch('${process.env.NEXT_PUBLIC_API_URL}/notifications/mark-read', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
         }).catch(() => { });
@@ -83,7 +83,7 @@ export default function Navbar() {
     setNotificaciones((prev) => prev.filter((n) => n.id !== notiId));
 
     try {
-      await fetch(`http://localhost:3001/notifications/${notiId}`, {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/notifications/${notiId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -104,7 +104,7 @@ export default function Navbar() {
     setNotificaciones((prev) => prev.filter((n) => n.id !== notiId));
 
     try {
-      await fetch(`http://localhost:3001/follow-requests/${actorId}/${accion}`, {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/follow-requests/${actorId}/${accion}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });

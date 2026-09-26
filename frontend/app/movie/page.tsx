@@ -10,15 +10,15 @@ export default async function PeliculasLobby() {
   const region = cookieStore.get('region')?.value || 'ES';
 
   // 1. Obtenemos las películas EXACTAS de este año, ordenadas por popularidad
-  const resYear = await fetch(`http://localhost:3001/tmdb/year/${currentYear}?language=${idioma}&region=${region}`, { cache: 'no-store' });
+  const resYear = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/year/${currentYear}?language=${idioma}&region=${region}`, { cache: 'no-store' });
   const yearMovies = await resYear.json();
 
   // 2. Obtenemos las más populares de SIEMPRE (no solo la tendencia actual)
-  const resPop = await fetch(`http://localhost:3001/tmdb/popular-historico?language=${idioma}&region=${region}`, { cache: 'no-store' });
+  const resPop = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/popular-historico?language=${idioma}&region=${region}`, { cache: 'no-store' });
   const popular = await resPop.json();
 
   // 3. Obtenemos TU base de datos
-  const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
+  const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' });
   const myDb = await resDb.json();
 
   // Esta petición a /media no lleva token (es una página de servidor, no

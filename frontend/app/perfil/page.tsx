@@ -46,7 +46,7 @@ useEffect(() => {
     if (token) {
       setLogueado(true);
 
-      fetch('http://localhost:3001/auth/me', {
+      fetch('${process.env.NEXT_PUBLIC_API_URL}/auth/me', {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then((res) => res.json())
@@ -56,7 +56,7 @@ useEffect(() => {
         })
         .catch(() => { });
 
-      fetch('http://localhost:3001/favorites', {
+      fetch('${process.env.NEXT_PUBLIC_API_URL}/favorites', {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       })
@@ -64,7 +64,7 @@ useEffect(() => {
         .then(setFavoritos)
         .catch(() => { });
 
-      fetch(`http://localhost:3001/media/watched?language=${getIdioma()}`, {
+      fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/watched?language=${getIdioma()}`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       })
@@ -73,7 +73,7 @@ useEffect(() => {
         .catch(() => { })
         .finally(() => setCargandoVistas(false)); // <-- Aquí avisamos que ya terminó
 
-      fetch(`http://localhost:3001/media/playing?language=${getIdioma()}`, {
+      fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/playing?language=${getIdioma()}`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       })

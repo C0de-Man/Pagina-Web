@@ -23,7 +23,7 @@ export default function MisPeliculas() {
     if (!token) return;
     setLogueado(true);
 
-    fetch(withLangRegion('http://localhost:3001/media/watched'), {
+    fetch(withLangRegion('${process.env.NEXT_PUBLIC_API_URL}/media/watched'), {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })

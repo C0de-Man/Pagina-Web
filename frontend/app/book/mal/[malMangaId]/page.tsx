@@ -4,7 +4,7 @@ import { urlFicha } from '@/lib/slug';
 export default async function BookMalResolver({ params }: { params: Promise<{ malMangaId: string }> }) {
   const { malMangaId } = await params;
 
-  const res = await fetch('http://localhost:3001/media/mal-manga', {
+  const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/mal-manga', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ malMangaId }),

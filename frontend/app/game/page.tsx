@@ -4,13 +4,13 @@ import FriendsActivityOnMedia from '@/components/FriendsActivityOnMedia';
 export default async function JuegosLobby() {
   const currentYear = new Date().getFullYear();
 
-  const resYear = await fetch(`http://localhost:3001/igdb/year/${currentYear}`, { cache: 'no-store' });
+  const resYear = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/year/${currentYear}`, { cache: 'no-store' });
   const yearGames = await resYear.json();
 
-  const resPop = await fetch(`http://localhost:3001/igdb/popular`, { cache: 'no-store' });
+  const resPop = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/popular`, { cache: 'no-store' });
   const popular = await resPop.json();
 
-  const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
+  const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' });
   const myDb = await resDb.json();
 
   // /media es una petición de servidor, sin token, así que su "portada" es

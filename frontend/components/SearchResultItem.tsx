@@ -15,7 +15,7 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
     if (!dbId) return;
     const token = localStorage.getItem('token');
     if (!token) return;
-    fetch(`http://localhost:3001/media/${dbId}/status`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${dbId}/status`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())
@@ -51,7 +51,7 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
 
     try {
       if (esJuego) {
-        const res = await fetch('http://localhost:3001/media/igdb', {
+        const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/igdb', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ igdbId: item.id })
@@ -60,7 +60,7 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
         router.push(urlFicha(nuevoJuego));
       } else {
         const tipo = item.media_type === 'tv' ? 'SERIE' : 'PELICULA';
-        const res = await fetch('http://localhost:3001/media/tmdb', {
+        const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/tmdb', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tmdbId: item.id, tipo })

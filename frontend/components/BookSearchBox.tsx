@@ -49,8 +49,8 @@ export default function BookSearchBox({
     setBuscadoYa(true);
     try {
       const [resLibros, resDb] = await Promise.all([
-        fetch(`http://localhost:3001/libros/buscar?q=${encodeURIComponent(query)}`, { cache: 'no-store' }),
-        fetch('http://localhost:3001/media', { cache: 'no-store' }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/libros/buscar?q=${encodeURIComponent(query)}`, { cache: 'no-store' }),
+        fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' }),
       ]);
       const libros = await resLibros.json();
       const db = await resDb.json();

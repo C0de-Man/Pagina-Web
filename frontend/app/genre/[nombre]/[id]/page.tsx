@@ -22,8 +22,8 @@ export default async function GenrePage({
   }
 
   const [res, resDb] = await Promise.all([
-    fetch(`http://localhost:3001/igdb/genre/${genreId}?page=${currentPage}`, { cache: 'no-store' }),
-    fetch('http://localhost:3001/media', { cache: 'no-store' }),
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/genre/${genreId}?page=${currentPage}`, { cache: 'no-store' }),
+    fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' }),
   ]);
 
   if (!res.ok) {

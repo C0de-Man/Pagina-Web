@@ -17,8 +17,8 @@ export default function GameSearchBox() {
     setBuscadoYa(true);
     try {
       const [resJuegos, resDb] = await Promise.all([
-        fetch(`http://localhost:3001/igdb/search?q=${encodeURIComponent(query)}`),
-        fetch('http://localhost:3001/media'),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/search?q=${encodeURIComponent(query)}`),
+        fetch('${process.env.NEXT_PUBLIC_API_URL}/media'),
       ]);
       const juegos = await resJuegos.json();
       const db = await resDb.json();

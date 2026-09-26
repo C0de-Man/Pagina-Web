@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = '${process.env.NEXT_PUBLIC_API_URL}';
 
 const OPCIONES_PROPIEDAD = ['Physical', 'Digital', 'Subscription', 'Borrowed', 'Rented', 'Free to Play'];
 

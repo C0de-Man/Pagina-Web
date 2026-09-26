@@ -12,7 +12,7 @@ export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) 
   const [hayImagenes, setHayImagenes] = useState<boolean | null>(null);
 
   const obtenerImagenes = async (): Promise<{ imgs: string[]; fuenteDetectada: 'googlebooks' | 'mal' | 'comicvine' | 'mangadex' }> => {
-    const resMedia = await fetch(`http://localhost:3001/media/${mediaId}`);
+    const resMedia = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}`);
     const media = await resMedia.json();
 
     if (media.mangaDexId) {
@@ -20,19 +20,19 @@ export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) 
       // comunidad que MAL — se prioriza siempre que el manga tenga
       // mangaDexId, aunque también tenga malMangaId (que sigue siendo la
       // fuente de nota/estado/capítulos, solo no de imágenes).
-      const res = await fetch(`http://localhost:3001/media/${mediaId}/mangadex-images`);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/mangadex-images`);
       const data = await res.json();
       return { imgs: Array.isArray(data) ? data : [], fuenteDetectada: 'mangadex' };
     } else if (media.malMangaId) {
-      const res = await fetch(`http://localhost:3001/mal/manga/${media.malMangaId}/images`);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/mal/manga/${media.malMangaId}/images`);
       const data = await res.json();
       return { imgs: Array.isArray(data) ? data : [], fuenteDetectada: 'mal' };
     } else if (media.comicVineId) {
-      const res = await fetch(`http://localhost:3001/media/${mediaId}/comicvine-images`);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/comicvine-images`);
       const data = await res.json();
       return { imgs: Array.isArray(data) ? data : [], fuenteDetectada: 'comicvine' };
     } else {
-      const res = await fetch(`http://localhost:3001/googlebooks/editions/${mediaId}`);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/googlebooks/editions/${mediaId}`);
       const data = await res.json();
       return { imgs: Array.isArray(data) ? data.map((e: any) => e.portada) : [], fuenteDetectada: 'googlebooks' };
     }
@@ -101,7 +101,7 @@ export default function BookPosterButtonModal({ mediaId }: { mediaId: number }) 
       return;
     }
     try {
-      const res = await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/poster`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

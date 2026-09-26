@@ -40,7 +40,7 @@ export default function PersonFilmography({
       .filter(Boolean);
     if (dbIds.length === 0) return;
 
-    fetch(`http://localhost:3001/media/personalizaciones?ids=${dbIds.join(',')}`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/personalizaciones?ids=${dbIds.join(',')}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })

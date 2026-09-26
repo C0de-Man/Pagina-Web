@@ -83,7 +83,7 @@ export default function ImportarMalAnime() {
       }
 
       const token = localStorage.getItem('token');
-      const res = await fetch('http://localhost:3001/import/mal-anime', {
+      const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/import/mal-anime', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

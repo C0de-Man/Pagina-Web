@@ -4,7 +4,7 @@ import Link from 'next/link';
 import ReviewDetailModal from './ReviewDetailModal';
 import { withLangRegion } from '@/lib/preferences';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = '${process.env.NEXT_PUBLIC_API_URL}';
 const TOTAL_VISIBLE = 8;
 
 function Estrellas({ rating }: { rating: number | null }) {

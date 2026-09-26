@@ -96,7 +96,7 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
-    fetch(`http://localhost:3001/media/${mediaId}/status`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())
@@ -132,7 +132,7 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
     setter(nuevoValor); // actualización optimista
 
     try {
-      const res = await fetch(`http://localhost:3001/media/${mediaId}/status`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -180,7 +180,7 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
     }
 
     try {
-      const res = await fetch(`http://localhost:3001/media/${mediaId}/status`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -197,10 +197,10 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
       if (marcandoLibroComoRead) {
         try {
           const [mangaInfo, comicInfo, mangadexInfo, anilistInfo] = await Promise.all([
-            fetch(`http://localhost:3001/media/${mediaId}/manga-info`).then((r) => r.json()).catch(() => null),
-            fetch(`http://localhost:3001/media/${mediaId}/comic-info`).then((r) => r.json()).catch(() => null),
-            fetch(`http://localhost:3001/media/${mediaId}/mangadex-info`).then((r) => r.json()).catch(() => null),
-            fetch(`http://localhost:3001/media/${mediaId}/anilist-info`).then((r) => r.json()).catch(() => null),
+            fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/manga-info`).then((r) => r.json()).catch(() => null),
+            fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/comic-info`).then((r) => r.json()).catch(() => null),
+            fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/mangadex-info`).then((r) => r.json()).catch(() => null),
+            fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/anilist-info`).then((r) => r.json()).catch(() => null),
           ]);
 
           const totalCapitulos = mangaInfo?.totalCapitulos ?? comicInfo?.totalIssues ?? mangadexInfo?.totalCapitulos ?? anilistInfo?.totalCapitulos ?? null;
@@ -217,7 +217,7 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
               progressBody.progresoVolumenTotal = totalVolumenes;
             }
 
-            await fetch(`http://localhost:3001/media/${mediaId}/progress`, {
+            await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/progress`, {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',

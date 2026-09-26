@@ -25,7 +25,7 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
   const idioma = cookieStore.get('idioma')?.value || 'es-ES';
   const region = cookieStore.get('region')?.value || 'ES';
 
-  const res = await fetch(`http://localhost:3001/media/${id}?language=${idioma}&region=${region}`, { cache: 'no-store' });
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${id}?language=${idioma}&region=${region}`, { cache: 'no-store' });
   const media = await res.json();
 
   if (!media || media.error) {
@@ -42,19 +42,19 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
   // Info extra de manga (vía MAL): volúmenes/capítulos totales, estado de
   // publicación y fechas completas. Solo existe si el libro se guardó desde
   // MAL (malMangaId); para libros de Google Books/Comic Vine queda todo en null.
-  const resMangaInfo = await fetch(`http://localhost:3001/media/${media.id}/manga-info`, { cache: 'no-store' });
+  const resMangaInfo = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${media.id}/manga-info`, { cache: 'no-store' });
   const mangaInfo = await resMangaInfo.json();
 
   // Info extra de cómic (vía Comic Vine): editorial, total de issues y
   // rango de fechas de publicación. Solo existe si el libro se guardó desde
   // Comic Vine (comicVineId).
-  const resComicInfo = await fetch(`http://localhost:3001/media/${media.id}/comic-info`, { cache: 'no-store' });
+  const resComicInfo = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${media.id}/comic-info`, { cache: 'no-store' });
   const comicInfo = await resComicInfo.json();
 
   // Info extra de manga vía AniList: solo existe si el libro se guardó
   // desde AniList (anilistId) — respaldo final cuando ni MAL ni MangaDex
   // encontraron el manga (ver /libros/buscar).
-  const resAniListInfo = await fetch(`http://localhost:3001/media/${media.id}/anilist-info`, { cache: 'no-store' });
+  const resAniListInfo = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${media.id}/anilist-info`, { cache: 'no-store' });
   const anilistInfo = await resAniListInfo.json();
 
   // Info extra de manga vía MangaDex: solo existe si el libro se guardó
@@ -64,7 +64,7 @@ export default async function BookDetail({ params }: { params: Promise<{ slug: s
   let mangaDexInfo: any = null;
   if (media.mangaDexId) {
     try {
-      const resMangaDexInfo = await fetch(`http://localhost:3001/mangadex/details/${media.mangaDexId}`, { cache: 'no-store' });
+      const resMangaDexInfo = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/mangadex/details/${media.mangaDexId}`, { cache: 'no-store' });
       mangaDexInfo = await resMangaDexInfo.json();
     } catch (e) {
       mangaDexInfo = null;

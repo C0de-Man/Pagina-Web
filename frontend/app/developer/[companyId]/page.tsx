@@ -7,7 +7,7 @@ export default async function DeveloperPage({
 }) {
   const { companyId } = await params;
 
-  const res = await fetch(`http://localhost:3001/igdb/company/${companyId}`, { cache: 'no-store' });
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/company/${companyId}`, { cache: 'no-store' });
 
   if (!res.ok) {
     return (

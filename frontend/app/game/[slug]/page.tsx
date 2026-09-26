@@ -37,12 +37,12 @@ export default async function GameDetail({ params }: { params: Promise<{ slug: s
   const cookieStore = await cookies();
   const idioma = cookieStore.get('idioma')?.value || 'es-ES';
 
-  const res = await fetch(`http://localhost:3001/media/${id}?language=${idioma}`, { cache: 'no-store' });
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${id}?language=${idioma}`, { cache: 'no-store' });
   const media = await res.json();
 
   let detalles: any = null;
   if (media.igdbId) {
-    const resDetalles = await fetch(`http://localhost:3001/igdb/details/${media.igdbId}`, { cache: 'no-store' });
+    const resDetalles = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/details/${media.igdbId}`, { cache: 'no-store' });
     detalles = await resDetalles.json();
   }
 

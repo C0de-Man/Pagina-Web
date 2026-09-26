@@ -18,7 +18,7 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
   const resolvedParams = await params;
   const id = resolvedParams.id;
 
-  const res = await fetch(`http://localhost:3001/media/${id}`, { cache: 'no-store' });
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${id}`, { cache: 'no-store' });
   const media = await res.json();
 
   if (!media || media.error) {
@@ -27,7 +27,7 @@ export default async function MediaDetail({ params }: { params: Promise<{ id: st
 
   let detalles: any = null;
   if (media.tmdbId) {
-    const resDetalles = await fetch(`http://localhost:3001/tmdb/details/${media.tmdbId}`, { cache: 'no-store' });
+    const resDetalles = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/details/${media.tmdbId}`, { cache: 'no-store' });
     detalles = await resDetalles.json();
   }
 

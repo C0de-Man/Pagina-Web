@@ -17,10 +17,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   // 1. Buscamos en la API de TMDB (películas/series), IGDB (juegos) y la
   // combinada de libros/manga/cómics (/libros/buscar) a la vez
   const [resTmdb, resIgdb, resLibros, resDb] = await Promise.all([
-    fetch(`http://localhost:3001/tmdb/buscar?q=${query}`, { cache: 'no-store' }),
-    fetch(`http://localhost:3001/igdb/search?q=${query}`, { cache: 'no-store' }),
-    fetch(`http://localhost:3001/libros/buscar?q=${query}`, { cache: 'no-store' }),
-    fetch('http://localhost:3001/media', { cache: 'no-store' }),
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/buscar?q=${query}`, { cache: 'no-store' }),
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/search?q=${query}`, { cache: 'no-store' }),
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/libros/buscar?q=${query}`, { cache: 'no-store' }),
+    fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' }),
   ]);
 
   const resultsTmdb = await resTmdb.json();

@@ -8,7 +8,7 @@ export default function WatchProviders({ tmdbId, tipo }: { tmdbId: number; tipo?
   useEffect(() => {
     if (!tmdbId) return;
     const tipoParam = tipo ? `&tipo=${tipo}` : '';
-    fetch(`http://localhost:3001/tmdb/watch-providers/${tmdbId}?region=${getRegion()}${tipoParam}`).then((res) => res.json())
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/watch-providers/${tmdbId}?region=${getRegion()}${tipoParam}`).then((res) => res.json())
       .then(setData)
       .catch(() => { });
   }, [tmdbId, tipo]);

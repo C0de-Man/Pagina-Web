@@ -54,7 +54,7 @@ export default function Settings() {
     const token = localStorage.getItem('token');
     if (!token) return;
 
-    fetch('http://localhost:3001/auth/me', {
+    fetch('${process.env.NEXT_PUBLIC_API_URL}/auth/me', {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })
@@ -68,7 +68,7 @@ export default function Settings() {
       })
       .catch(() => { });
 
-    fetch('http://localhost:3001/favorites', {
+    fetch('${process.env.NEXT_PUBLIC_API_URL}/favorites', {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })
@@ -110,7 +110,7 @@ export default function Settings() {
       // El username solo se manda si de verdad ha cambiado — así no
       // disparamos el error de "ya en uso" contra tu propio nombre actual.
       if (usernameInput.trim() && usernameInput.trim() !== username) {
-        const resUsername = await fetch('http://localhost:3001/auth/me/username', {
+        const resUsername = await fetch('${process.env.NEXT_PUBLIC_API_URL}/auth/me/username', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ username: usernameInput.trim() }),
@@ -125,7 +125,7 @@ export default function Settings() {
       }
 
       if (avatarPreview) {
-        await fetch('http://localhost:3001/auth/me/avatar', {
+        await fetch('${process.env.NEXT_PUBLIC_API_URL}/auth/me/avatar', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ avatar: avatarPreview }),
@@ -133,7 +133,7 @@ export default function Settings() {
       }
 
       const mediaIds = favoritos.filter(Boolean).map((f) => f.id);
-      await fetch('http://localhost:3001/favorites', {
+      await fetch('${process.env.NEXT_PUBLIC_API_URL}/favorites', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ mediaIds }),
@@ -172,7 +172,7 @@ export default function Settings() {
 
     setGuardandoCredenciales(true);
     try {
-      const res = await fetch('http://localhost:3001/auth/me/credentials', {
+      const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/auth/me/credentials', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -204,7 +204,7 @@ export default function Settings() {
 
   setExportando(true);
   try {
-    const res = await fetch('http://localhost:3001/export', {
+    const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/export', {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new Error('export failed');
@@ -234,7 +234,7 @@ export default function Settings() {
     setReseteando(true);
     setResultadoReset(null);
     try {
-      const res = await fetch('http://localhost:3001/auth/me/reset-custom-posters', {
+      const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/auth/me/reset-custom-posters', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -259,7 +259,7 @@ export default function Settings() {
     setIsPrivate(nuevoValor); // optimista
 
     try {
-      const res = await fetch('http://localhost:3001/auth/me/privacy', {
+      const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/auth/me/privacy', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ isPrivate: nuevoValor }),
@@ -283,7 +283,7 @@ export default function Settings() {
     setReseteandoCuenta(true);
     setErrorResetCuenta(null);
     try {
-      const res = await fetch('http://localhost:3001/auth/me/reset-account', {
+      const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/auth/me/reset-account', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -314,7 +314,7 @@ export default function Settings() {
     setBorrandoCuenta(true);
     setErrorBorrado(null);
     try {
-      const res = await fetch('http://localhost:3001/auth/me', {
+      const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/auth/me', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ username: usernameConfirmacion }),
@@ -671,7 +671,7 @@ export default function Settings() {
                   if (!token) return;
                   setLimpiandoSagas(true);
                   try {
-                    const res = await fetch('http://localhost:3001/admin/curated-collections/limpiar-sin-igdb-collection', {
+                    const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/admin/curated-collections/limpiar-sin-igdb-collection', {
                       method: 'POST',
                       headers: { Authorization: `Bearer ${token}` },
                     });
@@ -705,7 +705,7 @@ export default function Settings() {
                   if (!token) return;
                   setBorrandoTodasSagas(true);
                   try {
-                    const res = await fetch('http://localhost:3001/admin/movie-collections/delete-all', {
+                    const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/admin/movie-collections/delete-all', {
                       method: 'POST',
                       headers: { Authorization: `Bearer ${token}` },
                     });

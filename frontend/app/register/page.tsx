@@ -12,7 +12,7 @@ export default function Register() {
   const router = useRouter();
 
   // Esta línea es la magia: usará la URL de internet si existe, o localhost si estás en tu PC
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || '${process.env.NEXT_PUBLIC_API_URL}';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -24,8 +24,8 @@ export default function FavoritePickerModal({
       // que hace la página /search — antes esto solo miraba TMDB, así que
       // buscar un juego (p. ej. "Red Dead Redemption 2") no encontraba nada.
       Promise.all([
-        fetch(withLangRegion(`http://localhost:3001/tmdb/buscar?q=${encodeURIComponent(query)}`)).then((r) => r.json()).catch(() => []),
-        fetch(`http://localhost:3001/igdb/search?q=${encodeURIComponent(query)}`).then((r) => r.json()).catch(() => []),
+        fetch(withLangRegion(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/buscar?q=${encodeURIComponent(query)}`)).then((r) => r.json()).catch(() => []),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/search?q=${encodeURIComponent(query)}`).then((r) => r.json()).catch(() => []),
       ])
         .then(([tmdbData, igdbData]) => {
           // /tmdb/buscar usa TMDB search/multi: además de películas y series
@@ -48,7 +48,7 @@ export default function FavoritePickerModal({
 
   const elegir = async (item: any) => {
     try {
-      const resDb = await fetch('http://localhost:3001/media');
+      const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media');
       const myDb = await resDb.json();
 
       if (item.media_type === 'juego') {
@@ -56,7 +56,7 @@ export default function FavoritePickerModal({
         if (local) {
           onSelect(local);
         } else {
-          const res = await fetch('http://localhost:3001/media/igdb', {
+          const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/igdb', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ igdbId: item.id }),
@@ -71,7 +71,7 @@ export default function FavoritePickerModal({
       if (local) {
         onSelect(local);
       } else {
-        const res = await fetch('http://localhost:3001/media/tmdb', {
+        const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/tmdb', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tmdbId: item.id, tipo: item.media_type === 'tv' ? 'SERIE' : 'PELICULA' }),

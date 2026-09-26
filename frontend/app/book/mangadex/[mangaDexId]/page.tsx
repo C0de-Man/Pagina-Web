@@ -4,7 +4,7 @@ import { urlFicha } from '@/lib/slug';
 export default async function BookMangaDexResolver({ params }: { params: Promise<{ mangaDexId: string }> }) {
   const { mangaDexId } = await params;
 
-  const res = await fetch('http://localhost:3001/media/mangadex', {
+  const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/mangadex', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mangaDexId }),

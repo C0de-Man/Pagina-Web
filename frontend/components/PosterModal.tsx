@@ -9,7 +9,7 @@ export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number;
     const loadPosters = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`http://localhost:3001/tmdb/images/${tmdbId}`);
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/images/${tmdbId}`);
             const data = await res.json();
             setPosters(data.slice(0, 12));
         } catch (error) {
@@ -20,7 +20,7 @@ export default function PosterButtonModal({ tmdbId, mediaId }: { tmdbId: number;
 
     const selectPoster = async (path: string) => {
         const newUrl = `https://image.tmdb.org/t/p/w780${path}`;
-        await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/poster`, {
             method: 'PATCH',
             headers: { 'Type': 'Client', 'Content-Type': 'application/json' },
             body: JSON.stringify({ newPosterUrl: newUrl })

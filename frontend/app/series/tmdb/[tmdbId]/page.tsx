@@ -4,7 +4,7 @@ import { urlFicha } from '@/lib/slug';
 export default async function ResolverSerieTmdb({ params }: { params: Promise<{ tmdbId: string }> }) {
   const { tmdbId } = await params;
 
-  const res = await fetch('http://localhost:3001/media/tmdb', {
+  const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/tmdb', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tmdbId: parseInt(tmdbId, 10), tipo: 'SERIE' }),

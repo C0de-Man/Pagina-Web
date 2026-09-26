@@ -28,7 +28,7 @@ export default async function StudioPage({
   const region = cookieStore.get('region')?.value || 'ES';
 
   const res = await fetch(
-    `http://localhost:3001/tmdb/company/${companyId}?language=${idioma}&region=${region}&page=${currentPage}`,
+    `${process.env.NEXT_PUBLIC_API_URL}/tmdb/company/${companyId}?language=${idioma}&region=${region}&page=${currentPage}`,
     { cache: 'no-store' }
   );
 
@@ -48,7 +48,7 @@ export default async function StudioPage({
   // cualquier enlace interno siempre usan el slug correcto.
   const slugCanonico = urlEstudio(data.id, data.nombre);
 
-  const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
+  const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' });
   const myDb = await resDb.json();
   const getLocalData = (tmdbId: number, esSerie: boolean) => {
     const local = myDb.find((m: any) => m.tmdbId === tmdbId && m.tipo === (esSerie ? 'SERIE' : 'PELICULA'));

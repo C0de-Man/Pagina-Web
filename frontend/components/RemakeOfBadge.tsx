@@ -18,7 +18,7 @@ export default function RemakeOfBadge({
     setLoading(true);
     try {
       // Comprobamos si esa película original ya existe en tu base de datos
-      const resDb = await fetch('http://localhost:3001/media');
+      const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media');
       const myDb = await resDb.json();
       const local = myDb.find((m: any) => m.tmdbId === remakeOf.tmdbId);
 
@@ -26,7 +26,7 @@ export default function RemakeOfBadge({
         router.push(urlFicha(local));
       } else {
         // Si no existe, la creamos automáticamente a partir de TMDB
-        const res = await fetch('http://localhost:3001/media/tmdb', {
+        const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/tmdb', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tmdbId: remakeOf.tmdbId, tipo: 'PELICULA' }),

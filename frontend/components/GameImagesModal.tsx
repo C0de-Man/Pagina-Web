@@ -22,7 +22,7 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
             // defecto: si no hay nada guardado (null) o vale "true", se
             // oculta; solo se manda "false" si el usuario lo desactivó a mano.
             const ocultarNsfw = localStorage.getItem('ocultarNsfw') !== 'false';
-            const res = await fetch(`http://localhost:3001/steamgriddb/images/${mediaId}?ocultarNsfw=${ocultarNsfw}`);
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/steamgriddb/images/${mediaId}?ocultarNsfw=${ocultarNsfw}`);
             const data = await res.json();
             setCovers(data.covers || []);
             setHeroes(data.heroes || []);
@@ -55,7 +55,7 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
             return;
         }
         try {
-            const res = await fetch(`http://localhost:3001/media/${mediaId}/backdrop`, {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/backdrop`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
@@ -83,7 +83,7 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
             // descarga y las devuelve en base64 sin ese problema.
             setCargandoParaRecortar(true);
             try {
-                const res = await fetch(`http://localhost:3001/proxy-imagen?url=${encodeURIComponent(url)}`);
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/proxy-imagen?url=${encodeURIComponent(url)}`);
                 const data = await res.json();
                 if (!res.ok || !data.dataUrl) throw new Error(data.error || 'Error al descargar la imagen');
                 setImagenParaRecortar(data.dataUrl);
@@ -99,7 +99,7 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
             alert('Tienes que iniciar sesión para guardar tu carátula.');
             return;
         }
-        await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/poster`, {
             method: 'PATCH',
             headers: {
                 'Content-Type': 'application/json',
@@ -117,7 +117,7 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
             return;
         }
         try {
-            const res = await fetch(`http://localhost:3001/media/${mediaId}/backdrop`, {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/backdrop`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',

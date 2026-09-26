@@ -34,7 +34,7 @@ export default function ContinueWatchingSection() {
       setCargando(false);
       return;
     }
-    return fetch(withLangRegion('http://localhost:3001/media/continue-watching'), {
+    return fetch(withLangRegion('${process.env.NEXT_PUBLIC_API_URL}/media/continue-watching'), {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
@@ -59,7 +59,7 @@ export default function ContinueWatchingSection() {
     setMarcandoId(serie.id);
     try {
       await fetch(
-        `http://localhost:3001/media/${serie.id}/seasons/${serie.proximoEpisodio.temporada}/episodes/${serie.proximoEpisodio.episodio}`,
+        `${process.env.NEXT_PUBLIC_API_URL}/media/${serie.id}/seasons/${serie.proximoEpisodio.temporada}/episodes/${serie.proximoEpisodio.episodio}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

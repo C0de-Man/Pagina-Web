@@ -45,7 +45,7 @@ export default async function MediaDetail({ params }: { params: Promise<{ slug: 
   const idioma = cookieStore.get('idioma')?.value || 'es-ES';
   const region = cookieStore.get('region')?.value || 'ES';
 
-  const res = await fetch(`http://localhost:3001/media/${id}?language=${idioma}&region=${region}`, { cache: 'no-store' });
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${id}?language=${idioma}&region=${region}`, { cache: 'no-store' });
   const media = await res.json();
 
   if (!media || media.error) {
@@ -61,7 +61,7 @@ export default async function MediaDetail({ params }: { params: Promise<{ slug: 
 
   let detalles: any = null;
   if (media.tmdbId) {
-    const resDetalles = await fetch(`http://localhost:3001/tmdb/details/${media.tmdbId}?language=${idioma}`, { cache: 'no-store' });
+    const resDetalles = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/details/${media.tmdbId}?language=${idioma}`, { cache: 'no-store' });
     detalles = await resDetalles.json();
   }
 

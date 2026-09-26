@@ -4,7 +4,7 @@ import { urlFicha } from '@/lib/slug';
 export default async function BookComicVineResolver({ params }: { params: Promise<{ comicVineId: string }> }) {
   const { comicVineId } = await params;
 
-  const res = await fetch('http://localhost:3001/media/comicvine', {
+  const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/comicvine', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ comicVineId }),

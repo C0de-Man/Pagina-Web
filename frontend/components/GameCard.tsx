@@ -10,7 +10,7 @@ export default function GameCard({ juego, dbId, customPoster, fullWidth }: { jue
     if (customPoster || !dbId) return;
     const token = localStorage.getItem('token');
     if (!token) return;
-    fetch(`http://localhost:3001/media/${dbId}/status`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${dbId}/status`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())

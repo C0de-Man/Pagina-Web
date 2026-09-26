@@ -35,16 +35,16 @@ export default async function TodasLasSeries({ searchParams }: { searchParams: P
   const sufijoBackend = `?${filtrosBackend.toString()}`;
 
   const url = esTop
-    ? `http://localhost:3001/tmdb/tv/top/page/${currentPage}${sufijoBackend}`
+    ? `${process.env.NEXT_PUBLIC_API_URL}/tmdb/tv/top/page/${currentPage}${sufijoBackend}`
     : esPopulares
-      ? `http://localhost:3001/tmdb/tv/popular-historico/page/${currentPage}${sufijoBackend}`
-      : `http://localhost:3001/tmdb/tv/year/${anioFiltro}/page/${currentPage}${sufijoBackend}`;
+      ? `${process.env.NEXT_PUBLIC_API_URL}/tmdb/tv/popular-historico/page/${currentPage}${sufijoBackend}`
+      : `${process.env.NEXT_PUBLIC_API_URL}/tmdb/tv/year/${anioFiltro}/page/${currentPage}${sufijoBackend}`;
 
   const res = await fetch(url, { cache: 'no-store' });
   const data = await res.json();
   const series = data.results || [];
 
-  const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
+  const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' });
   const myDb = await resDb.json();
 
   const getLocalData = (tmdbId: number) => {

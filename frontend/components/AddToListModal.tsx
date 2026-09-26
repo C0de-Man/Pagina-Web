@@ -15,7 +15,7 @@ export default function AddToListModal({ mediaId }: { mediaId: number }) {
     const token = localStorage.getItem('token');
     if (!token) return;
     setLoading(true);
-    fetch(`http://localhost:3001/lists?mediaId=${mediaId}`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/lists?mediaId=${mediaId}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())
@@ -58,12 +58,12 @@ export default function AddToListModal({ mediaId }: { mediaId: number }) {
 
     try {
       if (list.contieneMedia) {
-        await fetch(`http://localhost:3001/lists/${list.id}/items/${mediaId}`, {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/lists/${list.id}/items/${mediaId}`, {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${token}` },
         });
       } else {
-        await fetch(`http://localhost:3001/lists/${list.id}/items`, {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/lists/${list.id}/items`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ mediaId }),
@@ -83,14 +83,14 @@ export default function AddToListModal({ mediaId }: { mediaId: number }) {
 
     setCreando(true);
     try {
-      const resNueva = await fetch('http://localhost:3001/lists', {
+      const resNueva = await fetch('${process.env.NEXT_PUBLIC_API_URL}/lists', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ nombre: nuevoNombre.trim() }),
       });
       const nueva = await resNueva.json();
 
-      await fetch(`http://localhost:3001/lists/${nueva.id}/items`, {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/lists/${nueva.id}/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ mediaId }),

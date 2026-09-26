@@ -31,7 +31,7 @@ export default async function ResolverPeliculaPorTmdb({
 
   const tipoFinal = tipo === 'SERIE' ? 'SERIE' : 'PELICULA';
 
-  const res = await fetch('http://localhost:3001/media/tmdb', {
+  const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/tmdb', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tmdbId: tmdbIdNum, tipo: tipoFinal }),

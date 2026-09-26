@@ -4,7 +4,7 @@ import { urlFicha } from '@/lib/slug';
 export default async function BookAniListResolver({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const res = await fetch('http://localhost:3001/media/anilist', {
+  const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/anilist', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ anilistId: id }),

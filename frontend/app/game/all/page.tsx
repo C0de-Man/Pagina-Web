@@ -60,7 +60,7 @@ export default async function TodosLosJuegos({
     // /igdb/top/page/:page no calcula un total real (mismo patrón simple que
     // las rutas equivalentes de movies/series) — se trata como "desconocido"
     // y la barra de paginación nunca deshabilita "Next", igual que en esas.
-    const res = await fetch(`http://localhost:3001/igdb/top/page/${currentPage}`, { cache: 'no-store' });
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/top/page/${currentPage}`, { cache: 'no-store' });
     const data = await res.json();
     juegos = data.results || [];
     totalPaginas = currentPage + 6; // ventana de paginación sin tope real conocido
@@ -72,14 +72,14 @@ export default async function TodosLosJuegos({
       paramsBackend.set('anio', String(currentYear));
     }
 
-    const res = await fetch(`http://localhost:3001/igdb/catalogo/page/${currentPage}?${paramsBackend.toString()}`, { cache: 'no-store' });
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/catalogo/page/${currentPage}?${paramsBackend.toString()}`, { cache: 'no-store' });
     const data = await res.json();
     juegos = data.results || [];
     totalPaginas = data.totalPaginas || 1;
   }
 
   // TU base de datos local
-  const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
+  const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' });
   const myDb = await resDb.json();
 
   // /media es una petición de servidor, sin token, así que su "portada" es
@@ -99,7 +99,7 @@ export default async function TodosLosJuegos({
   let generos: any[] = [];
   let plataformas: any[] = [];
   if (!esTop) {
-    const resFiltros = await fetch('http://localhost:3001/igdb/filtros', { cache: 'no-store' });
+    const resFiltros = await fetch('${process.env.NEXT_PUBLIC_API_URL}/igdb/filtros', { cache: 'no-store' });
     const data = await resFiltros.json();
     generos = data.generos || [];
     plataformas = data.plataformas || [];

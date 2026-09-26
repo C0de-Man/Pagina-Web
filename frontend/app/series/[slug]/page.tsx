@@ -35,7 +35,7 @@ export default async function SeriesDetail({ params }: { params: Promise<{ slug:
     const idioma = cookieStore.get('idioma')?.value || 'es-ES';
     const region = cookieStore.get('region')?.value || 'ES';
 
-    const res = await fetch(`http://localhost:3001/media/${id}?language=${idioma}&region=${region}`, { cache: 'no-store' });
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${id}?language=${idioma}&region=${region}`, { cache: 'no-store' });
     const media = await res.json();
 
     if (!media || media.error) {
@@ -58,7 +58,7 @@ export default async function SeriesDetail({ params }: { params: Promise<{ slug:
     // no son anime y esto simplemente no hace nada.
     if (!media.malId) {
         try {
-            await fetch(`http://localhost:3001/media/${media.id}/mal-match`, { cache: 'no-store' });
+            await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${media.id}/mal-match`, { cache: 'no-store' });
         } catch (e) {
             // si MAL falla o tarda, la ficha sigue funcionando igual sin esto
         }
@@ -67,7 +67,7 @@ export default async function SeriesDetail({ params }: { params: Promise<{ slug:
     let detalles: any = null;
     if (media.tmdbId) {
         const resDetalles = await fetch(
-            `http://localhost:3001/tmdb/details/${media.tmdbId}?language=${idioma}&tipo=SERIE`,
+            `${process.env.NEXT_PUBLIC_API_URL}/tmdb/details/${media.tmdbId}?language=${idioma}&tipo=SERIE`,
             { cache: 'no-store' }
         );
         detalles = await resDetalles.json();

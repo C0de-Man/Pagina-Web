@@ -3,10 +3,10 @@ import BookSearchBox from '@/components/BookSearchBox';
 export default async function BooksPage() {
   const currentYear = new Date().getFullYear();
 
-  const resYear = await fetch(`http://localhost:3001/libros/anio/${currentYear}`, { cache: 'no-store' });
+  const resYear = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/libros/anio/${currentYear}`, { cache: 'no-store' });
   const librosDelAño = await resYear.json();
 
-  const resDb = await fetch('http://localhost:3001/media', { cache: 'no-store' });
+  const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media', { cache: 'no-store' });
   const myDb = await resDb.json();
 
   // Igual que en Movies: aquí solo comprobamos si el título ya está

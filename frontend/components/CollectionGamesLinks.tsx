@@ -13,11 +13,11 @@ export default function CollectionGamesLinks({ igdbId }: { igdbId: number }) {
   useEffect(() => {
     if (!igdbId) return;
     const fetchData = async () => {
-      const resCol = await fetch(`http://localhost:3001/igdb/collection/${igdbId}`);
+      const resCol = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/igdb/collection/${igdbId}`);
       const colData = await resCol.json();
       setCollection(colData);
 
-      const resDb = await fetch('http://localhost:3001/media');
+      const resDb = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media');
       const dbData = await resDb.json();
       setMyDb(dbData);
     };
@@ -50,7 +50,7 @@ export default function CollectionGamesLinks({ igdbId }: { igdbId: number }) {
       router.push(urlFicha({ ...item, id: dbId }));
     } else {
       try {
-        const res = await fetch('http://localhost:3001/media/igdb', {
+        const res = await fetch('${process.env.NEXT_PUBLIC_API_URL}/media/igdb', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ igdbId: item.id })

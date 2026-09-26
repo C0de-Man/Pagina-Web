@@ -9,7 +9,7 @@ export default function RatingWidget({ mediaId }: { mediaId: number }) {
   const router = useRouter();
 
   const cargarMedia = () => {
-    fetch(`http://localhost:3001/media/${mediaId}/rating`)
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/rating`)
       .then((res) => res.json())
       .then(setMedia)
       .catch(() => {});
@@ -19,7 +19,7 @@ export default function RatingWidget({ mediaId }: { mediaId: number }) {
     cargarMedia();
     const token = localStorage.getItem('token');
     if (!token) return;
-    fetch(`http://localhost:3001/media/${mediaId}/status`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())
@@ -51,7 +51,7 @@ export default function RatingWidget({ mediaId }: { mediaId: number }) {
     setMiNota(valor ?? 0);
 
     try {
-      await fetch(`http://localhost:3001/media/${mediaId}/status`, {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

@@ -17,7 +17,7 @@ export default function PosterButtonModal({ tmdbId, mediaId, tipo }: { tmdbId: n
         const loadImages = async () => {
             try {
                 const tipoParam = tipo ? `?tipo=${tipo}` : '';
-                const res = await fetch(`http://localhost:3001/tmdb/images/${tmdbId}${tipoParam}`);
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/images/${tmdbId}${tipoParam}`);
                 const data = await res.json();
                 
                 const dedup = (arr: any[]) =>
@@ -44,7 +44,7 @@ export default function PosterButtonModal({ tmdbId, mediaId, tipo }: { tmdbId: n
             setCargandoParaRecortar(true);
             const urlOriginal = `https://image.tmdb.org/t/p/original${path}`;
             try {
-                const res = await fetch(`http://localhost:3001/proxy-imagen?url=${encodeURIComponent(urlOriginal)}`);
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/proxy-imagen?url=${encodeURIComponent(urlOriginal)}`);
                 const data = await res.json();
                 if (!res.ok || !data.dataUrl) throw new Error(data.error || 'Error al descargar la imagen');
                 setImagenParaRecortar(data.dataUrl);
@@ -62,7 +62,7 @@ export default function PosterButtonModal({ tmdbId, mediaId, tipo }: { tmdbId: n
             return;
         }
         try {
-            const res = await fetch(`http://localhost:3001/media/${mediaId}/poster`, {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/poster`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
@@ -88,7 +88,7 @@ export default function PosterButtonModal({ tmdbId, mediaId, tipo }: { tmdbId: n
             return;
         }
         try {
-            const res = await fetch(`http://localhost:3001/media/${mediaId}/backdrop`, {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/backdrop`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',

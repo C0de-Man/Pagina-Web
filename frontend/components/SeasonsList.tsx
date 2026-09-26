@@ -127,15 +127,15 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
     const token = localStorage.getItem('token');
 
     Promise.all([
-      fetch(`http://localhost:3001/tmdb/tv/${tmdbId}/seasons?language=${idioma}`, { cache: 'no-store' }).then((r) => r.json()),
+      fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/tv/${tmdbId}/seasons?language=${idioma}`, { cache: 'no-store' }).then((r) => r.json()),
       token
-        ? fetch(`http://localhost:3001/media/${mediaId}/seasons/status`, {
+        ? fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/seasons/status`, {
           headers: { Authorization: `Bearer ${token}` },
           cache: 'no-store',
         }).then((r) => r.json())
         : Promise.resolve([]),
       token
-        ? fetch(`http://localhost:3001/media/${mediaId}/status`, {
+        ? fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
           headers: { Authorization: `Bearer ${token}` },
           cache: 'no-store',
         }).then((r) => r.json())
@@ -168,7 +168,7 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
       },
     }));
     try {
-      await fetch(`http://localhost:3001/media/${mediaId}/seasons/${numero}`, {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/seasons/${numero}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(cambios),
@@ -184,7 +184,7 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
       [numeroEpisodio]: { episodeNumber: numeroEpisodio, watched: prev[numeroEpisodio]?.watched ?? false, rating: prev[numeroEpisodio]?.rating ?? null, ...cambios },
     }));
     try {
-      await fetch(`http://localhost:3001/media/${mediaId}/seasons/${numeroTemporada}/episodes/${numeroEpisodio}`, {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/seasons/${numeroTemporada}/episodes/${numeroEpisodio}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(cambios),
@@ -202,7 +202,7 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
     const token = localStorage.getItem('token');
     if (!token) return;
     try {
-      await fetch(`http://localhost:3001/media/${mediaId}/status`, {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ watched: true, playStatus: null }),
@@ -254,7 +254,7 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
     if (token) {
       await Promise.all(
         numerosAMarcar.map((n) =>
-          fetch(`http://localhost:3001/media/${mediaId}/seasons/${n}`, {
+          fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/seasons/${n}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({ watched: true }),
@@ -289,7 +289,7 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
       // pesada contra TMDB en el backend.
       await Promise.all(
         idsAMarcar.map((n) =>
-          fetch(`http://localhost:3001/media/${mediaId}/seasons/${numeroTemporada}/episodes/${n}`, {
+          fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/seasons/${numeroTemporada}/episodes/${n}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({ watched: true, omitirCascada: true }),
@@ -316,9 +316,9 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
     const token = localStorage.getItem('token');
     try {
       const [resEp, resEst] = await Promise.all([
-        fetch(`http://localhost:3001/tmdb/tv/${tmdbId}/season/${t.numero}?language=${idioma}`, { cache: 'no-store' }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/tv/${tmdbId}/season/${t.numero}?language=${idioma}`, { cache: 'no-store' }),
         token
-          ? fetch(`http://localhost:3001/media/${mediaId}/seasons/${t.numero}/episodes/status`, {
+          ? fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/seasons/${t.numero}/episodes/status`, {
             headers: { Authorization: `Bearer ${token}` },
             cache: 'no-store',
           })
@@ -348,7 +348,7 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
     setSelectorPosterAbierto(true);
     setCargandoPosters(true);
     try {
-      const res = await fetch(`http://localhost:3001/tmdb/tv/${tmdbId}/season/${temporadaAbierta.numero}/images`, { cache: 'no-store' });
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/tv/${tmdbId}/season/${temporadaAbierta.numero}/images`, { cache: 'no-store' });
       const data = await res.json();
       setPostersAlternativos(Array.isArray(data) ? data : []);
     } catch {
@@ -397,7 +397,7 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
     const token = localStorage.getItem('token');
     if (!token) return;
     try {
-      await fetch(`http://localhost:3001/media/${mediaId}/status`, {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ rating: notaSugerida }),
@@ -476,7 +476,7 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
 
                   if (token) {
                     try {
-                      const res = await fetch(`http://localhost:3001/media/${mediaId}/seasons/${t.numero}/mark-all`, {
+                      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/seasons/${t.numero}/mark-all`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                         body: JSON.stringify({ watched: nuevoEstado, totalEpisodios: t.episodios }),
@@ -521,7 +521,7 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
                     if (numerosAnteriores.length > 0 && token) {
                       await Promise.all(
                         numerosAnteriores.map((n) =>
-                          fetch(`http://localhost:3001/media/${mediaId}/seasons/${n}`, {
+                          fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/seasons/${n}`, {
                             method: 'PATCH',
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                             body: JSON.stringify({ watched: true }),
@@ -612,7 +612,7 @@ export default function SeasonsList({ mediaId, tmdbId, estadoSerie }: { mediaId:
                     let completa = true;
                     if (token) {
                       try {
-                        const res = await fetch(`http://localhost:3001/media/${mediaId}/seasons/${temporadaAbierta.numero}/mark-all`, {
+                        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/${mediaId}/seasons/${temporadaAbierta.numero}/mark-all`, {
                           method: 'PATCH',
                           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                           body: JSON.stringify({ watched: true, totalEpisodios: totalEpisodiosModal }),

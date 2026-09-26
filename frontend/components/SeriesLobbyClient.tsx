@@ -26,8 +26,8 @@ export default function SeriesLobbyClient({
     setBuscadoYa(true);
     try {
       const [resSeries, resDb] = await Promise.all([
-        fetch(`http://localhost:3001/tmdb/buscar?q=${encodeURIComponent(query)}`),
-        fetch('http://localhost:3001/media'),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/buscar?q=${encodeURIComponent(query)}`),
+        fetch('${process.env.NEXT_PUBLIC_API_URL}/media'),
       ]);
       const series = await resSeries.json();
       const db = await resDb.json();

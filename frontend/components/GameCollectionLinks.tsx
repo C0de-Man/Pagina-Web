@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = '${process.env.NEXT_PUBLIC_API_URL}';
 
 interface JuegoSaga {
     id: number; // id de la fila en CuratedCollectionItem — hace falta para poder borrarla

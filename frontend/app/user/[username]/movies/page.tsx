@@ -8,7 +8,7 @@ import SortDropdown from '@/components/SortDropdown';
 import { useSortPreference } from '@/hooks/useSortPreference';
 import { OPCIONES_ORDEN_WATCHED_DISPONIBLE, ordenarItems, type Selectores } from '@/lib/ordenamiento';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = '${process.env.NEXT_PUBLIC_API_URL}';
 
 const selectoresPeliculas: Selectores<any> = {
   nombre: (i) => i.titulo,

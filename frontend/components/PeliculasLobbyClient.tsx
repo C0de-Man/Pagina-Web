@@ -26,8 +26,8 @@ export default function PeliculasLobbyClient({
     setBuscadoYa(true);
     try {
       const [resPeliculas, resDb] = await Promise.all([
-        fetch(`http://localhost:3001/tmdb/buscar?q=${encodeURIComponent(query)}`),
-        fetch('http://localhost:3001/media'),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/tmdb/buscar?q=${encodeURIComponent(query)}`),
+        fetch('${process.env.NEXT_PUBLIC_API_URL}/media'),
       ]);
       const peliculas = await resPeliculas.json();
       const db = await resDb.json();

@@ -41,7 +41,7 @@ export default function MisSeries() {
     if (!token) return;
     setLogueado(true);
 
-    fetch(`http://localhost:3001/media/watched?language=${getIdioma()}`, {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/media/watched?language=${getIdioma()}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
     })
