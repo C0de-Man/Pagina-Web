@@ -187,9 +187,9 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
                                 <div className="text-center py-12 text-gray-400">{errorMsg || 'No hay imágenes disponibles en esta categoría.'}</div>
                             ) : tab === 'caratula' ? (
                                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-4">
-                                    {imagenes.map((url) => (
+                                    {imagenes.map((url, i) => (
                                         <img
-                                            key={url}
+                                            key={`${url}-${i}`}
                                             src={url}
                                             onClick={() => seleccionar(url)}
                                             className="cursor-pointer rounded-lg hover:scale-105 transition border-2 border-transparent hover:border-blue-500 object-cover aspect-[2/3] bg-gray-800"
@@ -200,9 +200,9 @@ export default function GameImagesModal({ mediaId }: { mediaId: number }) {
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    {imagenes.map((url) => (
+                                    {imagenes.map((url, i) => (
                                         <img
-                                            key={url}
+                                            key={`${url}-${i}`}
                                             src={url}
                                             onClick={() => seleccionar(url)}
                                             className="cursor-pointer rounded-lg hover:scale-105 transition border-2 border-transparent hover:border-blue-500 object-cover aspect-video bg-gray-800"

@@ -158,6 +158,13 @@ export default function GameCollectionLinks({
         return miPersonalizacion?.customPoster || local?.portada || juego.portada;
     }
 
+    // Nueva función para soportar carátulas personalizadas también en la pestaña "Franchise"
+    function getPortadaFranquicia(juego: JuegoFranquicia): string | null {
+        const local = myDb.find((m) => m.igdbId === juego.igdbId);
+        const miPersonalizacion = local ? personalizaciones[local.id] : undefined;
+        return miPersonalizacion?.customPoster || local?.portada || juego.portada;
+    }
+
     // Busca en IGDB mientras se escribe (con un pequeño debounce), igual que
     // el buscador principal de juegos de la app.
     useEffect(() => {
@@ -647,14 +654,15 @@ export default function GameCollectionLinks({
                             <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-5">
                                 {data.franquicia?.juegos.map((g) => {
                                     const esActual = g.igdbId === currentMediaIgdbId;
+                                    const portadaRealFranquicia = getPortadaFranquicia(g);
                                     return (
                                         <div key={g.igdbId} className="group relative">
                                             {esActual ? (
                                                 <span className="block w-full rounded text-left">
-                                                    {g.portada ? (
+                                                    {portadaRealFranquicia ? (
                                                         // eslint-disable-next-line @next/next/no-img-element
                                                         <img
-                                                            src={g.portada}
+                                                            src={portadaRealFranquicia}
                                                             alt={g.titulo}
                                                             className="w-full aspect-[2/3] object-cover rounded ring-2 ring-blue-500 transition"
                                                         />
@@ -668,10 +676,10 @@ export default function GameCollectionLinks({
                                                 </span>
                                             ) : (
                                                 <Link href={`/game/igdb/${g.igdbId}`} className="block w-full rounded text-left cursor-pointer">
-                                                    {g.portada ? (
+                                                    {portadaRealFranquicia ? (
                                                         // eslint-disable-next-line @next/next/no-img-element
                                                         <img
-                                                            src={g.portada}
+                                                            src={portadaRealFranquicia}
                                                             alt={g.titulo}
                                                             className="w-full aspect-[2/3] object-cover rounded transition group-hover:opacity-80 group-hover:scale-[1.02]"
                                                         />
