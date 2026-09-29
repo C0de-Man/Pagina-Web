@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 
 const API_URL = 'http://localhost:3001';
 
-const OPCIONES_PROPIEDAD = ['Physical', 'Digital', 'Subscription', 'Borrowed', 'Rented', 'Free to Play'];
+const OPCIONES_PROPIEDAD = ['Physical', 'Digital', 'Subscription', 'Borrowed', 'Rented', 'Free to Play', 'Emulated'];
 
 interface LogForm {
   id: number | null; // null = borrador todavía sin guardar en el backend
@@ -64,7 +64,7 @@ function SelectorConBusqueda({
     return () => document.removeEventListener('mousedown', alHacerClicFuera);
   }, []);
 
-  const filtradas = opciones.filter((o) => o.name.toLowerCase().includes(busqueda.toLowerCase()));
+  const filtradas = opciones.filter((o) => String(o?.name || '').toLowerCase().includes(String(busqueda || '').toLowerCase()));
 
   return (
     <div className="relative" ref={ref}>
@@ -96,18 +96,17 @@ function SelectorConBusqueda({
           >
             {placeholder}
           </button>
-          {filtradas.map((o) => (
+          {filtradas.map((o, index) => (
             <button
-              key={o.id}
+              key={`${o.id}-${index}`}
               type="button"
               onClick={() => {
                 onChange(o.name);
                 setAbierto(false);
                 setBusqueda('');
               }}
-              className={`w-full text-left px-3 py-2 text-sm transition cursor-pointer ${
-                o.name === valor ? 'bg-blue-600 text-white' : 'text-gray-200 hover:bg-gray-700 hover:text-white'
-              }`}
+              className={`w-full text-left px-3 py-2 text-sm transition cursor-pointer ${o.name === valor ? 'bg-blue-600 text-white' : 'text-gray-200 hover:bg-gray-700 hover:text-white'
+                }`}
             >
               {o.name}
             </button>
@@ -151,7 +150,7 @@ export default function GameLogModal({
     fetch(`${API_URL}/igdb/filtros`)
       .then((r) => r.json())
       .then((d) => setPlataformas(d.plataformas || []))
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // Plataformas REALES en las que salió este juego (mismo dato que la
@@ -162,10 +161,16 @@ export default function GameLogModal({
     fetch(`${API_URL}/igdb/details/${igdbId}`)
       .then((r) => r.json())
       .then((d) => {
-        const nombres: string[] = Array.isArray(d?.plataformas) ? d.plataformas : [];
-        setPlataformasDelJuego(nombres.map((n) => ({ id: n, name: n })));
+        const plataformasRaw = Array.isArray(d?.plataformas) ? d.plataformas : [];
+        setPlataformasDelJuego(
+          plataformasRaw.map((p: any, i: number) => {
+            if (typeof p === 'string') return { id: p, name: p };
+            if (p && typeof p === 'object') return { id: p.id || String(i), name: p.name || 'Unknown' };
+            return { id: String(i), name: String(p) };
+          })
+        );
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [igdbId]);
 
   useEffect(() => {
@@ -173,18 +178,16 @@ export default function GameLogModal({
     fetch(`${API_URL}/igdb/ediciones/${igdbId}`)
       .then((r) => r.json())
       .then((d) => setEdiciones(Array.isArray(d) ? d : []))
-      .catch(() => {});
+      .catch(() => { });
   }, [igdbId]);
 
   const edicionElegida = ediciones.find((e) => e.titulo === logActual?.edicion);
-  // Prioridad: plataformas de la edición elegida > plataformas reales del
-  // juego > lista completa de IGDB como último recurso (por si el juego no
-  // tuviera ninguna plataforma listada, para no dejar el select vacío).
+
+  // Si has elegido una versión, muestra las de esa versión.
+  // Si no has elegido nada, muestra la lista global con TODAS las plataformas.
   const plataformasFiltradas =
     edicionElegida && edicionElegida.plataformas.length > 0
       ? edicionElegida.plataformas
-      : plataformasDelJuego.length > 0
-      ? plataformasDelJuego
       : plataformas;
 
   const abrirModal = async () => {
@@ -280,7 +283,7 @@ export default function GameLogModal({
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ nombre: nuevoNombre }),
         });
-      } catch {}
+      } catch { }
     }
   };
 
@@ -293,7 +296,7 @@ export default function GameLogModal({
           method: 'DELETE',
           headers: { Authorization: `Bearer ${token}` },
         });
-      } catch {}
+      } catch { }
     }
 
     const restantes = logs.filter((_, i) => i !== activo);
@@ -394,9 +397,8 @@ export default function GameLogModal({
                       <button
                         key={i}
                         onClick={() => setActivo(i)}
-                        className={`px-3 py-1.5 rounded text-sm font-bold transition cursor-pointer ${
-                          activo === i ? 'bg-pink-600 text-white' : 'text-gray-400 hover:text-white'
-                        }`}
+                        className={`px-3 py-1.5 rounded text-sm font-bold transition cursor-pointer ${activo === i ? 'bg-pink-600 text-white' : 'text-gray-400 hover:text-white'
+                          }`}
                       >
                         {l.nombre}
                       </button>

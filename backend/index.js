@@ -7213,7 +7213,14 @@ app.get('/media/watched', requireAuth, async (req, res) => {
     });
 
     const mediaIds = entries.map(e => e.mediaId);
-    const mediaItems = await prisma.media.findMany({ where: { id: { in: mediaIds } } });
+    const mediaItems = await prisma.media.findMany({
+      where: { id: { in: mediaIds } },
+      include: {
+        gameLogs: {
+          where: { userId: req.userId }
+        }
+      }
+    });
 
     // Mismo motivo que en /friends/activity: Media.titulo se guardó en el
     // idioma que estuviera activo la primera vez que se añadió CADA título,

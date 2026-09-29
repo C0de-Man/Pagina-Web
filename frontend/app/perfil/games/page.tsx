@@ -11,8 +11,22 @@ const selectoresJuegos: Selectores<any> = {
   nombre: (i) => i.titulo,
   fechaLanzamiento: (i) => i.anio,
   miNota: (i) => i.rating,
+  // 👇 NUEVOS SELECTORES PARA JUEGOS
+  horasJugadas: (i) => {
+    if (!i.gameLogs || !Array.isArray(i.gameLogs)) return 0;
+    return i.gameLogs.reduce((total: number, log: any) => total + (log.minutosJugados || 0), 0);
+  },
+  fechaInicio: (i) => {
+    if (!i.gameLogs || !Array.isArray(i.gameLogs)) return 0;
+    const timestamps = i.gameLogs.map((log: any) => log.fechaInicio ? new Date(log.fechaInicio).getTime() : 0);
+    return Math.max(0, ...timestamps);
+  },
+  fechaFin: (i) => {
+    if (!i.gameLogs || !Array.isArray(i.gameLogs)) return 0;
+    const timestamps = i.gameLogs.map((log: any) => log.fechaFin ? new Date(log.fechaFin).getTime() : 0);
+    return Math.max(0, ...timestamps);
+  },
 };
-
 // Mismos valores/colores que el modal "Set your played status" de
 // ActionButtons.tsx. A diferencia de series, aquí NO hay un estado de
 // respaldo tipo "WATCHED" — un juego puntuado sin haber elegido nunca un
@@ -120,12 +134,48 @@ export default function MisJuegos() {
                   </div>
                 </Link>
 
-                {(item.rating > 0 || item.liked) && (
-                  <div className="flex items-center gap-1.5 px-0.5">
-                    {item.rating > 0 && <StarRating value={item.rating} readOnly size="sm" />}
-                    {item.liked && <span className="text-sm">❤️</span>}
-                  </div>
-                )}
+{(() => {
+                  const logs = Array.isArray(item.gameLogs) ? item.gameLogs : [];
+                  
+                  // 1. Si el orden es por fechas, mostramos la fecha en lugar de la nota
+                  if (orden.campo === 'fechaInicio' || orden.campo === 'fechaFin') {
+                    const esInicio = orden.campo === 'fechaInicio';
+                    const timestamps = logs.map((l: any) => {
+                      const f = esInicio ? l.fechaInicio : l.fechaFin;
+                      return f ? new Date(f).getTime() : 0;
+                    }).filter((t: number) => t > 0);
+                    
+                    if (timestamps.length > 0) {
+                      const fechaMostrada = new Date(Math.max(...timestamps)).toLocaleDateString();
+                      return (
+                        <div className="flex items-center px-0.5 text-xs text-gray-400 font-medium">
+                          {esInicio ? 'Started:' : 'Finished:'} {fechaMostrada}
+                        </div>
+                      );
+                    }
+                  }
+
+                  // 2. Comportamiento normal: estrellas, corazón y horas jugadas
+                  const totalMinutos = logs.reduce((acc: number, log: any) => acc + (log.minutosJugados || 0), 0);
+                  const horasJugadas = totalMinutos > 0 ? Math.floor(totalMinutos / 60) : 0;
+                  const mostrarInfo = item.rating > 0 || item.liked || horasJugadas > 0;
+
+                  if (!mostrarInfo) return null;
+
+                  return (
+                    <div className="flex items-center justify-between px-0.5">
+                      <div className="flex items-center gap-1.5">
+                        {item.rating > 0 && <StarRating value={item.rating} readOnly size="sm" />}
+                        {item.liked && <span className="text-sm">❤️</span>}
+                      </div>
+                      {horasJugadas > 0 && (
+                        <span className="text-xs text-gray-400 font-bold bg-[#2c3440] px-1.5 py-0.5 rounded">
+                          {horasJugadas}h
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             ))}
           </div>

@@ -204,9 +204,38 @@ export const OPCIONES_ORDEN_WATCHED_DISPONIBLE: OpcionOrden[] = OPCIONES_ORDEN_W
   ['nombre', 'fechaEstreno', 'miNota', 'aleatorio'].includes(o.campo)
 );
 
-export const OPCIONES_ORDEN_JUEGOS_DISPONIBLE: OpcionOrden[] = OPCIONES_ORDEN_JUEGOS.filter((o) =>
-  ['nombre', 'fechaLanzamiento', 'miNota', 'aleatorio'].includes(o.campo)
-);
+export const OPCIONES_ORDEN_JUEGOS_DISPONIBLE: OpcionOrden[] = [
+  ...OPCIONES_ORDEN_JUEGOS.filter((o) =>
+    ['nombre', 'fechaLanzamiento', 'miNota', 'aleatorio'].includes(o.campo)
+  ),
+  {
+    tipo: 'grupo',
+    campo: 'horasJugadas',
+    etiqueta: 'Playtime',
+    subopciones: [
+      { direccion: 'DESC', etiqueta: 'Most Hours Played' },
+      { direccion: 'ASC', etiqueta: 'Least Hours Played' },
+    ],
+  },
+  {
+    tipo: 'grupo',
+    campo: 'fechaInicio',
+    etiqueta: 'Log Dates',
+    subopciones: [
+      { direccion: 'DESC', etiqueta: 'Recently Started' },
+      { direccion: 'ASC', etiqueta: 'Oldest Started' },
+    ],
+  },
+  {
+    tipo: 'grupo',
+    campo: 'fechaFin',
+    etiqueta: 'Completion Dates',
+    subopciones: [
+      { direccion: 'DESC', etiqueta: 'Recently Finished' },
+      { direccion: 'ASC', etiqueta: 'Oldest Finished' },
+    ],
+  }
+];
 
 // Watchlist: GET /media/watchlist devuelve { id, titulo, anio, portada } sin
 // rating (todavía no lo has visto) y sin campo de fecha explícito, aunque el
