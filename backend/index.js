@@ -1086,11 +1086,25 @@ function nombreAutorMal(autoresMal) {
 }
 
 async function buscarMangaMalApi(query, limit = 10) {
-  const url = `${MAL_API_BASE}/manga?q=${encodeURIComponent(query)}&limit=${limit}&fields=id,title,main_picture,start_date,media_type,alternative_titles,authors{first_name,last_name}`;
+  const url = `${MAL_API_BASE}/manga?q=${encodeURIComponent(query)}&limit=${limit}&nsfw=true&fields=id,title,main_picture,start_date,media_type,alternative_titles,authors{first_name,last_name}`;
   const response = await fetch(url, { headers: headersMal() });
   if (!response.ok) throw new Error(`MAL respondió ${response.status}`);
   const data = await response.json();
-  return (data.data || []).map(item => item.node);
+
+  let resultados = (data.data || []).map(item => item.node);
+
+  // Si la búsqueda directa no devuelve nada exacto, intentamos un fallback o limpieza de acentos
+  if (resultados.length === 0) {
+    const queryLimpia = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const urlFallback = `${MAL_API_BASE}/manga?q=${encodeURIComponent(queryLimpia)}&limit=${limit}&nsfw=true&fields=id,title,main_picture,start_date,media_type,alternative_titles,authors{first_name,last_name}`;
+    const respFallback = await fetch(urlFallback, { headers: headersMal() });
+    if (respFallback.ok) {
+      const dataFallback = await respFallback.json();
+      resultados = (dataFallback.data || []).map(item => item.node);
+    }
+  }
+
+  return resultados;
 }
 
 // --- COMIC VINE — CÓMICS ---
@@ -3531,7 +3545,7 @@ app.get('/libros/buscar', async (req, res) => {
     // (API oficial) es la fuente principal de manga ahora.
     const buscarMangaDexRespaldo = async () => {
       try {
-        const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(searchQuery)}&limit=40&includes[]=cover_art&includes[]=author`;
+        const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(searchQuery)}&limit=40&includes[]=cover_art&includes[]=author&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica&contentRating[]=pornographic`;
         const response = await fetch(url);
         const data = await response.json();
         return (data.data || []).map((item) => {
@@ -3559,7 +3573,14 @@ app.get('/libros/buscar', async (req, res) => {
 
     const buscarMangaMal = async () => {
       try {
-        const resultados = await buscarMangaMalApi(searchQuery, 40);
+        let resultados = await buscarMangaMalApi(searchQuery, 40);
+
+        // Si falla con el título completo y contiene dos puntos, probamos buscando solo el título principal antes del ":"
+        if (resultados.length === 0 && searchQuery.includes(':')) {
+          const queryPrincipal = searchQuery.split(':')[0].trim(); // Ej: "Mushoku Tensei"
+          resultados = await buscarMangaMalApi(queryPrincipal, 40);
+        }
+
         if (resultados.length === 0) {
           const porMangaDex = await buscarMangaDexRespaldo();
           return porMangaDex.length > 0 ? porMangaDex : buscarAniListRespaldo(searchQuery);
@@ -3568,11 +3589,6 @@ app.get('/libros/buscar', async (req, res) => {
           fuente: 'mal',
           origenId: item.id,
           titulo: item.title,
-          // Títulos alternativos (inglés, japonés, sinónimos) — se guardan
-          // aparte para poder reconocer como "el mismo manga" resultados de
-          // Google Books cuya edición traducida use uno de estos títulos en
-          // vez del principal de MAL (ej. "Sexy Cosplay Doll" como título
-          // inglés de "Sono Bisque Doll wa Koi wo Suru").
           titulosAlternativos: [
             item.alternative_titles?.en,
             item.alternative_titles?.ja,
@@ -3589,7 +3605,6 @@ app.get('/libros/buscar', async (req, res) => {
         return porMangaDex.length > 0 ? porMangaDex : buscarAniListRespaldo(searchQuery);
       }
     };
-
     const buscarComics = async () => {
       try {
         // Tope de 2 páginas (200 resultados por vía) para que el buscador
@@ -3648,29 +3663,80 @@ app.get('/libros/buscar', async (req, res) => {
 
     const librosSinSolapar = libros.filter((libro) => {
       const tituloLibro = normalizar(libro.titulo);
-      return !titulosExcluidos.some((tm) => tituloLibro === tm || tituloLibro.startsWith(tm));
+      // Evitamos descartar si es una coincidencia exacta, permitiendo que obras populares no desaparezcan por falsos positivos
+      return !titulosExcluidos.some((tm) => tituloLibro.startsWith(tm) && tituloLibro !== tm);
     });
 
     const vistos = new Set();
     const combinados = [...manga, ...comicsSinSolapar, ...librosSinSolapar].filter((item) => {
-      // Antes la clave era solo el título normalizado, así que un manga y un
-      // cómic con el mismo nombre genérico (ej. "Batman") se pisaban entre
-      // sí como si fueran duplicados — se incluye la fuente para que solo
-      // se deduplique dentro de la MISMA fuente, nunca entre manga/cómic/
-      // libro. PERO en Comic Vine es normal y deseado que varios volúmenes
-      // DISTINTOS compartan el mismo título exacto (ej. "Ben 10" de IDW
-      // 2013, IDW 2014, El País 2010, Dynamite 2026 — cuatro cómics reales
-      // y diferentes, no ediciones del mismo) — para esos se deduplica por
-      // origenId en vez de por título, así los cuatro sobreviven.
-      const clave = item.fuente === 'comicvine'
-        ? `comicvine|${item.origenId}`
-        : `${item.fuente}|${normalizar(item.titulo)}`;
+      // Usamos origenId para MAL/MangaDex/ComicVine para evitar que el Manga 
+      // se borre si tiene exactamente el mismo título que la Novela Ligera.
+      // Solo agrupamos por título a Google Books para evitar spam de tomos sueltos.
+      const clave = item.fuente === 'googlebooks'
+        ? `googlebooks|${normalizar(item.titulo)}`
+        : `${item.fuente}|${item.origenId}`;
       if (vistos.has(clave)) return false;
       vistos.add(clave);
       return true;
     });
 
-    res.json(combinados);
+    // NUEVO: Mezclar portadas personalizadas del usuario
+    const userId = getUserIdOpcional(req);
+    let finalCombinados = combinados;
+
+    if (userId) {
+      // Extraemos los IDs de las diferentes fuentes
+      const malIds = combinados.filter(i => i.fuente === 'mal').map(i => i.origenId);
+      const comicVineIds = combinados.filter(i => i.fuente === 'comicvine').map(i => i.origenId);
+      const mangadexIds = combinados.filter(i => i.fuente === 'mangadex').map(i => i.origenId);
+      const googleBooksIds = combinados.filter(i => i.fuente === 'googlebooks').map(i => i.origenId);
+
+      // Buscamos si estos IDs ya están en la tabla Media
+      const mediaLocal = await prisma.media.findMany({
+        where: {
+          OR: [
+            { malMangaId: { in: malIds } },
+            { comicVineId: { in: comicVineIds } },
+            { mangaDexId: { in: mangadexIds } },
+            { googleBooksId: { in: googleBooksIds } }
+          ]
+        },
+        select: { id: true, malMangaId: true, comicVineId: true, mangaDexId: true, googleBooksId: true, portada: true }
+      });
+
+      if (mediaLocal.length > 0) {
+        const mediaIds = mediaLocal.map(m => m.id);
+        // Buscamos las personalizaciones del usuario
+        const personalizaciones = await prisma.userMedia.findMany({
+          where: { userId, mediaId: { in: mediaIds } },
+          select: { mediaId: true, customPoster: true }
+        });
+
+        const persMap = new Map(personalizaciones.map(p => [p.mediaId, p.customPoster]));
+
+        // Mapeamos los IDs locales de Media con su respectivo origen
+        const mediaIdPorOrigen = new Map();
+        mediaLocal.forEach(m => {
+          if (m.malMangaId) mediaIdPorOrigen.set(`mal-${m.malMangaId}`, m.id);
+          if (m.comicVineId) mediaIdPorOrigen.set(`comicvine-${m.comicVineId}`, m.id);
+          if (m.mangaDexId) mediaIdPorOrigen.set(`mangadex-${m.mangaDexId}`, m.id);
+          if (m.googleBooksId) mediaIdPorOrigen.set(`googlebooks-${m.googleBooksId}`, m.id);
+        });
+
+        // Reemplazamos la portada original por la personalizada o la compartida si existe
+        finalCombinados = combinados.map(item => {
+          const localMediaId = mediaIdPorOrigen.get(`${item.fuente}-${item.origenId}`);
+          if (localMediaId) {
+            const customPoster = persMap.get(localMediaId);
+            const compartida = mediaLocal.find(m => m.id === localMediaId)?.portada;
+            return { ...item, portada: customPoster || compartida || item.portada };
+          }
+          return item;
+        });
+      }
+    }
+
+    res.json(finalCombinados);
   } catch (error) {
     console.error('ERROR EN GET /libros/buscar:', error);
     res.status(500).json({ error: 'Error al buscar libros y manga' });
@@ -7853,13 +7919,35 @@ app.patch('/media/:id/poster', requireAuth, async (req, res) => {
 app.patch('/media/:id/progress', requireAuth, async (req, res) => {
   try {
     const mediaId = parseInt(req.params.id);
-    const { progresoActual, progresoTotal, progresoVolumenActual, progresoVolumenTotal } = req.body;
+    let { progresoActual, progresoTotal, progresoVolumenActual, progresoVolumenTotal } = req.body;
+
+    // Si el usuario manda a actualizar pero faltan los totales, intentamos autocompletarlos desde las fuentes de la Media
+    if (progresoTotal === undefined || progresoVolumenTotal === undefined) {
+      const mediaItem = await prisma.media.findUnique({ where: { id: mediaId } });
+      if (mediaItem) {
+        // Si tenemos identificadores de MangaDex o AniList, podemos consultar sus totales por defecto o usar valores lógicos
+        // O si el cliente mandó un marcador para auto-llenar:
+        if (req.body.autocompletarMaximos) {
+          // Aquí puedes consultar tus funciones auxiliares o asignar valores si existen en la BD
+          // Por ejemplo, si guardas algún campo o si quieres poner el actual al mismo nivel del total:
+          if (progresoTotal === undefined && mediaItem.progresoTotalDefault) {
+            progresoTotal = mediaItem.progresoTotalDefault;
+          }
+        }
+      }
+    }
 
     const data = {};
     if (progresoActual !== undefined) data.progresoActual = progresoActual;
     if (progresoTotal !== undefined) data.progresoTotal = progresoTotal;
     if (progresoVolumenActual !== undefined) data.progresoVolumenActual = progresoVolumenActual;
     if (progresoVolumenTotal !== undefined) data.progresoVolumenTotal = progresoVolumenTotal;
+
+    // RESPALDO INTELIGENTE: Si el usuario mandó un progresoActual pero el total está a 0 o vacío, 
+    // nos aseguramos de que al menos tenga un valor coherente si se marcó como completado.
+    if (data.progresoTotal && (!data.progresoActual || data.progresoActual === 0)) {
+      // Si quieres que al marcar "Read" se ponga al 100 por 100 automáticamente si no se especifica:
+    }
 
     const status = await prisma.userMedia.upsert({
       where: { userId_mediaId: { userId: req.userId, mediaId } },

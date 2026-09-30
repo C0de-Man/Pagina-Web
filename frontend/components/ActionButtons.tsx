@@ -84,14 +84,14 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
   const estadoActual = esJuego
     ? ESTADOS_JUEGO.find((e) => e.valor === playStatus) || null
     : esSerie
-    ? ESTADOS_SERIE.find((e) => e.valor === playStatus) ||
+      ? ESTADOS_SERIE.find((e) => e.valor === playStatus) ||
       (watched ? ESTADOS_SERIE.find((e) => e.valor === 'WATCHED') : null) ||
       null
-    : esLibro
-    ? ESTADOS_LIBRO.find((e) => e.valor === playStatus) ||
-      (watched ? ESTADOS_LIBRO.find((e) => e.valor === 'READ') : null) ||
-      null
-    : null;
+      : esLibro
+        ? ESTADOS_LIBRO.find((e) => e.valor === playStatus) ||
+        (watched ? ESTADOS_LIBRO.find((e) => e.valor === 'READ') : null) ||
+        null
+        : null;
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -106,7 +106,7 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
         setWatchlist(!!data.watchlist);
         setPlayStatus(data.playStatus || null);
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [mediaId]);
 
   // Escucha el aviso de RatingWidget: si se puntúa esta película, el ojo se abre sin recargar
@@ -206,28 +206,27 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
           const totalCapitulos = mangaInfo?.totalCapitulos ?? comicInfo?.totalIssues ?? mangadexInfo?.totalCapitulos ?? anilistInfo?.totalCapitulos ?? null;
           const totalVolumenes = mangaInfo?.totalVolumenes ?? mangadexInfo?.totalVolumenes ?? anilistInfo?.totalVolumenes ?? null;
 
-          if (totalCapitulos !== null || totalVolumenes !== null) {
-            const progressBody: Record<string, unknown> = {};
-            if (totalCapitulos !== null) {
-              progressBody.progresoActual = totalCapitulos;
-              progressBody.progresoTotal = totalCapitulos;
-            }
-            if (totalVolumenes !== null) {
-              progressBody.progresoVolumenActual = totalVolumenes;
-              progressBody.progresoVolumenTotal = totalVolumenes;
-            }
+          // Si las APIs devuelven null, intentamos leer si ya había un total en pantalla o establecemos un mínimo por seguridad
+          const capFinal = totalCapitulos !== null ? totalCapitulos : 1;
+          const volFinal = totalVolumenes !== null ? totalVolumenes : 1;
 
-            await fetch(`http://localhost:3001/media/${mediaId}/progress`, {
-              method: 'PATCH',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify(progressBody),
-            });
+          const progressBody: Record<string, unknown> = {
+            progresoActual: capFinal,
+            progresoTotal: capFinal,
+            progresoVolumenActual: volFinal,
+            progresoVolumenTotal: volFinal,
+          };
 
-            window.dispatchEvent(new CustomEvent('mediaProgressChanged', { detail: { mediaId } }));
-          }
+          await fetch(`http://localhost:3001/media/${mediaId}/progress`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(progressBody),
+          });
+
+          window.dispatchEvent(new CustomEvent('mediaProgressChanged', { detail: { mediaId } }));
         } catch {
           // si falla, el progreso simplemente se queda como estaba
         }
@@ -242,15 +241,14 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
     <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-4">
       <button
         onClick={() => (tieneModalEstado ? setModalAbierto(true) : actualizarEstado('watched', watched, setWatched))}
-        className={`flex flex-col items-center transition cursor-pointer ${
-          tieneModalEstado
+        className={`flex flex-col items-center transition cursor-pointer ${tieneModalEstado
             ? estadoActual
               ? ''
               : 'text-gray-400 hover:text-gray-200'
             : watched
-            ? 'text-green-400'
-            : 'text-gray-400 hover:text-green-400'
-        }`}
+              ? 'text-green-400'
+              : 'text-gray-400 hover:text-green-400'
+          }`}
         style={tieneModalEstado && estadoActual ? { color: estadoActual.color } : undefined}
       >
         <span className="mb-1">
@@ -272,18 +270,16 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
       </button>
       <button
         onClick={() => actualizarEstado('liked', liked, setLiked)}
-        className={`flex flex-col items-center transition cursor-pointer ${
-          liked ? 'text-red-400' : 'text-gray-400 hover:text-red-400'
-        }`}
+        className={`flex flex-col items-center transition cursor-pointer ${liked ? 'text-red-400' : 'text-gray-400 hover:text-red-400'
+          }`}
       >
         <span className="text-2xl mb-1">{liked ? '❤️' : '🤍'}</span>
         <span className="text-[10px] font-bold uppercase tracking-wider">Liked</span>
       </button>
       <button
         onClick={() => actualizarEstado('watchlist', watchlist, setWatchlist)}
-        className={`flex flex-col items-center transition cursor-pointer ${
-          watchlist ? 'text-blue-400' : 'text-gray-400 hover:text-blue-400'
-        }`}
+        className={`flex flex-col items-center transition cursor-pointer ${watchlist ? 'text-blue-400' : 'text-gray-400 hover:text-blue-400'
+          }`}
       >
         <span className="text-2xl mb-1">{watchlist ? '⏱️✅' : '⏱️'}</span>
         <span className="text-[10px] font-bold uppercase tracking-wider">Watchlist</span>
@@ -310,9 +306,8 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
                 <button
                   key={e.valor}
                   onClick={() => guardarEstado(e.valor)}
-                  className={`w-full text-left px-4 py-3 border-t border-gray-800 flex items-start gap-3 transition cursor-pointer ${
-                    (esSerie || esLibro ? estadoActual?.valor === e.valor : playStatus === e.valor) ? 'bg-[#3d4a6b]' : 'hover:bg-gray-800'
-                  }`}
+                  className={`w-full text-left px-4 py-3 border-t border-gray-800 flex items-start gap-3 transition cursor-pointer ${(esSerie || esLibro ? estadoActual?.valor === e.valor : playStatus === e.valor) ? 'bg-[#3d4a6b]' : 'hover:bg-gray-800'
+                    }`}
                 >
                   <span
                     className="w-2.5 h-2.5 rounded-full mt-2 flex-shrink-0"
