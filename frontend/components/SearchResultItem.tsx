@@ -1,11 +1,9 @@
 'use client';
-import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
-import Link from 'next/link'; // 1. Añadimos la importación de Link
+import Link from 'next/link';
 import { urlFicha } from '@/lib/slug';
 
 export default function SearchResultItem({ item, dbId, portadaCompartida }: { item: any, dbId: number | null, portadaCompartida: string | null }) {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const esJuego = item.media_type === 'juego';
   const esLibro = item.media_type === 'libro';
@@ -35,44 +33,22 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
     }
   };
 
-  // 2. Calculamos de antemano si ya tenemos una URL directa a la que ir
-  let urlDirecta = null;
+  // 2. Calculamos SIEMPRE la URL directa usando el formato resolutivo (ej: /game/igdb/123)
+  // Aunque no esté en DB, Next.js interceptará la ruta y lo creará al vuelo allí.
+  let urlDirecta = '';
+  
   if (dbId) {
     const tipo = esLibro ? 'LIBRO' : undefined;
     urlDirecta = urlFicha({ ...item, id: dbId, ...(tipo ? { tipo } : {}) });
-  } else if (esLibro) {
-    urlDirecta = hrefLibroSinGuardar();
-  }
-
-  // 3. El handleClick original, pero solo se usa si NO hay urlDirecta
-  const handleClick = async () => {
-    if (loading || urlDirecta) return; 
-    setLoading(true);
-
-    try {
-      if (esJuego) {
-        const res = await fetch('http://localhost:3001/media/igdb', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ igdbId: item.id })
-        });
-        const nuevoJuego = await res.json();
-        router.push(urlFicha(nuevoJuego));
-      } else {
-        const tipo = item.media_type === 'tv' ? 'SERIE' : 'PELICULA';
-        const res = await fetch('http://localhost:3001/media/tmdb', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tmdbId: item.id, tipo })
-        });
-        const nuevaPeli = await res.json();
-        router.push(urlFicha(nuevaPeli));
-      }
-    } catch (error) {
-      console.error("Error al guardar:", error);
-      setLoading(false);
+  } else {
+    // Si no está en DB, usamos las rutas resolutoras
+    if (esJuego) urlDirecta = `/game/igdb/${item.id}`;
+    else if (esLibro) urlDirecta = hrefLibroSinGuardar();
+    else {
+        const tipoEnlace = item.media_type === 'tv' ? 'series' : 'movie';
+        urlDirecta = `/${tipoEnlace}/tmdb/${item.id}`;
     }
-  };
+  }
 
   const posterUrl = miCustomPoster || portadaCompartida ||
     (esJuego ? item.cover?.url : esLibro ? item.portada : item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : null);
@@ -84,7 +60,6 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
 
   const clasesContenedor = `flex gap-4 group cursor-pointer transition ${loading ? 'opacity-50 blur-sm' : ''}`;
 
-  // 4. Extraemos el contenido visual para no repetirlo
   const ContenidoTarjeta = (
     <>
       <div className="flex-shrink-0 w-24 relative">
@@ -113,18 +88,13 @@ export default function SearchResultItem({ item, dbId, portadaCompartida }: { it
     </>
   );
 
-  // 5. Renderizado condicional: si hay URL usamos <Link> (soporta clic central), sino usamos <div>
-  if (urlDirecta) {
-    return (
-      <Link href={urlDirecta} className={clasesContenedor}>
-        {ContenidoTarjeta}
-      </Link>
-    );
-  }
-
   return (
-    <div onClick={handleClick} className={clasesContenedor}>
+    <Link 
+      href={urlDirecta} 
+      className={clasesContenedor}
+      onClick={() => setLoading(true)} // Mantenemos el efecto de desenfoque al hacer clic normal
+    >
       {ContenidoTarjeta}
-    </div>
+    </Link>
   );
 }
