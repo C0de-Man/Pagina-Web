@@ -109,17 +109,43 @@ export default function ActionButtons({ mediaId, tipo }: { mediaId: number; tipo
       .catch(() => { });
   }, [mediaId]);
 
-  // Escucha el aviso de RatingWidget: si se puntúa esta película, el ojo se abre sin recargar
+// Escucha los avisos del RatingWidget para marcar automáticamente como completado
   useEffect(() => {
-    const handleWatchedChange = (e: Event) => {
+    const handleRatingOrWatched = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (detail?.mediaId === mediaId) {
+      if (detail?.mediaId !== mediaId) return;
+
+      // Actualizamos UI base
+      if (detail.watched !== undefined) {
         setWatched(detail.watched);
       }
+
+      // Si le acaban de poner nota (>0) O el componente avisa de que se vio
+      if (detail.rating > 0 || detail.watched) {
+        // En Juegos, si no estaba ya completado, lo forzamos
+        if (esJuego && playStatus !== 'COMPLETED') {
+          guardarEstado('COMPLETED');
+        } 
+        // En Series, si no estaba visto o viéndose
+        else if (esSerie && estadoActual?.valor !== 'WATCHED' && playStatus !== 'WATCHING') {
+          guardarEstado('WATCHED');
+        } 
+        // En Libros, si no estaba leído o leyéndose
+        else if (esLibro && estadoActual?.valor !== 'READ' && playStatus !== 'READING') {
+          guardarEstado('READ');
+        }
+      }
     };
-    window.addEventListener('mediaWatchedChanged', handleWatchedChange);
-    return () => window.removeEventListener('mediaWatchedChanged', handleWatchedChange);
-  }, [mediaId]);
+
+    window.addEventListener('mediaWatchedChanged', handleRatingOrWatched);
+    window.addEventListener('mediaRatedChanged', handleRatingOrWatched);
+    
+    return () => {
+      window.removeEventListener('mediaWatchedChanged', handleRatingOrWatched);
+      window.removeEventListener('mediaRatedChanged', handleRatingOrWatched);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaId, playStatus, esJuego, esSerie, esLibro, estadoActual]);
 
   const actualizarEstado = async (campo: 'watched' | 'liked' | 'watchlist', valorActual: boolean, setter: (v: boolean) => void) => {
     const token = localStorage.getItem('token');
